@@ -79,5 +79,20 @@ export function validateConfig(config) {
         "Configure the Discord bot, Office channels, and meeting host roles",
       );
   }
+  if (config.todoForums !== undefined) {
+    if (
+      !config.discordBotToken ||
+      !Array.isArray(config.todoForums) ||
+      !config.todoForums.length ||
+      config.todoForums.some(
+        (forum) => !snowflake(forum.channelId) || !forum.projectId,
+      ) ||
+      new Set(config.todoForums.map((forum) => forum.channelId)).size !==
+        config.todoForums.length ||
+      new Set(config.todoForums.map((forum) => forum.projectId)).size !==
+        config.todoForums.length
+    )
+      throw new Error("Configure distinct Discord forums and Huly projects");
+  }
   return config;
 }

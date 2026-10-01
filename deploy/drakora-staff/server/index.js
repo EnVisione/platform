@@ -12,6 +12,7 @@ import { AuthError, discordClient } from "./discord.js";
 import { hulyClient } from "./huly.js";
 import { isPageRequest } from "./navigation.js";
 import { discordOffice } from "./office.js";
+import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
 
 const config = validateConfig(
@@ -28,6 +29,9 @@ const { store, sessions, OidcAdapter } = openStore(
 const discord = discordClient(config, store);
 const huly = hulyClient(config, store);
 const office = config.office ? discordOffice(config, store) : undefined;
+const todoSync = config.todoForums
+  ? discordTodoSync(config, store, huly)
+  : undefined;
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -702,8 +706,10 @@ sweep.unref();
 server.listen(3000, "0.0.0.0", () =>
   console.log("Drakora staff service ready."),
 );
-function stop() {
+todoSync?.start();
+async function stop() {
   clearInterval(sweep);
+  await todoSync?.close();
   office?.close();
   for (const socket of sockets) socket.destroy();
   server.close(() => {

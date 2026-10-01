@@ -98,5 +98,15 @@
         "kind": "voice"
       }
     ]
-  }
+  },
+  "todoForums": [
+    {
+      "channelId": "REPLACE_DEV_TODO_FORUM_ID",
+      "projectId": "REPLACE_DEV_PROJECT_ID"
+    },
+    {
+      "channelId": "REPLACE_DISCORD_TODO_FORUM_ID",
+      "projectId": "REPLACE_DISCORD_PROJECT_ID"
+    }
+  ]
 }

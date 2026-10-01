@@ -59,6 +59,12 @@ Keep the public domains exclusively behind the staff proxy. An independently pub
 
 The optional Office configuration includes the category, invitation channel, allowed host role IDs, and an ordered list of meeting or casual voice rooms. Removing it disables the integration server. Build the matching Huly frontend before exposing the Office configuration to clients.
 
+## Discord to-do forums and Tracker
+
+Create a Huly Tracker project for each Discord forum to-do list. Set `todoForums` in the private staff configuration to distinct `{ "channelId": "...", "projectId": "..." }` pairs. The bot must be able to view the forum and its posts. Add a URL property named `Discord post` to Huly's Issue type; the service uses that property and a stable Discord thread ID to prevent duplicate imports. It imports current and public archived forum posts and polls every five minutes. A changed Discord title or workflow tag updates the corresponding Tracker issue. Other Huly edits remain intact until that source value changes. There is no reverse sync, and comments, attachments, assignees, and non-workflow forum tags are not copied.
+
+The forum tag `In Progress` maps to Huly In Progress, `Complete` to Completed, and `Vetoed/Not Possible` to Impossible / Void. `Awaiting Verification` maps to the same-named status when present. A post without a workflow tag starts Pending. Use Huly statuses for progress and Huly labels for pack, server, and issue classification. The current labels cover Prom2, Luna, Terra, Sol, RestLess Horizons (RH), Eclipse, Void, EU Proxy, NA Proxy, Hub, Bug, Glitch, Exploit, and PRIORITY. Huly's own issue changes do not change Discord forum tags.
+
 ## Backups and recovery
 
 Back up the private configuration, SQLite database, and `oidc-jwks.json` together using a consistent SQLite backup or a stopped service. The database key is required to recover encrypted records. Keep backups encrypted or access-restricted and outside Git. Back up Huly's databases and object storage using its deployment procedures as well; a source fork is not a data backup.
@@ -67,6 +73,6 @@ Retain the previous staff and Huly front image identifiers before deployment. To
 
 ## Verification
 
-`pnpm test` checks independent access roles, rank ordering, encrypted persistence, one-use handoffs, role revocation, background login behavior, meeting serialization and recovery, and avatar URL selection.
+`pnpm test` checks independent access roles, rank ordering, encrypted persistence, one-use handoffs, role revocation, background login behavior, meeting serialization and recovery, avatar URL selection, and forum issue import and reconciliation.
 
 For a live installation, verify a user with each access combination, the Huly Office iframe, avatar rendering, and a real voice join. A host should start and end a test meeting with participants aware that the Todo role will be notified. Confirm the invitation opens the correct channel, regular Todo members cannot join before start or after end, and existing participants remain connected after end. Browser-only checks do not establish audio connectivity.
