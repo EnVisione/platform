@@ -154,6 +154,7 @@
   migrateViewOpttions()
 
   const excludedApps = getMetadata(workbench.metadata.ExcludedApplications) ?? []
+  const staffDashboardUrl = getMetadata(workbench.metadata.StaffDashboardUrl)
   const isCommunicationEnabled = getMetadata(communication.metadata.Enabled) ?? false
 
   const client = getClient()
@@ -860,17 +861,28 @@
         class:portrait={$deviceInfo.navigator.direction === 'horizontal'}
         class:landscape={$deviceInfo.navigator.direction === 'vertical'}
       >
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div
-          class="logo-container clear-mins"
-          class:mini={appsMini}
-          on:click={() => {
-            showPopup(SelectWorkspaceMenu, {}, popupSpacePosition)
-          }}
-        >
-          <Logo mini={appsMini} workspace={windowWorkspaceName ?? $resolvedLocationStore.path[1]} />
-        </div>
+        {#if staffDashboardUrl}
+          <a
+            class="logo-container clear-mins"
+            class:mini={appsMini}
+            href={staffDashboardUrl}
+            aria-label="Back to staff dashboard"
+          >
+            <Logo mini={appsMini} workspace={windowWorkspaceName ?? $resolvedLocationStore.path[1]} />
+          </a>
+        {:else}
+          <!-- svelte-ignore a11y-click-events-have-key-events -->
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <div
+            class="logo-container clear-mins"
+            class:mini={appsMini}
+            on:click={() => {
+              showPopup(SelectWorkspaceMenu, {}, popupSpacePosition)
+            }}
+          >
+            <Logo mini={appsMini} workspace={windowWorkspaceName ?? $resolvedLocationStore.path[1]} />
+          </div>
+        {/if}
         <div class="topmenu-container clear-mins flex-no-shrink" class:mini={appsMini}>
           <AppItem
             icon={TopMenu}

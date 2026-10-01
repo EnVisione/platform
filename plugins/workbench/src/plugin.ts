@@ -76,6 +76,7 @@ export const workbenchPlugin = plugin(workbenchId, {
   },
   metadata: {
     PlatformTitle: '' as Metadata<string>,
+    StaffDashboardUrl: '' as Metadata<string>,
     ExcludedApplications: '' as Metadata<Ref<Application>[]>,
     ExcludedApplicationsForAnonymous: '' as Metadata<string[]>,
     DefaultApplication: '' as Metadata<string>,

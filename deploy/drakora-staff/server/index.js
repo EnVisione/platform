@@ -345,6 +345,7 @@ app.use(async (req, res, next) => {
       ...(await response.json()),
       ...(office ? { OFFICE_URL: "/_drakora/office" } : {}),
       STAFF_SSO_URL: "/__staff/start",
+      STAFF_DASHBOARD_URL: config.staffOrigin,
       HIDE_LOCAL_LOGIN: "true",
       DISABLE_SIGNUP: "true",
     });

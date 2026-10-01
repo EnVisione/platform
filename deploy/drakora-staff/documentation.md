@@ -16,6 +16,8 @@ Sessions last twelve hours and use Secure, HttpOnly, host-only cookies. A Huly s
 
 The staff proxy adds `STAFF_SSO_URL` to Huly's browser configuration and hides Huly's local login and signup controls. A Huly login page reached without a valid app session returns to the existing staff session and runs the OpenID handoff. A 30 second browser guard prevents repeated redirects if the handoff fails; the OpenID provider button remains available to retry. The gateway still checks Dashboard and Todo roles before exposing Huly.
 
+The proxy also sets `STAFF_DASHBOARD_URL` to the staff portal origin. In this deployment, clicking the top-left Huly logo returns to the staff dashboard. The profile menu still offers Select Workspace. Without that configuration, the logo retains Huly's normal workspace menu.
+
 Discord profiles sync during authenticated activity. Guild avatars take precedence over global avatars, with Discord's default picture as a fallback. Huly stores an external avatar URL and loads it from Discord's CDN. A changed picture updates after the next role refresh; a browser refresh may be needed to replace an already-rendered Huly profile.
 
 ## Discord channels
