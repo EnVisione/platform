@@ -14,19 +14,37 @@
 // limitations under the License.
 -->
 <script lang="ts">
+  import contact, { type Employee } from '@hcengineering/contact'
   import { Class, ClassifierKind, Doc, Mixin, Ref } from '@hcengineering/core'
+  import { getMetadata } from '@hcengineering/platform'
   import { getClient } from '@hcengineering/presentation'
   import setting from '@hcengineering/setting'
   import { Icon, Label, themeStore, tooltip } from '@hcengineering/ui'
+  import workbench from '@hcengineering/workbench'
   import { getMixinStyle } from '../utils'
+  import { staffContactRanks } from '../staffContactRanks'
 
   export let value: Doc
   export let fullSize: boolean = false
 
   const client = getClient()
   const hierarchy = client.getHierarchy()
+  const staffRanksUrl = getMetadata(workbench.metadata.StaffContactRanksUrl)
 
   let mixins: Array<Mixin<Doc>> = []
+  let staffEmployee = false
+  let ranks: string[] = []
+
+  function rankStyle(rank: string, dark: boolean): string {
+    return getMixinStyle(`discord:rank:${rank}` as Ref<Class<Doc>>, true, dark)
+  }
+
+  $: staffEmployee =
+    staffRanksUrl !== undefined && value !== undefined && hierarchy.hasMixin(value, contact.mixin.Employee)
+  $: ranks =
+    staffEmployee && $staffContactRanks?.connected
+      ? ($staffContactRanks.byAccount[(value as Employee).personUuid ?? ''] ?? [])
+      : []
 
   $: if (value !== undefined) {
     const parentClass: Ref<Class<Doc>> = hierarchy.getParentClass(value._class)
@@ -34,14 +52,17 @@
     mixins = hierarchy
       .getDescendants(parentClass)
       .filter(
-        (m) => hierarchy.getClass(m).kind === ClassifierKind.MIXIN && hierarchy.hasMixin(value, m)
+        (m) =>
+          hierarchy.getClass(m).kind === ClassifierKind.MIXIN &&
+          hierarchy.hasMixin(value, m) &&
+          (!staffEmployee || String(m) !== 'hr:mixin:Staff')
         // && !hierarchy.hasMixin(hierarchy.getClass(m), setting.mixin.UserMixin)
       )
       .map((m) => hierarchy.getClass(m) as Mixin<Doc>)
   }
 </script>
 
-{#if mixins.length > 0}
+{#if mixins.length > 0 || ranks.length > 0}
   <div class="mixin-container">
     {#each mixins as mixin}
       {@const userMixin = hierarchy.hasMixin(mixin, setting.mixin.UserMixin)}
@@ -61,6 +82,11 @@
             {/if}
           </div>
         {/if}
+      </div>
+    {/each}
+    {#each ranks as rank (rank)}
+      <div class="mixin-selector" style={rankStyle(rank, $themeStore.dark)}>
+        <span class="overflow-label">{rank}</span>
       </div>
     {/each}
   </div>

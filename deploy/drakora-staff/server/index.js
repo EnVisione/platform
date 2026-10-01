@@ -17,6 +17,7 @@ import { validateConfig } from "./config.js";
 import { minecraftRegistry } from "./minecraft.js";
 import { managementAccess } from "./roles.js";
 import { memberActivity } from "./activity.js";
+import { contactRanks } from "./contact-ranks.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -222,6 +223,11 @@ officeRouter.get("/", async (req, res) => {
   }
   res.json({ ...office.snapshot(req.officeUser), csrf: req.session.csrf });
 });
+officeRouter.get("/contact-ranks", (req, res) => {
+  res.json(
+    contactRanks(office.snapshot(req.officeUser), (id) => store.get("user", id)),
+  );
+});
 officeRouter.post(
   "/:room/:action",
   rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
@@ -346,6 +352,7 @@ app.use(async (req, res, next) => {
       ...(office ? { OFFICE_URL: "/_drakora/office" } : {}),
       STAFF_SSO_URL: "/__staff/start",
       STAFF_DASHBOARD_URL: config.staffOrigin,
+      STAFF_CONTACT_RANKS_URL: "/_drakora/api/office/contact-ranks",
       HIDE_LOCAL_LOGIN: "true",
       DISABLE_SIGNUP: "true",
     });

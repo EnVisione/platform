@@ -184,6 +184,7 @@ export interface Config {
   HIDE_LOCAL_LOGIN?: string
   STAFF_SSO_URL?: string
   STAFF_DASHBOARD_URL?: string
+  STAFF_CONTACT_RANKS_URL?: string
   LINK_PREVIEW_URL?: string
   PASSWORD_STRICTNESS?: 'very_strict' | 'strict' | 'normal' | 'none'
   // Could be defined for dev environment
@@ -745,6 +746,7 @@ export async function configurePlatform() {
   setMetadata(uiPlugin.metadata.PlatformTitle, title)
   setMetadata(workbench.metadata.PlatformTitle, title)
   setMetadata(workbench.metadata.StaffDashboardUrl, config.STAFF_DASHBOARD_URL)
+  setMetadata(workbench.metadata.StaffContactRanksUrl, config.STAFF_CONTACT_RANKS_URL)
   setDefaultLanguage(myBranding.defaultLanguage ?? 'en')
   setMetadata(workbench.metadata.DefaultApplication, myBranding.defaultApplication ?? 'tracker')
   setMetadata(workbench.metadata.DefaultSpace, myBranding.defaultSpace ?? tracker.project.DefaultProject)

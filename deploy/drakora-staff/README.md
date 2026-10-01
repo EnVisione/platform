@@ -4,6 +4,8 @@ A React staff portal, Discord identity provider, and private Discord Office for 
 
 The Office shows Discord presence, profile pictures, voice participants, and links to the configured voice channels. Meeting hosts can open a room and notify the Todo role in a private invitation channel. Ending a meeting locks new joins and updates the invitation. Existing voice participants remain connected.
 
+Huly Contacts shows the configured Discord staff ranks for linked employees. The rank badges refresh while Contacts is open. The generic Huly Worker badge is hidden in this deployment; its underlying HR data remains intact.
+
 ## Requirements
 
 - A working [Huly self-hosted installation](https://github.com/hcengineering/huly-selfhost), matching this checkout's Huly version.
