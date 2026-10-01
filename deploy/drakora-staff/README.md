@@ -23,7 +23,7 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 7. Build the Huly frontend image below, set `HULY_OFFICE_IMAGE`, and recreate Huly's front and account services.
 8. Route both public origins to this service on port 3000 through the private network, or to its loopback port 8088. Keep Huly's nginx and account services inaccessible directly from the public internet.
 
-The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
+The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. If Huly loses its browser session, its login page restarts the same handoff automatically. The public Huly view hides local email and password login. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
 
 The Drakora Huly frontend hides the Chat and HR applications from workspace navigation. Staff communication stays in Discord. Existing Huly chat channels and meeting minutes remain stored; hiding the applications does not delete their records.
 

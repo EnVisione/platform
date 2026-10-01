@@ -53,6 +53,7 @@ export default plugin(loginId, {
     LoginAccount: '' as Metadata<string>,
     DisableSignUp: '' as Metadata<boolean>,
     HideLocalLogin: '' as Metadata<boolean>,
+    SsoUrl: '' as Metadata<string>,
     TransactorOverride: '' as Metadata<string>,
     PasswordValidations: '' as Metadata<{
       MinLength: number

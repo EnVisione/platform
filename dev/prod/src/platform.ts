@@ -182,6 +182,7 @@ export interface Config {
   AI_URL?: string
   DISABLE_SIGNUP?: string
   HIDE_LOCAL_LOGIN?: string
+  STAFF_SSO_URL?: string
   LINK_PREVIEW_URL?: string
   PASSWORD_STRICTNESS?: 'very_strict' | 'strict' | 'normal' | 'none'
   // Could be defined for dev environment
@@ -475,6 +476,7 @@ export async function configurePlatform() {
   setMetadata(login.metadata.AccountsUrl, config.ACCOUNTS_URL)
   setMetadata(login.metadata.DisableSignUp, config.DISABLE_SIGNUP === 'true')
   setMetadata(login.metadata.HideLocalLogin, config.HIDE_LOCAL_LOGIN === 'true')
+  setMetadata(login.metadata.SsoUrl, config.STAFF_SSO_URL)
 
   setMetadata(login.metadata.PasswordValidations, PASSWORD_REQUIREMENTS[config.PASSWORD_STRICTNESS ?? 'none'])
 

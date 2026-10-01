@@ -10,6 +10,8 @@ Discord IDs are the persistent identity. The verified Discord email allows Huly 
 
 Sessions last twelve hours and use Secure, HttpOnly, host-only cookies. A Huly session depends on its originating staff session. Signing out closes related live connections. A single-use, browser-bound handoff connects the two host sessions. Background requests receive an authentication error instead of restarting the login flow. Role checks refresh after sixty seconds, and open WebSockets are rechecked every thirty seconds. Losing Dashboard blocks an existing session at its next role check. Meeting mutations force a fresh role check and require an origin match and session CSRF token.
 
+The staff proxy adds `STAFF_SSO_URL` to Huly's browser configuration and hides Huly's local login and signup controls. A Huly login page reached without a valid app session returns to the existing staff session and runs the OpenID handoff. A 30 second browser guard prevents repeated redirects if the handoff fails; the OpenID provider button remains available to retry. The gateway still checks Dashboard and Todo roles before exposing Huly.
+
 Discord profiles sync during authenticated activity. Guild avatars take precedence over global avatars, with Discord's default picture as a fallback. Huly stores an external avatar URL and loads it from Discord's CDN. A changed picture updates after the next role refresh; a browser refresh may be needed to replace an already-rendered Huly profile.
 
 ## Discord channels

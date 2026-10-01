@@ -308,7 +308,7 @@ app.use(async (req, res, next) => {
   if (!user.permissions.todo) throw new AuthError("todo_role_required");
   if (!matchingHulyIdentity(req, user))
     throw new AuthError("huly_account_mismatch");
-  if (req.method === "GET" && req.path === "/config.json" && office) {
+  if (req.method === "GET" && req.path === "/config.json") {
     const response = await fetch(`${config.hulyUpstream}/config.json`, {
       headers: { Host: todoHost, "X-Forwarded-Proto": "https" },
       signal: AbortSignal.timeout(10000),
@@ -316,7 +316,10 @@ app.use(async (req, res, next) => {
     if (!response.ok) throw new Error("Huly configuration is unavailable");
     return res.json({
       ...(await response.json()),
-      OFFICE_URL: "/_drakora/office",
+      ...(office ? { OFFICE_URL: "/_drakora/office" } : {}),
+      STAFF_SSO_URL: "/__staff/start",
+      HIDE_LOCAL_LOGIN: "true",
+      DISABLE_SIGNUP: "true",
     });
   }
   if (req.method === "GET" && req.path === "/_drakora/office") {

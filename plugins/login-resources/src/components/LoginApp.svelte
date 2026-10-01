@@ -59,6 +59,8 @@
 
   const signUpDisabled = getMetadata(login.metadata.DisableSignUp) ?? false
   const localLoginHidden = getMetadata(login.metadata.HideLocalLogin) ?? false
+  const ssoUrl = getMetadata(login.metadata.SsoUrl)
+  const ssoAttemptKey = 'huly-sso-attempt'
   const useOTP = getMetadata(presentation.metadata.MailUrl) != null && getMetadata(presentation.metadata.MailUrl) !== ''
   let navigateUrl: string | undefined
   let tfaToken: string | undefined = undefined
@@ -119,7 +121,24 @@
     }
   }
 
-  onMount(chooseToken)
+  onMount(() => {
+    void openStaffSession()
+  })
+
+  async function openStaffSession (): Promise<void> {
+    await chooseToken()
+    if (page !== 'login' || ssoUrl == null) return
+
+    try {
+      const lastAttempt = Number(sessionStorage.getItem(ssoAttemptKey) ?? '0')
+      if (Date.now() - lastAttempt < 30000) return
+      sessionStorage.setItem(ssoAttemptKey, String(Date.now()))
+    } catch {
+      return
+    }
+
+    window.location.assign(ssoUrl)
+  }
 </script>
 
 {#if page === 'admin'}
