@@ -64,6 +64,37 @@
       <span>{$discordOffice.members.length} members</span>
     </div>
 
+    <h2>Active staff</h2>
+    {#if activeStaff.length === 0}
+      <p class="empty">No staff currently appear online.</p>
+    {:else}
+      {#each activeStaff as member (member.id)}
+        <div class="member">
+          <img src={member.avatar} alt="" />
+          <div>
+            <strong>{member.name}</strong><small>{member.ranks.join(' · ') || 'Staff'} · {member.status}</small>
+          </div>
+        </div>
+      {/each}
+    {/if}
+
+    <h2>Server members</h2>
+    <label for="discord-member-search">Search members</label>
+    <input id="discord-member-search" type="search" bind:value={search} placeholder="Name" />
+    {#each members as member (member.id)}
+      <div class="member">
+        <img src={member.avatar} alt="" />
+        <div>
+          <strong>{member.name}</strong>
+          <small>{active.has(member.status) ? `Active now · ${member.status}` : lastSeen(member.lastActiveAt)}</small>
+        </div>
+      </div>
+    {/each}
+    {#if $discordOffice.members.length > 50 && search === ''}
+      <p class="empty">Search to find more members.</p>
+    {/if}
+    <p class="empty">Last active is recorded from observed Discord presence. Earlier activity is unavailable.</p>
+
     <h2>Voice rooms</h2>
     {#each $discordOffice.rooms as room (room.id)}
       <div class="room">
@@ -104,36 +135,6 @@
     {/each}
     {#if actionError}<p class="notice" role="alert">{actionError}</p>{/if}
 
-    <h2>Active staff</h2>
-    {#if activeStaff.length === 0}
-      <p class="empty">No staff currently appear online.</p>
-    {:else}
-      {#each activeStaff as member (member.id)}
-        <div class="member">
-          <img src={member.avatar} alt="" />
-          <div>
-            <strong>{member.name}</strong><small>{member.ranks.join(' · ') || 'Staff'} · {member.status}</small>
-          </div>
-        </div>
-      {/each}
-    {/if}
-
-    <h2>Server members</h2>
-    <label for="discord-member-search">Search members</label>
-    <input id="discord-member-search" type="search" bind:value={search} placeholder="Name" />
-    {#each members as member (member.id)}
-      <div class="member">
-        <img src={member.avatar} alt="" />
-        <div>
-          <strong>{member.name}</strong>
-          <small>{active.has(member.status) ? `Active now · ${member.status}` : lastSeen(member.lastActiveAt)}</small>
-        </div>
-      </div>
-    {/each}
-    {#if $discordOffice.members.length > 50 && search === ''}
-      <p class="empty">Search to find more members.</p>
-    {/if}
-    <p class="empty">Last active is recorded from observed Discord presence. Earlier activity is unavailable.</p>
     {#if /^https:\/\/discord\.com\/channels\/\d+\/\d+$/.test($discordOffice.discordUrl)}
       <a class="discord-link" href={$discordOffice.discordUrl} target="_blank" rel="noreferrer">Open Discord ↗</a>
     {/if}
