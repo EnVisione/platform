@@ -477,18 +477,6 @@ header b {
 .open-tool:hover {
   background: #ead6b7;
 }
-.access-label,
-.muted {
-  font-size: 11px;
-  color: #5e697e;
-}
-.access-label {
-  margin-left: auto;
-  white-space: nowrap;
-}
-.locked {
-  opacity: 0.7;
-}
 .dashboard-footer {
   display: flex;
   justify-content: space-between;

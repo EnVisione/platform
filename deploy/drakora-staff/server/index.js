@@ -138,6 +138,8 @@ async function signedIn(req) {
       throw new AuthError("login_required", 401);
   }
   let user = await discord.check(req.session.userId);
+  if (!user.permissions.dashboard)
+    throw new AuthError("dashboard_role_required");
   if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
   return user;
 }
@@ -210,6 +212,8 @@ officeRouter.post(
     )
       throw new AuthError("invalid_request");
     const user = await discord.check(req.session.userId, true);
+    if (!user.permissions.dashboard)
+      throw new AuthError("dashboard_role_required");
     if (!["start", "end"].includes(req.params.action))
       throw new AuthError("invalid_request", 404);
     await office.meetings[req.params.action](req.params.room, user);
@@ -278,6 +282,8 @@ app.use(async (req, res, next) => {
     if (!parent || parent.userId !== handoff.userId)
       throw new AuthError("login_required", 401);
     const user = await discord.check(handoff.userId, true);
+    if (!user.permissions.dashboard)
+      throw new AuthError("dashboard_role_required");
     if (!user.permissions.todo) throw new AuthError("todo_role_required");
     await regenerate(req);
     Object.assign(req.session, {
@@ -386,11 +392,7 @@ app.get("/auth/discord/callback", async (req, res) => {
     csrf: newToken(),
   });
   await save(req);
-  res.redirect(
-    next === "/" && !user.permissions.dashboard && user.permissions.todo
-      ? "/huly"
-      : next,
-  );
+  res.redirect(next);
 });
 
 app.get("/api/me", async (req, res) => {
@@ -503,7 +505,7 @@ const provider = new Provider(`${config.staffOrigin}/oidc`, {
   async findAccount(_ctx, id) {
     if (!/^discord:\d+$/.test(id)) return undefined;
     const user = await discord.check(id.slice(8));
-    if (!user.permissions.todo) return undefined;
+    if (!user.permissions.dashboard || !user.permissions.todo) return undefined;
     return {
       accountId: id,
       async claims() {
@@ -605,10 +607,8 @@ app.get("/office", async (req, res) => {
 });
 app.get("/", async (req, res) => {
   try {
-    const user = await signedIn(req);
-    res
-      .status(user.permissions.dashboard ? 200 : 403)
-      .sendFile(`${dist}/index.html`);
+    await signedIn(req);
+    res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401) res.redirect("/login");
     else throw error;
@@ -626,13 +626,20 @@ app.use((error, req, res, _next) => {
     req.method !== "GET"
   )
     return res.status(status).json({ error: code });
-  if (req.headers.host === todoHost)
+  if (req.headers.host === todoHost) {
+    const message =
+      code === "todo_role_required"
+        ? "You need the Todo role in the Drakora Discord server."
+        : code === "dashboard_role_required"
+          ? "You need the Dashboard role to sign in to Drakora Staff."
+          : "Return to the staff portal to sign in or retry.";
     return res
       .status(status)
       .type("html")
       .send(
-        `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#101319;color:#edf0f4;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Huly access unavailable"}</h1><p>${code === "todo_role_required" ? "You need the Todo role in the Drakora Discord server." : "Return to the staff portal to sign in or retry."}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
+        `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#101319;color:#edf0f4;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Huly access unavailable"}</h1><p>${message}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
       );
+  }
   res.redirect(`/login?error=${encodeURIComponent(code)}`);
 });
 
@@ -679,8 +686,9 @@ const sweep = setInterval(async () => {
       )
         throw new Error("Session expired");
       let user = await discord.check(socket.userId);
+      if (!user.permissions.dashboard || !user.permissions.todo)
+        throw new Error("Access revoked");
       if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
-      if (!user.permissions.todo) throw new Error("Access revoked");
     } catch {
       socket.destroy();
     }

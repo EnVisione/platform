@@ -21,6 +21,34 @@ test("access roles are independent and ranks never grant access", () => {
   const both = permissions(Object.values(accessRoles));
   assert.equal(both.dashboard && both.todo, true);
 });
+test("Discord sign-in requires Dashboard even for Todo members", async () => {
+  const records = new Map();
+  const store = {
+    get: (_, id) => records.get(id),
+    set: (_, id, value) => records.set(id, value),
+  };
+  let roles = [accessRoles.todo];
+  const client = discordClient(config, store, async (url) => {
+    if (url.endsWith("/oauth2/token"))
+      return Response.json({ access_token: "test", expires_in: 3600 });
+    if (url.endsWith("/users/@me"))
+      return Response.json({
+        id: "42",
+        email: "staff@example.invalid",
+        verified: true,
+        username: "staff",
+      });
+    return Response.json({ roles });
+  });
+  await assert.rejects(client.login("code"), {
+    code: "dashboard_role_required",
+    status: 403,
+  });
+  roles = [accessRoles.dashboard];
+  const admitted = await client.login("code");
+  assert.equal(admitted.permissions.dashboard, true);
+  assert.equal(admitted.permissions.todo, false);
+});
 test("highest rank determines Huly permissions and specialist roles stay in Huly", () => {
   assert.equal(permissions(ranks.map((role) => role.id)).hulyRole, "OWNER");
   assert.equal(

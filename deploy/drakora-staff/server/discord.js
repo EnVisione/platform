@@ -57,7 +57,10 @@ export function discordClient(config, store, fetcher = fetch) {
       checkedAt: 0,
     };
     store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
-    return check(user.id, true);
+    const admitted = await check(user.id, true);
+    if (!admitted.permissions.dashboard)
+      throw new AuthError("dashboard_role_required");
+    return admitted;
   }
   async function refresh(id, force) {
     const user = store.get("user", id);

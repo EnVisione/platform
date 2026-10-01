@@ -17,6 +17,8 @@ const messages = {
   discord_login_required:
     "Your Discord session has expired. Please sign in again.",
   login_required: "Please sign in to continue.",
+  dashboard_role_required:
+    "You need the Dashboard role in the Drakora Discord server to sign in.",
   invalid_login_state:
     "This sign-in link has expired. Start a new sign-in below.",
   invalid_handoff:
@@ -98,7 +100,7 @@ function App() {
         <p>Opening Drakora Staff…</p>
       </main>
     );
-  if (loginPage || !state.user)
+  if (loginPage || !state.user?.dashboard)
     return (
       <main className="login-layout">
         <section className="intro">
@@ -146,7 +148,7 @@ function App() {
             <p className="help">
               Your Discord roles determine which staff tools you can open.
             </p>
-            {state.user && !error && (
+            {state.user?.dashboard && !error && (
               <a className="text-link" href="/">
                 Continue as {state.user.name} →
               </a>
@@ -195,16 +197,8 @@ function App() {
           <div className="welcome">
             <div>
               <span className="eyebrow">DRAKORA STAFF</span>
-              <h1>
-                {user.dashboard
-                  ? `Welcome, ${user.name}.`
-                  : "Dashboard access is restricted."}
-              </h1>
-              <p>
-                {user.dashboard
-                  ? "Your workspace, ready when you are."
-                  : "Ask a server administrator for the Dashboard role to access this workspace."}
-              </p>
+              <h1>Welcome, {user.name}.</h1>
+              <p>Your workspace, ready when you are.</p>
             </div>
             {user.avatar && <img className="avatar" src={user.avatar} alt="" />}
           </div>
@@ -213,63 +207,53 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {user.dashboard && (
-            <section className="identity-card" aria-labelledby="your-roles">
-              <div>
-                <span className="section-kicker">YOUR TEAM</span>
-                <h2 id="your-roles">Staff roles</h2>
-              </div>
-              <div className="chips">
-                {user.dashboardRanks.length ? (
-                  user.dashboardRanks.map((rank) => (
-                    <span
-                      className={`chip ${rank === "Founder" ? "founder" : ""}`}
-                      key={rank}
-                    >
-                      {rank}
-                    </span>
-                  ))
-                ) : (
-                  <span className="chip">Staff</span>
-                )}
-              </div>
-              <span className="identity-note">Managed in Discord</span>
-            </section>
-          )}
-          <section className="tools" aria-labelledby="staff-tools">
-            <div className="section-title">
-              <h2 id="staff-tools">Your tools</h2>
-              <span>{user.todo ? "1 available" : "No tools assigned"}</span>
+          <section className="identity-card" aria-labelledby="your-roles">
+            <div>
+              <span className="section-kicker">YOUR TEAM</span>
+              <h2 id="your-roles">Staff roles</h2>
             </div>
-            <article className={`tool-card ${user.todo ? "" : "locked"}`}>
-              <div className="tool-icon">✓</div>
-              <div className="tool-content">
-                <span className="section-kicker">TASKS & COLLABORATION</span>
-                <h3>Huly</h3>
-                <p>Plan work, track progress, and keep the team in sync.</p>
-                <div className="chips small">
-                  {user.todo ? (
-                    user.hulyRanks.map((rank) => (
+            <div className="chips">
+              {user.dashboardRanks.length ? (
+                user.dashboardRanks.map((rank) => (
+                  <span
+                    className={`chip ${rank === "Founder" ? "founder" : ""}`}
+                    key={rank}
+                  >
+                    {rank}
+                  </span>
+                ))
+              ) : (
+                <span className="chip">Staff</span>
+              )}
+            </div>
+            <span className="identity-note">Managed in Discord</span>
+          </section>
+          {user.todo && (
+            <section className="tools" aria-labelledby="staff-tools">
+              <div className="section-title">
+                <h2 id="staff-tools">Your tools</h2>
+                <span>1 available</span>
+              </div>
+              <article className="tool-card">
+                <div className="tool-icon">✓</div>
+                <div className="tool-content">
+                  <span className="section-kicker">TASKS & COLLABORATION</span>
+                  <h3>Huly</h3>
+                  <p>Plan work, track progress, and keep the team in sync.</p>
+                  <div className="chips small">
+                    {user.hulyRanks.map((rank) => (
                       <span className="chip" key={rank}>
                         {rank}
                       </span>
-                    ))
-                  ) : (
-                    <span className="muted">
-                      Requires the Todo role in Discord
-                    </span>
-                  )}
+                    ))}
+                  </div>
                 </div>
-              </div>
-              {user.todo ? (
                 <a className="button open-tool" href="/huly">
                   Open Huly<span>↗</span>
                 </a>
-              ) : (
-                <span className="access-label">No access</span>
-              )}
-            </article>
-          </section>
+              </article>
+            </section>
+          )}
           <footer className="dashboard-footer">
             <span>Drakora Network</span>
             <span>Built around the team.</span>
