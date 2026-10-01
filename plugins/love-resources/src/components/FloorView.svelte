@@ -44,7 +44,6 @@
         info={getInfo(room._id, $infos)}
         discordRoom={discordRooms.get(normalize(room.name))}
         on:open
-        on:discordroom
       />
     {/each}
   </FloorGrid>

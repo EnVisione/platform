@@ -27,7 +27,7 @@
   import PersonActionPopup from './PersonActionPopup.svelte'
   import { IntlString } from '@hcengineering/platform'
   import { lkSessionConnected } from '../liveKitClient'
-  import { discordVoiceUrl, type DiscordRoom } from '../discordOffice'
+  import type { DiscordRoom } from '../discordOffice'
 
   export let room: Room
   export let info: ParticipantInfo[]
@@ -72,12 +72,6 @@
   }
 
   async function openRoom (x: number, y: number): Promise<void> {
-    if (discordRoom !== undefined && !preview) {
-      const link = discordRoom.joinable ? discordVoiceUrl(discordRoom) : undefined
-      if (link !== undefined) window.open(link, '_blank', 'noopener,noreferrer')
-      else dispatch('discordroom', { id: discordRoom.id })
-      return
-    }
     const client = getClient()
     const hierarchy = client.getHierarchy()
     if ($lkSessionConnected && $currentRoom?._id === room._id) {
@@ -102,10 +96,6 @@
   async function placeClickHandler (e: MouseEvent, x: number, y: number, person: Person | undefined): Promise<void> {
     e.stopPropagation()
     e.preventDefault()
-    if (discordRoom !== undefined && !preview) {
-      await openRoom(x, y)
-      return
-    }
     if (person !== undefined) {
       if ($myInfo === undefined || (person._id === me && $myInfo?.room === room._id)) return
       showPopup(PersonActionPopup, { room, person: person._id }, eventToHTMLElement(e))

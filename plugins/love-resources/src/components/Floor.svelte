@@ -103,7 +103,6 @@
         is={viewlet.$lookup.descriptor.component}
         props={{ floor, rooms }}
         on:open
-        on:discordroom={() => (showDiscord = true)}
       />
     {/if}
   </div>

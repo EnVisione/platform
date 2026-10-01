@@ -23,7 +23,7 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 7. Build the Huly frontend image below, set `HULY_OFFICE_IMAGE`, and recreate Huly's front and account services.
 8. Route both public origins to this service on port 3000 through the private network, or to its loopback port 8088. Keep Huly's nginx and account services inaccessible directly from the public internet.
 
-The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. If Huly loses its browser session, its login page restarts the same handoff automatically. The public Huly view hides local email and password login. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
+The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. If Huly loses its browser session, its login page restarts the same handoff automatically. The public Huly view hides local email and password login. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout and room clicks, with Discord room links and a member panel available separately.
 
 Signed-in staff can open Dashboard Settings to choose a 3 or 6 digit hex accent color. Save applies it to the dashboard and keeps it across refreshes for that Discord account in the same browser. Reset restores the default Discord blue. This appearance setting stays in browser storage and does not sync across devices.
 
@@ -41,7 +41,7 @@ docker build -f deploy/drakora-staff/Dockerfile.huly-front \
   -t drakora-huly-front:office .
 ```
 
-Use the exact front image digest from the matching installation as the base. This image replaces browser assets while preserving the matching front server. Never mix platform tags and server versions. The optional `OFFICE_URL` browser configuration activates Discord controls in Huly's original Office layout; deployments without it retain Huly's original Office.
+Use the exact front image digest from the matching installation as the base. This image replaces browser assets while preserving the matching front server. Never mix platform tags and server versions. The optional `OFFICE_URL` browser configuration activates Discord controls in Huly's original Office layout; deployments without it retain Huly's original Office. Room tiles still open Huly's room view. Huly audio and video calls require a separately configured Love service and LiveKit endpoint; Discord voice links remain independent.
 
 ## GitHub integration
 
