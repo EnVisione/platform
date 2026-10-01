@@ -1,0 +1,4 @@
+ARG HULY_FRONT_IMAGE
+FROM ${HULY_FRONT_IMAGE}
+COPY dev/prod/dist /app/dist
+COPY dev/prod/public /app/dist

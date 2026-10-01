@@ -1,0 +1,31 @@
+services:
+  account:
+    image: hardcoreeng/account@sha256:a77b42617b7c88e886458966c0001952c22f882feb44f78e9f6f8d89d7e73c1c
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283
+  cockroach:
+    image: cockroachdb/cockroach@sha256:885d9b0e3243f262976763717e547dbbe75ca999548f7a4ea95fcd30a9aee66c
+  collaborator:
+    image: hardcoreeng/collaborator@sha256:2747295c2cf5de05d6ea8ec90173891f28ede3064d45354a8069ebfe769f279f
+  elastic:
+    image: elasticsearch@sha256:f05ab7f4d2aa5040813a0ea4eb76fa99bb31459937a4539efe2f2c2dbb2109fb
+  front:
+    image: hardcoreeng/front@sha256:96d5270cb1f46cbe2d67a9cee79a83f184bbf5b6daf02ee8e2cbbb2522ce759f
+  fulltext:
+    image: hardcoreeng/fulltext@sha256:e8670c41aab79b0e4e15230aad61e2e7e886e57cc83796e92ecb3c4d1f99209a
+  kvs:
+    image: hardcoreeng/hulykvs@sha256:765ca15bb643e4f8d42dba9bc0bf0d0e668ee5ced8fb1c432abb142946b09d4f
+  minio:
+    image: pgsty/silo@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46
+  nginx:
+    image: nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda@sha256:04baa40ed34edf86028396f762be802f3b6b0acaab65e9de696a3f15d54c550f
+  rekoni:
+    image: hardcoreeng/rekoni-service@sha256:d148cefc5e55372a4d5d513626136618f814ee341eff1be9deffbeb74c8b5fed
+  stats:
+    image: hardcoreeng/stats@sha256:9a08a6ec7f80e13d3d3694247087751727227152bb23fdc88f53f8fae1a07183
+  transactor:
+    image: hardcoreeng/transactor@sha256:4bbf156ff7ba06c665930d40bb577f6b549d1f9eeaa7270de5d98ac7fdd7465c
+  workspace:
+    image: hardcoreeng/workspace@sha256:9a95e4fc7616fb427111400191a9cff42e5e8e56c893c61bfa15055b1bfadb53

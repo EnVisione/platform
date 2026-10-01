@@ -96,6 +96,10 @@ tests/db_dump
 .format
 tools/apm/apm.js
 deploy
+!/deploy/
+/deploy/*
+!/deploy/drakora-staff/
+/.runtime/
 metrics.txt
 services/github/pod-github/src/github.graphql
 .build

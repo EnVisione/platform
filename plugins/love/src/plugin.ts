@@ -108,6 +108,7 @@ const love = plugin(loveId, {
   },
   metadata: {
     WebSocketURL: '' as Metadata<string>,
+    OfficeUrl: '' as Metadata<string>,
     ServiceEnpdoint: '' as Metadata<string>
   },
   space: {

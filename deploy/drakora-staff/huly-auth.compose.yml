@@ -1,0 +1,12 @@
+services:
+  account:
+    environment:
+      OPENID_CLIENT_ID: drakora-huly
+      OPENID_CLIENT_SECRET: ${HULY_OIDC_SECRET:?Set HULY_OIDC_SECRET}
+      OPENID_ISSUER: ${STAFF_ORIGIN:?Set STAFF_ORIGIN}/oidc
+      OPENID_DISPLAY_NAME: Discord
+    command: ["sh", "-c", "node /run/wait-issuer.mjs && exec node bundle.js"]
+    volumes:
+      - ${STAFF_SOURCE_PATH:?Set STAFF_SOURCE_PATH}/server/wait-issuer.js:/run/wait-issuer.mjs:ro
+  front:
+    image: ${HULY_OFFICE_IMAGE:?Set HULY_OFFICE_IMAGE}

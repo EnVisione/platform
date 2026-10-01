@@ -1,0 +1,694 @@
+import express from "express";
+import session from "express-session";
+import { rateLimit } from "express-rate-limit";
+import { Provider } from "oidc-provider";
+import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
+import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual, generateKeyPairSync } from "node:crypto";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+import { openStore, hash } from "./store.js";
+import { AuthError, discordClient } from "./discord.js";
+import { hulyClient } from "./huly.js";
+import { isPageRequest } from "./navigation.js";
+import { discordOffice } from "./office.js";
+import { validateConfig } from "./config.js";
+
+const config = validateConfig(
+  JSON.parse(
+    readFileSync(process.env.CONFIG_PATH ?? "/run/secrets/config.json"),
+  ),
+);
+const dataPath = process.env.DATA_PATH ?? "/data";
+mkdirSync(dataPath, { recursive: true, mode: 0o700 });
+const { store, sessions, OidcAdapter } = openStore(
+  `${dataPath}/staff.sqlite`,
+  config.databaseKey,
+);
+const discord = discordClient(config, store);
+const huly = hulyClient(config, store);
+const office = config.office ? discordOffice(config, store) : undefined;
+const app = express();
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+const staffHost = new URL(config.staffOrigin).host;
+const todoHost = new URL(config.todoOrigin).host;
+const newToken = () => randomBytes(32).toString("base64url");
+const safeEqual = (left, right) =>
+  typeof left === "string" &&
+  typeof right === "string" &&
+  Buffer.byteLength(left) === Buffer.byteLength(right) &&
+  timingSafeEqual(Buffer.from(left), Buffer.from(right));
+const save = (req) =>
+  new Promise((resolve, reject) =>
+    req.session.save((error) => (error ? reject(error) : resolve())),
+  );
+const regenerate = (req) =>
+  new Promise((resolve, reject) =>
+    req.session.regenerate((error) => (error ? reject(error) : resolve())),
+  );
+const destroy = (req) =>
+  new Promise((resolve, reject) =>
+    req.session.destroy((error) => (error ? reject(error) : resolve())),
+  );
+const cookieOptions = {
+  secure: true,
+  httpOnly: true,
+  sameSite: "lax",
+  path: "/",
+  maxAge: 43200000,
+};
+const makeSession = (name) =>
+  session({
+    name,
+    store: sessions,
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: cookieOptions,
+  });
+const staffSession = makeSession("__Host-drakora_staff");
+const todoSession = makeSession("__Host-drakora_todo");
+const sockets = new Set();
+
+app.use((req, res, next) => {
+  res.set({
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=31536000",
+  });
+  if (req.path === "/health" && req.headers.host === "127.0.0.1:3000")
+    return res.json({ ok: true });
+  if (![staffHost, todoHost].includes(req.headers.host))
+    return res.status(421).end();
+  if (req.headers["x-forwarded-proto"] !== "https")
+    return res.redirect(
+      308,
+      `${req.headers.host === staffHost ? config.staffOrigin : config.todoOrigin}${req.url}`,
+    );
+  next();
+});
+app.use((req, res, next) =>
+  (req.headers.host === todoHost ? todoSession : staffSession)(req, res, next),
+);
+app.use(
+  ["/auth/discord", "/__staff/start"],
+  rateLimit({
+    windowMs: 60000,
+    limit: 20,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
+);
+app.use((req, res, next) => {
+  if (req.headers.host === staffHost)
+    res.set(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    );
+  next();
+});
+
+function safeNext(value) {
+  if (["/", "/huly"].includes(value)) return value;
+  if (
+    typeof value === "string" &&
+    /^\/interaction\/[A-Za-z0-9_-]+$/.test(value)
+  )
+    return value;
+  if (
+    typeof value === "string" &&
+    /^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value)
+  )
+    return value;
+  return "/";
+}
+
+async function signedIn(req) {
+  if (!req.session.userId || req.session.until < Date.now())
+    throw new AuthError("login_required", 401);
+  if (req.headers.host === todoHost) {
+    const parent = store.get("session", req.session.staffSessionId ?? "");
+    if (
+      !parent ||
+      parent.userId !== req.session.userId ||
+      parent.until < Date.now()
+    )
+      throw new AuthError("login_required", 401);
+  }
+  let user = await discord.check(req.session.userId);
+  if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
+  return user;
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    avatar: user.avatar,
+    ...user.permissions,
+  };
+}
+
+function accountFromToken(token) {
+  if (!token || typeof token !== "string" || token.split(".").length !== 3)
+    return undefined;
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1], "base64url")).account;
+  } catch {
+    return undefined;
+  }
+}
+
+function matchingHulyIdentity(req, user) {
+  const url = new URL(req.url, config.todoOrigin);
+  const candidates = [
+    req.headers.authorization?.replace(/^Bearer /i, ""),
+    url.searchParams.get("token"),
+  ];
+  candidates.push(
+    ...url.pathname.split("/").map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return candidates.every((token) => {
+    const account = accountFromToken(token);
+    return !account || account === user.hulyAccount;
+  });
+}
+
+const officeRouter = express.Router();
+officeRouter.use(async (req, res, next) => {
+  if (!office) throw new AuthError("office_unavailable", 503);
+  const user = await signedIn(req);
+  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  req.officeUser = user;
+  next();
+});
+officeRouter.get("/", async (req, res) => {
+  if (!req.session.csrf) {
+    req.session.csrf = newToken();
+    await save(req);
+  }
+  res.json({ ...office.snapshot(req.officeUser), csrf: req.session.csrf });
+});
+officeRouter.post(
+  "/:room/:action",
+  rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
+  express.json({ limit: "1kb" }),
+  async (req, res) => {
+    const origin =
+      req.headers.host === todoHost ? config.todoOrigin : config.staffOrigin;
+    if (
+      req.headers.origin !== origin ||
+      !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
+    )
+      throw new AuthError("invalid_request");
+    const user = await discord.check(req.session.userId, true);
+    if (!["start", "end"].includes(req.params.action))
+      throw new AuthError("invalid_request", 404);
+    await office.meetings[req.params.action](req.params.room, user);
+    res.json({ ...office.snapshot(user), csrf: req.session.csrf });
+  },
+);
+app.use(["/api/office", "/_drakora/api/office"], officeRouter);
+
+const proxy = createProxyMiddleware({
+  target: config.hulyUpstream,
+  changeOrigin: false,
+  on: {
+    proxyReq(proxyReq, req, res) {
+      const cookies = String(req.headers.cookie ?? "")
+        .split(";")
+        .filter((value) => !value.trim().startsWith("__Host-drakora_"))
+        .join(";");
+      proxyReq.setHeader("cookie", cookies);
+      fixRequestBody(proxyReq, req, res);
+    },
+    error(_error, _req, response) {
+      if (typeof response.writeHead === "function" && !response.headersSent)
+        response.writeHead(502).end("Huly is temporarily unavailable.");
+      else response.destroy();
+    },
+  },
+});
+
+app.use(async (req, res, next) => {
+  if (req.headers.host !== todoHost) return next();
+  if (req.path === "/__staff/start") {
+    await regenerate(req);
+    const challenge = newToken();
+    req.session.challenge = hash(challenge);
+    store.set(
+      "challenge",
+      hash(challenge),
+      { todoSession: req.sessionID },
+      Date.now() + 600000,
+    );
+    await save(req);
+    return res.redirect(
+      `${config.staffOrigin}/huly/authorize?challenge=${challenge}`,
+    );
+  }
+  if (req.path === "/__staff/complete") {
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const handoff = store.take("handoff", hash(code));
+    if (!handoff || handoff.todoSession !== req.sessionID) {
+      console.warn(
+        "Huly handoff rejected:",
+        !handoff ? "expired code" : "browser session changed",
+      );
+      throw new AuthError("invalid_handoff");
+    }
+    const parent = store.get("session", handoff.staffSession);
+    if (!parent || parent.userId !== handoff.userId)
+      throw new AuthError("login_required", 401);
+    const user = await discord.check(handoff.userId, true);
+    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    await regenerate(req);
+    Object.assign(req.session, {
+      userId: user.id,
+      staffSessionId: handoff.staffSession,
+      until: parent.until,
+    });
+    await save(req);
+    const inviteId = await huly.invite(user);
+    return res.redirect(
+      `/_accounts/auth/openid?inviteId=${encodeURIComponent(inviteId)}`,
+    );
+  }
+  let user;
+  try {
+    user = await signedIn(req);
+  } catch (error) {
+    if (error.status === 401 && isPageRequest(req))
+      return res.redirect("/__staff/start");
+    throw error;
+  }
+  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  if (!matchingHulyIdentity(req, user))
+    throw new AuthError("huly_account_mismatch");
+  if (req.method === "GET" && req.path === "/config.json" && office) {
+    const response = await fetch(`${config.hulyUpstream}/config.json`, {
+      headers: { Host: todoHost, "X-Forwarded-Proto": "https" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error("Huly configuration is unavailable");
+    return res.json({
+      ...(await response.json()),
+      OFFICE_URL: "/_drakora/office",
+    });
+  }
+  if (req.method === "GET" && req.path === "/_drakora/office") {
+    res.set(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+    );
+    return res.sendFile(`${dist}/index.html`);
+  }
+  if (req.path.startsWith("/__staff/assets/")) return next();
+  if (req.path.replace(/\/+$/, "") === "/_accounts" && req.method === "POST") {
+    return express.json({ limit: "128kb" })(req, res, (error) => {
+      if (error) return next(error);
+      if (
+        [
+          "login",
+          "loginOtp",
+          "validateOtp",
+          "signUp",
+          "join",
+          "signUpJoin",
+          "checkAutoJoin",
+        ].includes(req.body?.method)
+      )
+        return res
+          .status(403)
+          .json({ error: "Use Discord login through the staff portal." });
+      proxy(req, res, next);
+    });
+  }
+  return proxy(req, res, next);
+});
+
+app.get("/auth/discord", async (req, res) => {
+  const state = newToken();
+  const next = safeNext(req.query.next);
+  await regenerate(req);
+  Object.assign(req.session, {
+    oauthState: hash(state),
+    oauthUntil: Date.now() + 600000,
+    next,
+  });
+  await save(req);
+  const url = new URL("https://discord.com/oauth2/authorize");
+  url.search = new URLSearchParams({
+    client_id: config.discordClientId,
+    redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+    response_type: "code",
+    scope: "identify email guilds.members.read",
+    state,
+    prompt: "consent",
+  });
+  res.redirect(url.href);
+});
+
+app.get("/auth/discord/callback", async (req, res) => {
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (
+    !safeEqual(hash(state), req.session.oauthState) ||
+    req.session.oauthUntil < Date.now()
+  )
+    throw new AuthError("invalid_login_state");
+  const next = safeNext(req.session.next);
+  delete req.session.oauthState;
+  await save(req);
+  if (req.query.error || typeof req.query.code !== "string")
+    return res.redirect("/login?error=discord_cancelled");
+  const user = await discord.login(req.query.code);
+  await regenerate(req);
+  Object.assign(req.session, {
+    userId: user.id,
+    until: Date.now() + 43200000,
+    csrf: newToken(),
+  });
+  await save(req);
+  res.redirect(
+    next === "/" && !user.permissions.dashboard && user.permissions.todo
+      ? "/huly"
+      : next,
+  );
+});
+
+app.get("/api/me", async (req, res) => {
+  const user = await signedIn(req);
+  res.json({ user: publicUser(user), csrf: req.session.csrf });
+});
+app.post("/api/logout", express.json({ limit: "1kb" }), async (req, res) => {
+  if (
+    req.headers.origin !== config.staffOrigin ||
+    !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
+  )
+    throw new AuthError("invalid_request");
+  const id = req.sessionID;
+  await destroy(req);
+  for (const socket of sockets)
+    if (socket.staffSessionId === id) socket.destroy();
+  res.clearCookie("__Host-drakora_staff", cookieOptions).json({ ok: true });
+});
+
+app.get(["/huly", "/todo"], (_req, res) =>
+  res.redirect(`${config.todoOrigin}/__staff/start`),
+);
+app.get("/huly/authorize", async (req, res) => {
+  if (typeof req.query.challenge !== "string")
+    throw new AuthError("invalid_handoff");
+  let user;
+  try {
+    user = await signedIn(req);
+  } catch (error) {
+    if (error.status === 401)
+      return res.redirect(
+        `/login?next=${encodeURIComponent(safeNext(req.originalUrl))}`,
+      );
+    throw error;
+  }
+  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  const challenge = store.take("challenge", hash(req.query.challenge));
+  if (!challenge) throw new AuthError("invalid_handoff");
+  const code = newToken();
+  store.set(
+    "handoff",
+    hash(code),
+    {
+      userId: user.id,
+      staffSession: req.sessionID,
+      todoSession: challenge.todoSession,
+    },
+    Date.now() + 60000,
+  );
+  res.redirect(`${config.todoOrigin}/__staff/complete?code=${code}`);
+});
+
+const keyPath = `${dataPath}/oidc-jwks.json`;
+if (!existsSync(keyPath)) {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  writeFileSync(
+    keyPath,
+    JSON.stringify({
+      keys: [
+        {
+          ...privateKey.export({ format: "jwk" }),
+          use: "sig",
+          alg: "RS256",
+          kid: newToken(),
+        },
+      ],
+    }),
+    { mode: 0o600, flag: "wx" },
+  );
+}
+const provider = new Provider(`${config.staffOrigin}/oidc`, {
+  adapter: OidcAdapter,
+  clients: [
+    {
+      client_id: "drakora-huly",
+      client_name: "Drakora Huly",
+      client_secret: config.oidcClientSecret,
+      redirect_uris: [`${config.todoOrigin}/_accounts/auth/openid/callback`],
+      response_types: ["code"],
+      grant_types: ["authorization_code"],
+      token_endpoint_auth_method: "client_secret_basic",
+    },
+  ],
+  jwks: JSON.parse(readFileSync(keyPath)),
+  cookies: {
+    keys: [config.sessionSecret],
+    long: { secure: true, httpOnly: true, sameSite: "lax" },
+    short: { secure: true, httpOnly: true, sameSite: "lax" },
+  },
+  features: { devInteractions: { enabled: false } },
+  responseTypes: ["code"],
+  scopes: ["openid", "email", "profile"],
+  claims: {
+    openid: ["sub"],
+    email: ["email", "email_verified"],
+    profile: ["name", "preferred_username"],
+  },
+  pkce: { required: () => false },
+  ttl: {
+    Session: 43200,
+    Grant: 43200,
+    AccessToken: 300,
+    IdToken: 300,
+    AuthorizationCode: 60,
+    Interaction: 600,
+  },
+  interactions: {
+    url: (_ctx, interaction) => `/interaction/${interaction.uid}`,
+  },
+  async findAccount(_ctx, id) {
+    if (!/^discord:\d+$/.test(id)) return undefined;
+    const user = await discord.check(id.slice(8));
+    if (!user.permissions.todo) return undefined;
+    return {
+      accountId: id,
+      async claims() {
+        return {
+          sub: id,
+          name: user.name,
+          preferred_username: user.username,
+          email: user.email,
+          email_verified: true,
+        };
+      },
+    };
+  },
+  renderError(ctx) {
+    ctx.status = 400;
+    ctx.body =
+      "Sign-in could not be completed. Return to the staff portal and try again.";
+  },
+});
+provider.proxy = true;
+provider.on("server_error", (_ctx, error) =>
+  console.error("OpenID provider error:", error.message),
+);
+app.get("/interaction/:uid", async (req, res) => {
+  let user;
+  try {
+    user = await signedIn(req);
+  } catch (error) {
+    if (error.status === 401)
+      return res.redirect(
+        `/login?next=${encodeURIComponent(safeNext(req.path))}`,
+      );
+    throw error;
+  }
+  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  const details = await provider.interactionDetails(req, res);
+  if (details.params.client_id !== "drakora-huly")
+    throw new AuthError("invalid_client");
+  if (details.prompt.name === "login") {
+    return provider.interactionFinished(
+      req,
+      res,
+      { login: { accountId: `discord:${user.id}` } },
+      { mergeWithLastSubmission: false },
+    );
+  }
+  if (details.prompt.name === "consent") {
+    if (details.session.accountId !== `discord:${user.id}`)
+      throw new AuthError("huly_account_mismatch");
+    const grant = details.grantId
+      ? await provider.Grant.find(details.grantId)
+      : new provider.Grant({
+          accountId: details.session.accountId,
+          clientId: "drakora-huly",
+        });
+    grant.addOIDCScope("openid profile email");
+    const grantId = await grant.save();
+    return provider.interactionFinished(
+      req,
+      res,
+      { consent: { grantId } },
+      { mergeWithLastSubmission: true },
+    );
+  }
+  throw new AuthError("invalid_interaction");
+});
+app.use("/oidc", async (req, res, next) => {
+  if (req.path === "/auth") {
+    try {
+      const user = await signedIn(req);
+      if (!user.permissions.todo) throw new AuthError("todo_role_required");
+      const url = new URL(req.url, config.staffOrigin);
+      url.searchParams.set("prompt", "login");
+      req.url = url.pathname + url.search;
+    } catch (error) {
+      return next(error);
+    }
+  }
+  provider.callback()(req, res);
+});
+
+const dist = resolve("dist");
+app.use(
+  "/__staff/assets",
+  express.static(`${dist}/assets`, { immutable: true, maxAge: "1y" }),
+);
+app.get(["/login", "/access"], (_req, res) =>
+  res.sendFile(`${dist}/index.html`),
+);
+app.get("/office", async (req, res) => {
+  try {
+    const user = await signedIn(req);
+    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    res.sendFile(`${dist}/index.html`);
+  } catch (error) {
+    if (error.status === 401) res.redirect("/login");
+    else throw error;
+  }
+});
+app.get("/", async (req, res) => {
+  try {
+    const user = await signedIn(req);
+    res
+      .status(user.permissions.dashboard ? 200 : 403)
+      .sendFile(`${dist}/index.html`);
+  } catch (error) {
+    if (error.status === 401) res.redirect("/login");
+    else throw error;
+  }
+});
+app.use((_req, res) => res.status(404).send("Page not found."));
+app.use((error, req, res, _next) => {
+  const status = error instanceof AuthError ? error.status : 503;
+  const code = error instanceof AuthError ? error.code : "service_unavailable";
+  if (!(error instanceof AuthError))
+    console.error("Request failed:", error.message);
+  if (
+    req.path.startsWith("/api/") ||
+    req.path.startsWith("/_drakora/api/") ||
+    req.method !== "GET"
+  )
+    return res.status(status).json({ error: code });
+  if (req.headers.host === todoHost)
+    return res
+      .status(status)
+      .type("html")
+      .send(
+        `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#101319;color:#edf0f4;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Huly access unavailable"}</h1><p>${code === "todo_role_required" ? "You need the Todo role in the Drakora Discord server." : "Return to the staff portal to sign in or retry."}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
+      );
+  res.redirect(`/login?error=${encodeURIComponent(code)}`);
+});
+
+const server = createServer(app);
+server.on("upgrade", (req, socket, head) => {
+  if (
+    req.headers.host !== todoHost ||
+    req.headers.origin !== config.todoOrigin ||
+    req.headers["x-forwarded-proto"] !== "https"
+  )
+    return socket.destroy();
+  const response = {
+    getHeader() {},
+    setHeader() {},
+    writeHead() {},
+    end() {
+      socket.destroy();
+    },
+  };
+  todoSession(req, response, async (error) => {
+    try {
+      if (error) throw error;
+      const user = await signedIn(req);
+      if (!user.permissions.todo || !matchingHulyIdentity(req, user))
+        return socket.destroy();
+      socket.userId = user.id;
+      socket.staffSessionId = req.session.staffSessionId;
+      socket.until = req.session.until;
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      proxy.upgrade(req, socket, head);
+    } catch {
+      socket.destroy();
+    }
+  });
+});
+const sweep = setInterval(async () => {
+  store.clean();
+  for (const socket of sockets) {
+    try {
+      if (
+        socket.until < Date.now() ||
+        !store.get("session", socket.staffSessionId)
+      )
+        throw new Error("Session expired");
+      let user = await discord.check(socket.userId);
+      if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
+      if (!user.permissions.todo) throw new Error("Access revoked");
+    } catch {
+      socket.destroy();
+    }
+  }
+}, 30000);
+sweep.unref();
+server.listen(3000, "0.0.0.0", () =>
+  console.log("Drakora staff service ready."),
+);
+function stop() {
+  clearInterval(sweep);
+  office?.close();
+  for (const socket of sockets) socket.destroy();
+  server.close(() => {
+    store.close();
+    process.exit(0);
+  });
+}
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);

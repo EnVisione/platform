@@ -173,6 +173,7 @@ export interface Config {
   GITHUB_URL: string
   LOVE_ENDPOINT?: string
   LIVEKIT_WS?: string
+  OFFICE_URL?: string
   SIGN_URL?: string
   PRINT_URL?: string
   ANALYTICS_COLLECTOR_URL?: string
@@ -527,6 +528,7 @@ export async function configurePlatform() {
   setMetadata(contactPlugin.metadata.LastNameFirst, myBranding.lastNameFirst === 'true')
   setMetadata(love.metadata.ServiceEnpdoint, config.LOVE_ENDPOINT)
   setMetadata(love.metadata.WebSocketURL, config.LIVEKIT_WS)
+  setMetadata(love.metadata.OfficeUrl, config.OFFICE_URL)
   setMetadata(print.metadata.PrintURL, config.PRINT_URL)
   setMetadata(sign.metadata.SignURL, config.SIGN_URL)
   setMetadata(presence.metadata.PresenceUrl, config.PRESENCE_URL ?? '')

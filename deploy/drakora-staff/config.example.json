@@ -1,0 +1,102 @@
+{
+  "staffOrigin": "https://staff.example.com",
+  "todoOrigin": "https://todo.example.com",
+  "discordClientId": "REPLACE_APPLICATION_ID",
+  "discordClientSecret": "REPLACE_OAUTH_SECRET",
+  "discordBotToken": "REPLACE_BOT_TOKEN",
+  "guildId": "REPLACE_GUILD_ID",
+  "sessionSecret": "REPLACE_RANDOM_SECRET",
+  "databaseKey": "REPLACE_32_RANDOM_BYTES_BASE64",
+  "oidcClientSecret": "REPLACE_RANDOM_SECRET",
+  "hulySecret": "REPLACE_HULY_SHARED_SECRET",
+  "hulyOwner": "REPLACE_OWNER_UUID",
+  "hulyWorkspace": "REPLACE_WORKSPACE_UUID",
+  "hulyAccounts": "http://account:3000",
+  "hulyUpstream": "http://nginx:80",
+  "accessRoles": {
+    "dashboard": "REPLACE_DASHBOARD_ROLE_ID",
+    "todo": "REPLACE_TODO_ROLE_ID"
+  },
+  "ranks": [
+    {
+      "id": "REPLACE_FOUNDER_ROLE_ID",
+      "name": "Founder",
+      "huly": "OWNER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_ADMIN_ROLE_ID",
+      "name": "Admin",
+      "huly": "MAINTAINER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_MODERATOR_ROLE_ID",
+      "name": "Moderator",
+      "huly": "USER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_HELPER_ROLE_ID",
+      "name": "Helper",
+      "huly": "USER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_TRIAL_STAFF_ROLE_ID",
+      "name": "Trial Staff",
+      "huly": "USER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_DEVELOPER_ROLE_ID",
+      "name": "Developer",
+      "huly": "USER",
+      "dashboard": false
+    },
+    {
+      "id": "REPLACE_DISCORD_MANAGEMENT_ROLE_ID",
+      "name": "Discord Management",
+      "huly": "USER",
+      "dashboard": false
+    },
+    {
+      "id": "REPLACE_SERVER_MANAGEMENT_ROLE_ID",
+      "name": "Server Management",
+      "huly": "USER",
+      "dashboard": false
+    }
+  ],
+  "office": {
+    "categoryId": "REPLACE_CATEGORY_ID",
+    "inviteChannelId": "REPLACE_INVITES_CHANNEL_ID",
+    "hostRoles": ["REPLACE_FOUNDER_ROLE_ID", "REPLACE_ADMIN_ROLE_ID"],
+    "rooms": [
+      {
+        "id": "REPLACE_1_CHANNEL_ID",
+        "name": "All Hands",
+        "kind": "meeting"
+      },
+      {
+        "id": "REPLACE_2_CHANNEL_ID",
+        "name": "Meeting Room 1",
+        "kind": "meeting"
+      },
+      {
+        "id": "REPLACE_3_CHANNEL_ID",
+        "name": "Meeting Room 2",
+        "kind": "meeting"
+      },
+      {
+        "id": "REPLACE_4_CHANNEL_ID",
+        "name": "Voice Room 1",
+        "kind": "voice"
+      },
+      {
+        "id": "REPLACE_5_CHANNEL_ID",
+        "name": "Voice Room 2",
+        "kind": "voice"
+      }
+    ]
+  }
+}

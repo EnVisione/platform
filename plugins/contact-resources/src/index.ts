@@ -15,6 +15,7 @@
 //
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
+  AvatarType,
   getGravatarUrl,
   getName,
   type AvatarInfo,
@@ -426,6 +427,13 @@ export default async (): Promise<Resources> => ({
   },
   function: {
     GetFileUrl: async (person: Data<WithLookup<AvatarInfo>>, name: string, width: number) => {
+      // external avatars share the image provider in this model.
+      if (person.avatarType === AvatarType.EXTERNAL) {
+        return {
+          url: person.avatarProps?.url,
+          color: getPersonColor(person, name)
+        }
+      }
       if (person.avatar == null) {
         return {
           color: getPersonColor(person, name)

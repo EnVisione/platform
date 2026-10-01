@@ -1,0 +1,364 @@
+.discord-office {
+  min-height: 100vh;
+  padding: 32px;
+  background: #141619;
+  color: #e6e8ed;
+  font-family: Inter, system-ui, sans-serif;
+}
+.office-header {
+  height: auto;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font-size: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 26px;
+  gap: 20px;
+}
+.office-header h1 {
+  font-size: 30px;
+  margin: 7px 0;
+}
+.office-header p {
+  color: #9b9eaa;
+  font-size: 14px;
+  margin: 0;
+}
+.office-eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #a9a4ce;
+  font-weight: 700;
+}
+.office-header nav {
+  display: flex;
+  gap: 10px;
+}
+.office-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #7871ae;
+  background: #aea5eb;
+  color: #181724;
+  border-radius: 8px;
+  padding: 10px 15px;
+  text-decoration: none;
+  font:
+    600 12px Inter,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.office-button:hover {
+  filter: brightness(1.1);
+}
+.office-button:focus-visible {
+  outline: 2px solid #dfd6ff;
+  outline-offset: 3px;
+}
+.office-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.office-button.secondary {
+  background: #25272e;
+  color: #e1dfef;
+  border-color: #3c3c47;
+}
+.office-summary {
+  display: flex;
+  gap: 24px;
+  border: 1px solid #30323a;
+  border-radius: 10px;
+  padding: 15px 20px;
+  background: #1b1e23;
+  margin-bottom: 32px;
+  color: #a7a9b3;
+  font-size: 12px;
+}
+.office-summary span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 100%;
+  background: #686a75;
+}
+.connection-dot.connected {
+  background: #67c9a0;
+}
+.office-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 30px;
+}
+.office-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 8px;
+}
+.office-section-heading h2 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 600;
+}
+.office-section-heading > span {
+  font-size: 11px;
+  color: #7f8290;
+}
+.room-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.office-room {
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  border: 1px solid #30343d;
+  background: #1e2229;
+  border-radius: 13px;
+  padding: 21px;
+}
+.office-room.all-hands {
+  grid-column: 1/-1;
+  min-height: 230px;
+  background: linear-gradient(110deg, #252434, #1e2229);
+}
+.office-room.live {
+  border-color: #4d8f7b;
+}
+.room-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.room-title h3 {
+  font-size: 15px;
+  margin: 0 0 5px;
+}
+.room-title > div > span {
+  font-size: 11px;
+  color: #8f94a0;
+}
+.room-icon {
+  font-size: 24px;
+  color: #b2a7e8;
+}
+.room-state {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: #2b2f38;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: #8e94a0;
+}
+.room-state.live {
+  background: #234237;
+  color: #7bdbb2;
+}
+.room-people {
+  flex: 1;
+  padding: 21px 0;
+  display: flex;
+  align-content: start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.room-people > p {
+  color: #8c929e;
+  font-size: 12px;
+  margin: auto 0;
+}
+.room-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.meeting-host {
+  font-size: 11px;
+  color: #aaa4c3;
+  margin: 0 0 12px;
+}
+.office-staff {
+  border-left: 1px solid #2b2e35;
+  padding-left: 25px;
+}
+.staff-person {
+  display: flex;
+  gap: 12px;
+  padding: 15px 0;
+  border-bottom: 1px solid #252932;
+}
+.staff-person h3 {
+  font-size: 13px;
+  margin: 1px 0 5px;
+}
+.staff-person p {
+  font-size: 10px;
+  color: #a29bbd;
+  margin: 0 0 5px;
+}
+.staff-person > div > span {
+  font-size: 10px;
+  color: #7f8793;
+}
+.office-avatar {
+  position: relative;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+.office-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.office-avatar.small {
+  margin-top: 0;
+  width: 28px;
+  height: 28px;
+}
+.office-avatar.small img {
+  border-radius: 9px;
+}
+.presence {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #1e2229;
+  border-radius: 100%;
+  right: -2px;
+  bottom: -2px;
+  background: #737986;
+}
+.presence.online {
+  background: #68caa0;
+}
+.presence.idle {
+  background: #e4bf64;
+}
+.presence.dnd {
+  background: #da7575;
+}
+.presence.unknown {
+  background: #444853;
+}
+.voice-person {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.voice-detail {
+  font-size: 9px;
+  color: #9ba0aa;
+}
+.presence-note {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #737b87;
+  margin-top: 22px;
+}
+.office-notice {
+  padding: 16px;
+  border: 1px solid #786054;
+  background: #372d28;
+  border-radius: 9px;
+  color: #edcfc0;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+.office-notice a {
+  display: inline-block;
+  margin-left: 14px;
+  color: #d6c6ff;
+}
+.office-modal::backdrop {
+  background: #0009;
+}
+.office-modal {
+  color: #e6e8ed;
+  width: calc(100% - 48px);
+  background: #22252c;
+  border: 1px solid #45404f;
+  max-width: 440px;
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 24px 100px #0008;
+}
+.office-modal h2 {
+  font-size: 20px;
+  margin: 0 0 16px;
+}
+.office-modal p {
+  color: #aab0ba;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.office-modal > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+@media (max-width: 1050px) {
+  .office-layout {
+    grid-template-columns: 1fr;
+  }
+  .office-staff {
+    border-left: 0;
+    border-top: 1px solid #30323a;
+    padding: 22px 0 0;
+  }
+  .staff-person {
+    display: inline-flex;
+    min-width: 230px;
+    padding-right: 24px;
+  }
+}
+@media (max-width: 650px) {
+  .discord-office {
+    padding: 20px 15px;
+  }
+  .office-header {
+    align-items: start;
+    flex-direction: column;
+  }
+  .office-summary {
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px;
+  }
+  .room-grid {
+    grid-template-columns: 1fr;
+  }
+  .office-room {
+    padding: 17px;
+  }
+  .room-title h3 {
+    font-size: 14px;
+  }
+  .room-title > div > span {
+    font-size: 10px;
+  }
+  .room-state {
+    font-size: 8px;
+  }
+  .office-section-heading > span {
+    font-size: 10px;
+  }
+}

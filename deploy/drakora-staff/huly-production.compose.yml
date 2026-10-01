@@ -1,0 +1,109 @@
+services:
+  nginx:
+    image: nginx:stable-alpine
+    volumes: !override
+      - ${HULY_NGINX_CONFIG:?Set HULY_NGINX_CONFIG}:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  redpanda:
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, rpk, cluster, info, -X, brokers=localhost:9092]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  kvs:
+    ports: !reset []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  minio:
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "mc alias set local http://localhost:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD >/dev/null && mc ready local"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  transactor:
+    environment:
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+      FRONT_URL: ${TODO_ORIGIN:?Set TODO_ORIGIN}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  collaborator:
+    environment:
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  account:
+    environment:
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+      DISABLE_SIGNUP: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  workspace:
+    environment:
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+      INIT_REPO_DIR: /no-init-scripts
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  front:
+    environment:
+      LOVE_ENDPOINT: ""
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+      DISABLE_SIGNUP: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  fulltext:
+    environment:
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283
+    command: [tunnel, --no-autoupdate, run, --token-file, /run/secrets/tunnel-token]
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${HULY_TUNNEL_TOKEN_PATH:?Set HULY_TUNNEL_TOKEN_PATH}:/run/secrets/tunnel-token:ro
+    networks:
+      - huly_net
+    depends_on:
+      - nginx
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
