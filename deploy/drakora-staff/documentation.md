@@ -29,7 +29,9 @@ Deny View Channel and Connect to everyone. Allow View Channel, Connect, and Spea
 
 The bot needs View Channel, Manage Channels, Manage Roles for channel permission overwrites, Connect, Speak, Send Messages, Embed Links, Read Message History, and permission to mention the Todo role. Limit its permissions to this category where practical. The bot must be able to edit the configured role's overwrites. The service validates channel types and category membership before mutations.
 
-The Office uses Guilds, Guild Members, Guild Presences, and Guild Voice States Gateway intents. The two privileged intents must be enabled in Discord's Developer Portal. Presence and voice data remain in memory. The browser refreshes its view every five seconds. Invisible members appear offline. The roster contains non-bot guild members with the Todo role; it does not publish the guild's full membership or activity history.
+The Office uses Guilds, Guild Members, Guild Presences, and Guild Voice States Gateway intents. The two privileged intents must be enabled in Discord's Developer Portal. The browser refreshes its view every five seconds. Invisible members appear offline. The roster includes all non-bot server members for authorized Todo users, with active staff highlighted separately. The service stores the latest observed online presence time in its encrypted database for ninety days. Last active starts when the service first observes a member online; Discord does not provide earlier history. Voice state remains in memory.
+
+Huly's Office keeps its original floor and room layout. Matching room tiles open Discord voice channels when joining is allowed. The Discord control in the native Huly header opens staff presence, the searchable server roster, room occupancy, and meeting actions. The dashboard no longer includes a separate Office navigation item. Minecraft identities and game activity are reserved for the later proxy unification.
 
 ## Meeting lifecycle
 

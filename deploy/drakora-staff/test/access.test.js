@@ -9,6 +9,7 @@ import { config, ranks, accessRoles } from "./fixture.js";
 const permissions = (roles) => evaluatePermissions(config, roles);
 import { openStore } from "../server/store.js";
 import { discordClient } from "../server/discord.js";
+import { memberActivity } from "../server/activity.js";
 
 test("access roles are independent and ranks never grant access", () => {
   for (const rank of ranks) {
@@ -98,4 +99,21 @@ test("Discord role removal is applied and API errors never grant access", async 
   });
   status = 404;
   assert.equal((await client.check("42", true)).permissions.todo, false);
+});
+test("last active records observed presence and survives a restart", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "drakora-activity-"));
+  const path = join(dir, "test.sqlite");
+  const key = randomBytes(32).toString("base64");
+  t.after(() => rmSync(dir, { recursive: true }));
+  const first = openStore(path, key);
+  const activity = memberActivity(first.store);
+  assert.equal(activity.lastActiveAt("42"), undefined);
+  const observed = Date.now();
+  activity.observe("42", "online", observed);
+  activity.observe("42", "offline", observed + 1000);
+  assert.equal(activity.lastActiveAt("42"), observed);
+  first.store.close();
+  const second = openStore(path, key);
+  assert.equal(memberActivity(second.store).lastActiveAt("42"), observed);
+  second.store.close();
 });

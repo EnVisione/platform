@@ -15,12 +15,15 @@
 <script lang="ts">
   import { AccountRole, getCurrentAccount, hasAccountRole, Ref, WithLookup } from '@hcengineering/core'
   import { Floor, Room } from '@hcengineering/love'
+  import { getMetadata } from '@hcengineering/platform'
   import { Component, DropdownLabels, Header, IconEdit, ModernButton } from '@hcengineering/ui'
   import { Viewlet, ViewletPreference } from '@hcengineering/view'
   import { ViewletSelector } from '@hcengineering/view-resources'
   import { createEventDispatcher } from 'svelte'
 
   import lovePlg from '../plugin'
+  import { discordOffice } from '../discordOffice'
+  import DiscordOfficePanel from './DiscordOfficePanel.svelte'
   import { floors, selectedFloor } from '../stores'
 
   export let rooms: Room[] = []
@@ -31,6 +34,9 @@
   let viewlet: WithLookup<Viewlet> | undefined
   let preference: ViewletPreference | undefined
   let loading = false
+  let showDiscord = false
+  const configuredOffice = getMetadata(lovePlg.metadata.OfficeUrl)
+  const hasDiscordOffice = configuredOffice?.startsWith('/') === true && !configuredOffice.startsWith('//')
 
   let selected = $floors.filter((fl) => fl._id === floor)[0]
   $: selected = $floors.filter((fl) => fl._id === floor)[0]
@@ -54,7 +60,7 @@
   }
 </script>
 
-<div class="hulyComponent">
+<div class="hulyComponent discord-office-floor">
   <Header adaptive={'disabled'}>
     <DropdownLabels
       {items}
@@ -69,6 +75,18 @@
       <ViewletSelector bind:viewlet bind:preference bind:loading viewletQuery={{ attachTo: lovePlg.class.Floor }} />
     </svelte:fragment>
     <svelte:fragment slot="actions">
+      {#if hasDiscordOffice}
+        <button
+          class="discord-toggle"
+          type="button"
+          aria-expanded={showDiscord}
+          on:click={() => (showDiscord = !showDiscord)}
+          >Discord{#if $discordOffice}
+            · {$discordOffice.members.filter(
+              (member) => member.staff && ['online', 'idle', 'dnd'].includes(member.status)
+            ).length} active{/if}</button
+        >
+      {/if}
       {#if editable}
         <ModernButton
           icon={IconEdit}
@@ -81,7 +99,37 @@
   </Header>
   <div class="hulyComponent-content__column content">
     {#if viewlet?.$lookup?.descriptor?.component}
-      <Component is={viewlet.$lookup.descriptor.component} props={{ floor, rooms }} on:open />
+      <Component
+        is={viewlet.$lookup.descriptor.component}
+        props={{ floor, rooms }}
+        on:open
+        on:discordroom={() => (showDiscord = true)}
+      />
     {/if}
   </div>
+  {#if hasDiscordOffice && showDiscord}
+    <DiscordOfficePanel on:close={() => (showDiscord = false)} />
+  {/if}
 </div>
+
+<style>
+  .discord-office-floor {
+    position: relative;
+  }
+  .discord-toggle {
+    border: 1px solid var(--theme-popup-divider, #454751);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--theme-content-color, #e8eaef);
+    padding: 0.4rem 0.65rem;
+    font: inherit;
+    cursor: pointer;
+  }
+  .discord-toggle:hover {
+    background: #ffffff12;
+  }
+  .discord-toggle:focus-visible {
+    outline: 2px solid #a69de5;
+    outline-offset: 2px;
+  }
+</style>

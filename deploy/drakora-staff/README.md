@@ -23,7 +23,7 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 7. Build the Huly frontend image below, set `HULY_OFFICE_IMAGE`, and recreate Huly's front and account services.
 8. Route both public origins to this service on port 3000 through the private network, or to its loopback port 8088. Keep Huly's nginx and account services inaccessible directly from the public internet.
 
-The staff root redirects unauthenticated users to `/login`. `/huly` and `/todo` start the Huly sign-in handoff. `/office` opens the Office directly. Huly's Office navigation embeds the same React view.
+The staff root redirects unauthenticated users to `/login`. `/huly` and `/todo` start the Huly sign-in handoff. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
 
 ## Huly frontend image
 
@@ -37,7 +37,15 @@ docker build -f deploy/drakora-staff/Dockerfile.huly-front \
   -t drakora-huly-front:office .
 ```
 
-Use the exact front image digest from the matching installation as the base. This image replaces browser assets while preserving the matching front server. Never mix platform tags and server versions. The optional `OFFICE_URL` browser configuration activates the embedded Office; deployments without it retain Huly's original Office.
+Use the exact front image digest from the matching installation as the base. This image replaces browser assets while preserving the matching front server. Never mix platform tags and server versions. The optional `OFFICE_URL` browser configuration activates Discord controls in Huly's original Office layout; deployments without it retain Huly's original Office.
+
+## GitHub integration
+
+Register a private GitHub App for this Huly installation, using the callback and webhook URLs from the [Huly self-hosted GitHub instructions](https://github.com/hcengineering/huly-selfhost#github-service). Install the app only on repositories intended for this workspace. Keep the app private key, client secret, and webhook secret outside this checkout.
+
+Add `huly-github.compose.yml` to the Huly Compose files. Set `HULY_GITHUB_IMAGE` to a pinned image matching the platform version, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, and `TODO_COLLABORATOR_URL` in the private Huly environment. Add the supplied `/_github` proxy location to the live Huly nginx configuration. The staff gateway accepts only GitHub's signed webhook endpoint without a Discord session; Huly verifies the webhook signature. Other GitHub integration calls remain behind Todo access.
+
+In Huly, open Integrations, connect your GitHub identity, install the app for the selected repositories, and map each repository to the intended Huly project. Mapping can create and synchronize issues and comments, so select the project deliberately. The GitHub service supports the same Huly 0.7.426 version as this source checkout.
 
 ## Development
 

@@ -195,6 +195,28 @@
   border-left: 1px solid #2b2e35;
   padding-left: 25px;
 }
+.member-heading {
+  margin-top: 28px;
+}
+.member-search-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #a7a9b3;
+  font-size: 11px;
+}
+.member-search {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #3c3c47;
+  border-radius: 8px;
+  background: #25272e;
+  color: #e6e8ed;
+  padding: 9px;
+}
+.member-search:focus-visible {
+  outline: 2px solid #dfd6ff;
+  outline-offset: 2px;
+}
 .staff-person {
   display: flex;
   gap: 12px;

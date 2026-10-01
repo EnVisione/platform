@@ -1,0 +1,32 @@
+services:
+  github:
+    image: ${HULY_GITHUB_IMAGE:?Set HULY_GITHUB_IMAGE}
+    restart: unless-stopped
+    environment:
+      PORT: "3500"
+      STORAGE_CONFIG: "minio|minio?accessKey=${MINIO_ROOT_USER}&secretKey=${MINIO_ROOT_PASSWORD}"
+      SERVER_SECRET: ${SECRET:?Set SECRET}
+      ACCOUNTS_URL: http://account:3000
+      STATS_URL: http://stats:4900
+      APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID}
+      CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID}
+      CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET}
+      PRIVATE_KEY: ${GITHUB_PRIVATE_KEY:?Set GITHUB_PRIVATE_KEY}
+      WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?Set GITHUB_WEBHOOK_SECRET}
+      COLLABORATOR_URL: ${TODO_COLLABORATOR_URL:?Set TODO_COLLABORATOR_URL}
+      FRONT_URL: ${TODO_ORIGIN:?Set TODO_ORIGIN}
+      BOT_NAME: ${GITHUB_APP_SLUG:?Set GITHUB_APP_SLUG}[bot]
+    networks:
+      - huly_net
+    depends_on:
+      - account
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  front:
+    environment:
+      GITHUB_URL: ${TODO_ORIGIN:?Set TODO_ORIGIN}/_github
+      GITHUB_APP: ${GITHUB_APP_SLUG:?Set GITHUB_APP_SLUG}
+      GITHUB_CLIENTID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID}

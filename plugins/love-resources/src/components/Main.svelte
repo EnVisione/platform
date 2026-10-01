@@ -14,15 +14,17 @@
 -->
 <script lang="ts">
   import { deviceOptionsStore as deviceInfo } from '@hcengineering/ui'
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { getMetadata } from '@hcengineering/platform'
   import love from '../plugin'
+  import { connectDiscordOffice } from '../discordOffice'
   import Hall from './Hall.svelte'
 
   const localNav: boolean = $deviceInfo.navigator.visible
   const configuredOffice = getMetadata(love.metadata.OfficeUrl)
   const officeUrl =
     configuredOffice?.startsWith('/') === true && !configuredOffice.startsWith('//') ? configuredOffice : undefined
+  onMount(() => (officeUrl !== undefined ? connectDiscordOffice(officeUrl) : undefined))
   const savedNav = localStorage.getItem('love-visibleNav')
   if (savedNav !== undefined) $deviceInfo.navigator.visible = savedNav === 'true'
   $: localStorage.setItem('love-visibleNav', JSON.stringify($deviceInfo.navigator.visible))
@@ -33,17 +35,5 @@
 </script>
 
 <div class="hulyPanels-container">
-  {#if officeUrl !== undefined}
-    <iframe title="Discord staff office" src={officeUrl} />
-  {:else}
-    <Hall />
-  {/if}
+  <Hall />
 </div>
-
-<style>
-  iframe {
-    width: 100%;
-    height: 100%;
-    border: 0;
-  }
-</style>

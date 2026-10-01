@@ -27,11 +27,13 @@
   import PersonActionPopup from './PersonActionPopup.svelte'
   import { IntlString } from '@hcengineering/platform'
   import { lkSessionConnected } from '../liveKitClient'
+  import { discordVoiceUrl, type DiscordRoom } from '../discordOffice'
 
   export let room: Room
   export let info: ParticipantInfo[]
   export let preview: boolean = false
   export let hovered: boolean = false
+  export let discordRoom: DiscordRoom | undefined = undefined
 
   const dispatch = createEventDispatcher()
 
@@ -70,6 +72,12 @@
   }
 
   async function openRoom (x: number, y: number): Promise<void> {
+    if (discordRoom !== undefined && !preview) {
+      const link = discordRoom.joinable ? discordVoiceUrl(discordRoom) : undefined
+      if (link !== undefined) window.open(link, '_blank', 'noopener,noreferrer')
+      else dispatch('discordroom', { id: discordRoom.id })
+      return
+    }
     const client = getClient()
     const hierarchy = client.getHierarchy()
     if ($lkSessionConnected && $currentRoom?._id === room._id) {
@@ -94,6 +102,10 @@
   async function placeClickHandler (e: MouseEvent, x: number, y: number, person: Person | undefined): Promise<void> {
     e.stopPropagation()
     e.preventDefault()
+    if (discordRoom !== undefined && !preview) {
+      await openRoom(x, y)
+      return
+    }
     if (person !== undefined) {
       if ($myInfo === undefined || (person._id === me && $myInfo?.room === room._id)) return
       showPopup(PersonActionPopup, { room, person: person._id }, eventToHTMLElement(e))
@@ -203,6 +215,11 @@
       <span class="overflow-label text-md flex-grow">
         <Label label={roomLabel} />
       </span>
+      {#if discordRoom}
+        <span class="discord-room-state" class:live={discordRoom.status === 'live'}>
+          {discordRoom.memberIds.length} in voice · {discordRoom.status === 'closed' ? 'locked' : discordRoom.status}
+        </span>
+      {/if}
       <!-- {#if !isOffice(room)}
         <RoomLanguage {room} />
       {/if} -->
@@ -219,3 +236,15 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .discord-room-state {
+    align-self: center;
+    color: var(--theme-caption-color, #9da1aa);
+    font-size: 0.65rem;
+    white-space: nowrap;
+  }
+  .discord-room-state.live {
+    color: #66c9a2;
+  }
+</style>

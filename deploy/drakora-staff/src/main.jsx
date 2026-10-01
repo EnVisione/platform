@@ -172,11 +172,6 @@ function App() {
             <span>◈</span>Overview
           </a>
           {user.todo && (
-            <a className="nav-item" href="/office">
-              <span>◉</span>Office
-            </a>
-          )}
-          {user.todo && (
             <a className="nav-item" href="/huly">
               <span>✓</span>Huly<span className="arrow">↗</span>
             </a>

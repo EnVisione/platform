@@ -20,6 +20,7 @@
   import { calculateFloorSize } from '../utils'
   import FloorGrid from './FloorGrid.svelte'
   import RoomPreview from './RoomPreview.svelte'
+  import { discordOffice } from '../discordOffice'
 
   export let rooms: Room[] = []
 
@@ -29,13 +30,22 @@
     return info.filter((p) => p.room === room)
   }
 
+  const normalize = (name: string): string => name.trim().replace(/\s+/g, ' ').toLowerCase()
+  $: discordRooms = new Map(($discordOffice?.rooms ?? []).map((room) => [normalize(room.name), room]))
+
   $: rows = calculateFloorSize(rooms) - 1
 </script>
 
 <Scroller padding="1rem" bottomPadding="1rem" align={'center'} horizontal>
   <FloorGrid bind:floorContainer {rows}>
     {#each rooms as room}
-      <RoomPreview {room} info={getInfo(room._id, $infos)} on:open />
+      <RoomPreview
+        {room}
+        info={getInfo(room._id, $infos)}
+        discordRoom={discordRooms.get(normalize(room.name))}
+        on:open
+        on:discordroom
+      />
     {/each}
   </FloorGrid>
 </Scroller>

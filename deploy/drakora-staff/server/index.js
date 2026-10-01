@@ -238,6 +238,15 @@ const proxy = createProxyMiddleware({
   },
 });
 
+app.post("/_github/api/webhook", (req, res, next) => {
+  if (
+    req.headers.host !== todoHost ||
+    !/^sha256=[0-9a-f]{64}$/.test(req.headers["x-hub-signature-256"] ?? "")
+  )
+    return res.status(403).end();
+  proxy(req, res, next);
+});
+
 app.use(async (req, res, next) => {
   if (req.headers.host !== todoHost) return next();
   if (req.path === "/__staff/start") {

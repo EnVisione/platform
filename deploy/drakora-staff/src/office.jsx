@@ -72,6 +72,7 @@ export function Office() {
   const [actionError, setActionError] = useState("");
   const [pending, setPending] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [search, setSearch] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     let timer;
@@ -120,9 +121,22 @@ export function Office() {
     }
   }
   const active =
-    data?.members.filter((member) =>
-      ["online", "idle", "dnd"].includes(member.status),
+    data?.members.filter(
+      (member) =>
+        member.staff && ["online", "idle", "dnd"].includes(member.status),
     ) ?? [];
+  const visibleMembers =
+    data?.members
+      .filter((member) =>
+        member.name.toLowerCase().includes(search.toLowerCase()),
+      )
+      .sort(
+        (a, b) =>
+          Number(["online", "idle", "dnd"].includes(b.status)) -
+            Number(["online", "idle", "dnd"].includes(a.status)) ||
+          a.name.localeCompare(b.name),
+      )
+      .slice(0, 50) ?? [];
   return (
     <main className="discord-office">
       <header className="office-header">
@@ -300,10 +314,11 @@ export function Office() {
             </section>
             <aside className="office-staff" aria-labelledby="staff-title">
               <div className="office-section-heading">
-                <h2 id="staff-title">The team</h2>
-                <span>{data.members.length} staff</span>
+                <h2 id="staff-title">Active staff</h2>
+                <span>{active.length} online</span>
               </div>
-              {data.members.map((member) => (
+              {active.length === 0 && <p>No staff currently appear online.</p>}
+              {active.map((member) => (
                 <article className="staff-person" key={member.id}>
                   <Avatar member={member} />
                   <div>
@@ -313,8 +328,42 @@ export function Office() {
                   </div>
                 </article>
               ))}
+              <div className="office-section-heading member-heading">
+                <h2>Server members</h2>
+                <span>{data.members.length} members</span>
+              </div>
+              <label className="member-search-label" htmlFor="member-search">
+                Search members
+              </label>
+              <input
+                id="member-search"
+                className="member-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+              {visibleMembers.map((member) => (
+                <article className="staff-person" key={member.id}>
+                  <Avatar member={member} />
+                  <div>
+                    <h3>{member.name}</h3>
+                    <p>{member.ranks.join(" · ") || "Member"}</p>
+                    <span>
+                      {["online", "idle", "dnd"].includes(member.status)
+                        ? `Active now · ${statuses[member.status]}`
+                        : member.lastActiveAt
+                          ? `Last active ${new Date(member.lastActiveAt).toLocaleString()}`
+                          : "Not yet observed"}
+                    </span>
+                  </div>
+                </article>
+              ))}
+              {data.members.length > 50 && !search && (
+                <p>Search to find more members.</p>
+              )}
               <p className="presence-note">
-                Discord presence updates live. Invisible members appear offline.
+                Last active is recorded from observed Discord presence. Earlier
+                activity is unavailable.
               </p>
             </aside>
           </div>

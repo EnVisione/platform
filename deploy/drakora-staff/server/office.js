@@ -8,8 +8,10 @@ import { meetingService } from "./meetings.js";
 import { AuthError } from "./discord.js";
 import { canHost, permissions } from "./roles.js";
 import { discordAvatar } from "./avatar.js";
+import { memberActivity } from "./activity.js";
 
 export function discordOffice(config, store) {
+  const activity = memberActivity(store);
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -95,19 +97,25 @@ export function discordOffice(config, store) {
     },
   };
   const meetings = meetingService(config, store, transport);
-  const profile = (member) => ({
-    id: member.id,
-    name: member.displayName,
-    avatar: discordAvatar(member.user, config.guildId, member.avatar),
-    ranks: permissions(config, [...member.roles.cache.keys()]).hulyRanks,
-    status:
-      ready && guild?.available
-        ? (member.presence?.status ?? "offline")
-        : "unknown",
-    voiceRoomId: ready && guild?.available ? member.voice.channelId : null,
-    muted: ready && guild?.available && Boolean(member.voice.mute),
-    deafened: ready && guild?.available && Boolean(member.voice.deaf),
-  });
+  const profile = (member) => {
+    const assigned = permissions(config, [...member.roles.cache.keys()]);
+    return {
+      id: member.id,
+      name: member.displayName,
+      avatar: discordAvatar(member.user, config.guildId, member.avatar),
+      ranks: assigned.hulyRanks,
+      staff:
+        assigned.dashboard || assigned.todo || assigned.hulyRanks.length > 0,
+      status:
+        ready && guild?.available
+          ? (member.presence?.status ?? "offline")
+          : "unknown",
+      lastActiveAt: activity.lastActiveAt(member.id),
+      voiceRoomId: ready && guild?.available ? member.voice.channelId : null,
+      muted: ready && guild?.available && Boolean(member.voice.mute),
+      deafened: ready && guild?.available && Boolean(member.voice.deaf),
+    };
+  };
   async function connect() {
     if (connecting || stopped || !client.isReady()) return;
     connecting = true;
@@ -115,6 +123,9 @@ export function discordOffice(config, store) {
     try {
       guild = await client.guilds.fetch(config.guildId);
       await guild.members.fetch({ withPresences: true });
+      for (const member of guild.members.cache.values())
+        if (!member.user.bot)
+          activity.observe(member.id, member.presence?.status);
       ready = true;
       await meetings.reconcile();
       attempts = 0;
@@ -142,6 +153,10 @@ export function discordOffice(config, store) {
     attempts = 0;
     void connect();
   });
+  client.on("presenceUpdate", (_before, after) => {
+    if (after.guild.id === config.guildId)
+      activity.observe(after.userId, after.status);
+  });
   client.on("error", () => {
     ready = false;
     console.error("Discord office connection failed.");
@@ -152,12 +167,7 @@ export function discordOffice(config, store) {
   function snapshot(user) {
     const members = guild
       ? [...guild.members.cache.values()]
-          .filter(
-            (member) =>
-              !member.user.bot &&
-              !member.pending &&
-              member.roles.cache.has(config.accessRoles.todo),
-          )
+          .filter((member) => !member.user.bot)
           .map(profile)
       : [];
     const available = ready && guild?.available;
