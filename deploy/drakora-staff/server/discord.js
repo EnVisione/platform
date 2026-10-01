@@ -45,9 +45,11 @@ export function discordClient(config, store, fetcher = fetch) {
     const profile = await api("/users/@me", tokens.access_token);
     if (!profile?.verified || !profile.email)
       throw new AuthError("verified_email_required");
+    const previous = store.get("user", profile.id);
     const user = {
-      ...store.get("user", profile.id),
+      ...previous,
       id: profile.id,
+      returning: Boolean(previous),
       email: profile.email.toLowerCase(),
       name: profile.global_name || profile.username,
       username: profile.username,

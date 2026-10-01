@@ -176,6 +176,69 @@ button:disabled {
   text-align: center;
 }
 
+.minecraft-form {
+  margin-top: 24px;
+}
+
+.minecraft-form > label:not(.confirm-name) {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.minecraft-form input:not([type="checkbox"]),
+.change-name-row input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #59606c;
+  border-radius: 6px;
+  background: #1e1f22;
+  color: #f2f3f5;
+  font: inherit;
+}
+
+.minecraft-form .registration-warning {
+  margin: 16px 0;
+  color: #f1d4bd;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.confirm-name {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  color: #dbdee1;
+  font-size: 13px;
+}
+
+.confirm-name input {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: #5865f2;
+}
+
+.submit-name {
+  width: 100%;
+  margin-top: 20px;
+  background: #5865f2;
+  color: #fff;
+  cursor: pointer;
+}
+
+.registration-signout {
+  display: block;
+  margin: 16px auto 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #b5bac1;
+  cursor: pointer;
+}
+
 .text-link {
   display: block;
   margin-top: 20px;
@@ -407,7 +470,7 @@ button:disabled {
   font-weight: 700;
 }
 
-.mobile-page-link {
+.mobile-nav {
   display: none;
 }
 
@@ -620,6 +683,125 @@ button:disabled {
   color: #ffb4ad;
 }
 
+.minecraft-settings {
+  margin-top: 24px;
+}
+
+.linked-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 24px;
+}
+
+.linked-name strong {
+  font-size: 20px;
+}
+
+.linked-name span,
+.registered-minecraft > span {
+  color: #f1d4bd;
+  font-size: 12px;
+}
+
+.change-name-row {
+  display: flex;
+  gap: 10px;
+}
+
+.change-name-row input {
+  max-width: 240px;
+}
+
+.change-name-row button {
+  padding: 0 16px;
+  flex: none;
+}
+
+.account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.registered-account {
+  display: flex;
+  align-items: start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #42444a;
+  border-radius: 9px;
+  background: #2b2d31;
+}
+
+.registered-account > img,
+.registered-account > .account-avatar {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.registered-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.registered-details strong,
+.registered-details span,
+.registered-minecraft strong,
+.registered-minecraft span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.registered-details span {
+  margin-top: 3px;
+  color: #b5bac1;
+  font-size: 12px;
+}
+
+.registered-minecraft {
+  min-width: 180px;
+  text-align: right;
+}
+
+.registered-minecraft strong {
+  font-size: 15px;
+}
+
+.change-request {
+  margin-top: 10px;
+}
+
+.change-request span {
+  color: #dbdee1;
+  font-size: 12px;
+}
+
+.change-request div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.change-request button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: #404249;
+  color: #f2f3f5;
+  cursor: pointer;
+}
+
+.activity-note {
+  margin-top: 18px;
+  color: #949ba4;
+  font-size: 12px;
+}
+
 .roles-card {
   margin-top: 24px;
   padding: 20px;
@@ -674,6 +856,23 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+  .registered-account {
+    flex-wrap: wrap;
+  }
+
+  .registered-minecraft {
+    width: 100%;
+    padding-left: 56px;
+    text-align: left;
+  }
+
+  .change-request div {
+    justify-content: flex-start;
+  }
+
+  .change-name-row {
+    flex-wrap: wrap;
+  }
   .workspace {
     grid-template-columns: 56px minmax(0, 1fr);
   }
@@ -693,11 +892,15 @@ button:disabled {
   }
 
   .topbar {
-    padding: 0 18px;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 58px;
+    padding: 8px 18px;
   }
 
-  .mobile-page-link {
-    display: inline-flex;
+  .mobile-nav {
+    display: flex;
+    gap: 12px;
     margin-left: auto;
     color: var(--accent);
     font-size: 13px;

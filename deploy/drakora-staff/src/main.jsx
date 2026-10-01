@@ -5,6 +5,13 @@ import { Office } from "./office.jsx";
 import logo from "./assets/drakora-logo.png";
 
 const messages = {
+  invalid_minecraft_name:
+    "Use your Java Edition username: 3–16 letters, numbers, or underscores.",
+  minecraft_name_taken:
+    "This Minecraft name is already linked or awaiting Founder approval.",
+  minecraft_name_locked:
+    "Your Minecraft name is already linked. Request a change in Settings.",
+  minecraft_name_unchanged: "Enter a different Minecraft name.",
   discord_cancelled:
     "Discord sign-in was cancelled. You can try again when you are ready.",
   verified_email_required:
@@ -27,6 +34,16 @@ const messages = {
   huly_account_mismatch:
     "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
 };
+function safeTarget(value) {
+  if (["/", "/huly", "/settings", "/accounts"].includes(value)) return value;
+  if (/^\/interaction\/[A-Za-z0-9_-]+$/.test(value || "")) return value;
+  if (/^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value || ""))
+    return value;
+  return "/";
+}
+function timeLabel(value) {
+  return value ? new Date(value).toLocaleString() : "Not observed yet";
+}
 const defaultAccent = "#5865F2";
 function normalizeHex(value) {
   if (typeof value !== "string") return null;
@@ -160,6 +177,284 @@ function AccentSettings({ userId, accent, onChange }) {
     </section>
   );
 }
+function MinecraftRegistration({ user, csrf, next, onLogout }) {
+  const [name, setName] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const response = await fetch("/api/minecraft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ name }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "service_unavailable");
+      location.assign(safeTarget(next));
+    } catch (failure) {
+      setError(messages[failure.message] || messages.service_unavailable);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="login-layout">
+      <div className="login-shell">
+        <Brand />
+        <section className="login-card" aria-labelledby="minecraft-title">
+          <span className="login-label">DRAKORA STAFF</span>
+          <h1 id="minecraft-title">
+            {user.returning
+              ? `Welcome back, ${user.name}`
+              : `Welcome, ${user.name}`}
+          </h1>
+          <p>Please enter your Minecraft name to continue.</p>
+          <form className="minecraft-form" onSubmit={submit}>
+            <label htmlFor="minecraft-name">
+              Minecraft Java Edition username
+            </label>
+            <input
+              id="minecraft-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              minLength={3}
+              maxLength={16}
+              pattern="[A-Za-z0-9_]{3,16}"
+              autoComplete="off"
+              spellCheck="false"
+              required
+            />
+            <p className="registration-warning">
+              Please be extra careful. You will need to verify this name in-game
+              later. Once submitted, it can only be changed with Founder
+              authorization. For now, you can continue while verification is
+              pending.
+            </p>
+            <label className="confirm-name">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(event) => setConfirmed(event.target.checked)}
+                required
+              />
+              I checked my Minecraft name and understand the change policy.
+            </label>
+            {error && (
+              <p className="notice" role="alert">
+                {error}
+              </p>
+            )}
+            <button
+              className="button submit-name"
+              disabled={busy || !confirmed}
+            >
+              {busy ? "Saving…" : "Save name and continue"}
+            </button>
+          </form>
+          <button
+            className="registration-signout"
+            type="button"
+            onClick={onLogout}
+          >
+            Sign out
+          </button>
+        </section>
+      </div>
+    </main>
+  );
+}
+function MinecraftSettings({ minecraft, csrf }) {
+  const [link, setLink] = useState(minecraft);
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState(false);
+  async function request(event) {
+    event.preventDefault();
+    const response = await fetch("/api/minecraft/change", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: JSON.stringify({ name }),
+    }).catch(() => null);
+    const data = response
+      ? await response.json()
+      : { error: "service_unavailable" };
+    if (!response?.ok) {
+      setError(true);
+      setMessage(messages[data.error] || messages.service_unavailable);
+      return;
+    }
+    setLink(data.minecraft);
+    setName("");
+    setError(false);
+    setMessage(
+      "Change request sent to a Founder. Your current link stays active.",
+    );
+  }
+  return (
+    <section
+      className="settings-card minecraft-settings"
+      aria-labelledby="minecraft-settings-title"
+    >
+      <div className="settings-heading">
+        <h2 id="minecraft-settings-title">Minecraft account</h2>
+        <p>
+          Your linked Minecraft name is locked until a Founder approves a
+          change.
+        </p>
+      </div>
+      <div className="linked-name">
+        <strong>{link.name}</strong>
+        <span>Awaiting in-game verification</span>
+      </div>
+      {link.changeRequest && (
+        <p className="settings-help">
+          Requested name: <strong>{link.changeRequest.name}</strong> · Awaiting
+          Founder approval
+        </p>
+      )}
+      <form onSubmit={request}>
+        <label htmlFor="new-minecraft-name">Request a different name</label>
+        <div className="change-name-row">
+          <input
+            id="new-minecraft-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            minLength={3}
+            maxLength={16}
+            pattern="[A-Za-z0-9_]{3,16}"
+            required
+          />
+          <button className="button save-accent">Request change</button>
+        </div>
+        {message && (
+          <p
+            className={error ? "settings-message error" : "settings-message"}
+            role="status"
+          >
+            {message}
+          </p>
+        )}
+      </form>
+    </section>
+  );
+}
+function Accounts({ csrf, founder }) {
+  const [accounts, setAccounts] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    fetch("/api/accounts")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error();
+        setAccounts(data.accounts);
+      })
+      .catch(() => setError("Could not load registered staff accounts."));
+  }, []);
+  async function decide(id, decision) {
+    setBusy(id);
+    setError("");
+    try {
+      const response = await fetch(`/api/accounts/${id}/minecraft-change`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ decision }),
+      });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      setAccounts((current) =>
+        current.map((account) =>
+          account.id === id
+            ? { ...account, minecraft: data.minecraft }
+            : account,
+        ),
+      );
+    } catch {
+      setError("Could not save the Founder decision. Please try again.");
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <section className="accounts-panel" aria-labelledby="accounts-title">
+      <div className="welcome">
+        <h2 id="accounts-title">Registered staff</h2>
+        <p>
+          Minecraft links and observed Discord activity in the staff server.
+        </p>
+      </div>
+      {error && (
+        <p className="notice" role="alert">
+          {error}
+        </p>
+      )}
+      {!accounts ? (
+        <p>Loading accounts…</p>
+      ) : accounts.length === 0 ? (
+        <p>No Minecraft names registered yet.</p>
+      ) : (
+        <div className="account-list">
+          {accounts.map((account) => (
+            <article className="registered-account" key={account.id}>
+              {account.avatar ? (
+                <img src={account.avatar} alt="" />
+              ) : (
+                <span className="account-avatar fallback">
+                  {account.name.slice(0, 1)}
+                </span>
+              )}
+              <div className="registered-details">
+                <strong>{account.name}</strong>
+                <span>Discord ID {account.id}</span>
+                <span>
+                  Last active on Discord: {timeLabel(account.lastActiveAt)} ·{" "}
+                  {account.discordStatus}
+                </span>
+              </div>
+              <div className="registered-minecraft">
+                <strong>{account.minecraft.name}</strong>
+                <span>Awaiting in-game verification</span>
+                {account.minecraft.changeRequest && (
+                  <div className="change-request">
+                    <span>
+                      Requested: {account.minecraft.changeRequest.name}
+                    </span>
+                    {founder && (
+                      <div>
+                        <button
+                          disabled={busy === account.id}
+                          onClick={() => decide(account.id, "approve")}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          disabled={busy === account.id}
+                          onClick={() => decide(account.id, "reject")}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      <p className="activity-note">
+        Discord activity is shown only when observed by the staff bot. Invisible
+        members may appear offline. Minecraft server activity will be added
+        after server integration.
+      </p>
+    </section>
+  );
+}
 function Brand({ href = "/" }) {
   return (
     <a className="brand" href={href}>
@@ -190,6 +485,7 @@ function App() {
   const params = new URLSearchParams(location.search);
   const loginPage = location.pathname === "/login";
   const settingsPage = location.pathname === "/settings";
+  const accountsPage = location.pathname === "/accounts";
   useEffect(() => {
     let active = true;
     fetch("/api/me")
@@ -240,6 +536,15 @@ function App() {
         <img src={logo} alt="" />
         <p>Opening Drakora Staff…</p>
       </main>
+    );
+  if (state.user?.dashboard && !state.user.minecraft)
+    return (
+      <MinecraftRegistration
+        user={state.user}
+        csrf={state.csrf}
+        next={params.get("next") || (loginPage ? "/" : location.pathname)}
+        onLogout={logout}
+      />
     );
   if (loginPage || !state.user?.dashboard)
     return (
@@ -303,15 +608,24 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage ? "" : " active"}`}
             href="/"
-            aria-current={settingsPage ? undefined : "page"}
+            aria-current={settingsPage || accountsPage ? undefined : "page"}
           >
             <span aria-hidden="true">⌂</span>Overview
           </a>
           {user.todo && (
             <a className="nav-item" href="/huly">
               <span aria-hidden="true">✓</span>Huly
+            </a>
+          )}
+          {user.manager && (
+            <a
+              className={`nav-item${accountsPage ? " active" : ""}`}
+              href="/accounts"
+              aria-current={accountsPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">♙</span>Accounts
             </a>
           )}
           <a
@@ -338,13 +652,14 @@ function App() {
       </aside>
       <div className="main-area">
         <header className="topbar">
-          <h1>{settingsPage ? "Settings" : "Overview"}</h1>
-          <a
-            className="mobile-page-link"
-            href={settingsPage ? "/" : "/settings"}
-          >
-            {settingsPage ? "Overview" : "Settings"}
-          </a>
+          <h1>
+            {settingsPage ? "Settings" : accountsPage ? "Accounts" : "Overview"}
+          </h1>
+          <nav className="mobile-nav" aria-label="Mobile navigation">
+            {(settingsPage || accountsPage) && <a href="/">Overview</a>}
+            {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
+            {!settingsPage && <a href="/settings">Settings</a>}
+          </nav>
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>
@@ -356,11 +671,16 @@ function App() {
             </p>
           )}
           {settingsPage ? (
-            <AccentSettings
-              userId={user.id}
-              accent={accent}
-              onChange={setAccent}
-            />
+            <>
+              <AccentSettings
+                userId={user.id}
+                accent={accent}
+                onChange={setAccent}
+              />
+              <MinecraftSettings minecraft={user.minecraft} csrf={state.csrf} />
+            </>
+          ) : accountsPage ? (
+            <Accounts csrf={state.csrf} founder={user.founder} />
           ) : (
             <>
               <div className="welcome">

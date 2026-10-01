@@ -14,6 +14,9 @@ import { isPageRequest } from "./navigation.js";
 import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
+import { minecraftRegistry } from "./minecraft.js";
+import { managementAccess } from "./roles.js";
+import { memberActivity } from "./activity.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -27,6 +30,8 @@ const { store, sessions, OidcAdapter } = openStore(
   config.databaseKey,
 );
 const discord = discordClient(config, store);
+const minecraft = minecraftRegistry(store);
+const activity = memberActivity(store);
 const huly = hulyClient(config, store);
 const office = config.office ? discordOffice(config, store) : undefined;
 const todoSync = config.todoForums
@@ -115,7 +120,7 @@ app.use((req, res, next) => {
 });
 
 function safeNext(value) {
-  if (["/", "/huly", "/settings"].includes(value)) return value;
+  if (["/", "/huly", "/settings", "/accounts"].includes(value)) return value;
   if (
     typeof value === "string" &&
     /^\/interaction\/[A-Za-z0-9_-]+$/.test(value)
@@ -129,7 +134,7 @@ function safeNext(value) {
   return "/";
 }
 
-async function signedIn(req) {
+async function signedIn(req, { allowUnlinked = false } = {}) {
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
   if (req.headers.host === todoHost) {
@@ -144,7 +149,10 @@ async function signedIn(req) {
   let user = await discord.check(req.session.userId);
   if (!user.permissions.dashboard)
     throw new AuthError("dashboard_role_required");
-  if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
+  const link = minecraft.get(user.id);
+  if (!allowUnlinked && !link)
+    throw new AuthError("minecraft_name_required", 428);
+  if (link && user.syncedAt !== user.checkedAt) user = await huly.sync(user);
   return user;
 }
 
@@ -153,8 +161,19 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     avatar: user.avatar,
+    returning: user.returning,
+    minecraft: minecraft.get(user.id) ?? null,
+    ...managementAccess(config, user),
     ...user.permissions,
   };
+}
+
+function requireMutation(req) {
+  if (
+    req.headers.origin !== config.staffOrigin ||
+    !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
+  )
+    throw new AuthError("invalid_request");
 }
 
 function accountFromToken(token) {
@@ -288,6 +307,8 @@ app.use(async (req, res, next) => {
     const user = await discord.check(handoff.userId, true);
     if (!user.permissions.dashboard)
       throw new AuthError("dashboard_role_required");
+    if (!minecraft.get(user.id))
+      throw new AuthError("minecraft_name_required", 428);
     if (!user.permissions.todo) throw new AuthError("todo_role_required");
     await regenerate(req);
     Object.assign(req.session, {
@@ -307,6 +328,8 @@ app.use(async (req, res, next) => {
   } catch (error) {
     if (error.status === 401 && isPageRequest(req))
       return res.redirect("/__staff/start");
+    if (error.code === "minecraft_name_required" && isPageRequest(req))
+      return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     throw error;
   }
   if (!user.permissions.todo) throw new AuthError("todo_role_required");
@@ -399,19 +422,81 @@ app.get("/auth/discord/callback", async (req, res) => {
     csrf: newToken(),
   });
   await save(req);
-  res.redirect(next);
+  res.redirect(
+    minecraft.get(user.id)
+      ? next
+      : `/minecraft?next=${encodeURIComponent(next)}`,
+  );
 });
 
 app.get("/api/me", async (req, res) => {
-  const user = await signedIn(req);
+  const user = await signedIn(req, { allowUnlinked: true });
   res.json({ user: publicUser(user), csrf: req.session.csrf });
 });
+app.post(
+  "/api/minecraft",
+  rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
+  express.json({ limit: "1kb" }),
+  async (req, res) => {
+    const user = await signedIn(req, { allowUnlinked: true });
+    requireMutation(req);
+    const link = minecraft.register(user.id, req.body?.name);
+    res.status(201).json({ minecraft: link });
+  },
+);
+app.post(
+  "/api/minecraft/change",
+  rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
+  express.json({ limit: "1kb" }),
+  async (req, res) => {
+    const user = await signedIn(req);
+    requireMutation(req);
+    res.json({ minecraft: minecraft.requestChange(user.id, req.body?.name) });
+  },
+);
+app.get("/api/accounts", async (req, res) => {
+  const user = await signedIn(req);
+  if (!managementAccess(config, user).manager)
+    throw new AuthError("management_role_required");
+  const live = new Map(
+    (office?.snapshot(user).members ?? []).map((member) => [member.id, member]),
+  );
+  const accounts = minecraft.entries().map(([id, link]) => {
+    const stored = store.get("user", id);
+    const member = live.get(id);
+    return {
+      id,
+      name: member?.name ?? stored?.name ?? id,
+      avatar: member?.avatar ?? stored?.avatar ?? null,
+      minecraft: link,
+      discordStatus: member?.status ?? "unknown",
+      lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
+    };
+  });
+  accounts.sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ accounts });
+});
+app.post(
+  "/api/accounts/:id/minecraft-change",
+  rateLimit({ windowMs: 60000, limit: 12, legacyHeaders: false }),
+  express.json({ limit: "1kb" }),
+  async (req, res) => {
+    const user = await signedIn(req);
+    requireMutation(req);
+    const current = await discord.check(user.id, true);
+    if (!managementAccess(config, current).founder)
+      throw new AuthError("founder_role_required");
+    if (!["approve", "reject"].includes(req.body?.decision))
+      throw new AuthError("invalid_request", 400);
+    const target = store.get("user", req.params.id);
+    if (!target) throw new AuthError("account_not_found", 404);
+    res.json({
+      minecraft: minecraft.decide(target.id, req.body.decision === "approve"),
+    });
+  },
+);
 app.post("/api/logout", express.json({ limit: "1kb" }), async (req, res) => {
-  if (
-    req.headers.origin !== config.staffOrigin ||
-    !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
-  )
-    throw new AuthError("invalid_request");
+  requireMutation(req);
   const id = req.sessionID;
   await destroy(req);
   for (const socket of sockets)
@@ -419,9 +504,18 @@ app.post("/api/logout", express.json({ limit: "1kb" }), async (req, res) => {
   res.clearCookie("__Host-drakora_staff", cookieOptions).json({ ok: true });
 });
 
-app.get(["/huly", "/todo"], (_req, res) =>
-  res.redirect(`${config.todoOrigin}/__staff/start`),
-);
+app.get(["/huly", "/todo"], async (req, res) => {
+  try {
+    const user = await signedIn(req);
+    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    res.redirect(`${config.todoOrigin}/__staff/start`);
+  } catch (error) {
+    if (error.status === 401) return res.redirect("/login?next=/huly");
+    if (error.code === "minecraft_name_required")
+      return res.redirect("/minecraft?next=/huly");
+    throw error;
+  }
+});
 app.get("/huly/authorize", async (req, res) => {
   if (typeof req.query.challenge !== "string")
     throw new AuthError("invalid_handoff");
@@ -433,6 +527,8 @@ app.get("/huly/authorize", async (req, res) => {
       return res.redirect(
         `/login?next=${encodeURIComponent(safeNext(req.originalUrl))}`,
       );
+    if (error.code === "minecraft_name_required")
+      return res.redirect("/minecraft?next=/huly");
     throw error;
   }
   if (!user.permissions.todo) throw new AuthError("todo_role_required");
@@ -513,6 +609,7 @@ const provider = new Provider(`${config.staffOrigin}/oidc`, {
     if (!/^discord:\d+$/.test(id)) return undefined;
     const user = await discord.check(id.slice(8));
     if (!user.permissions.dashboard || !user.permissions.todo) return undefined;
+    if (!minecraft.get(user.id)) return undefined;
     return {
       accountId: id,
       async claims() {
@@ -545,6 +642,8 @@ app.get("/interaction/:uid", async (req, res) => {
       return res.redirect(
         `/login?next=${encodeURIComponent(safeNext(req.path))}`,
       );
+    if (error.code === "minecraft_name_required")
+      return res.redirect("/minecraft?next=/huly");
     throw error;
   }
   if (!user.permissions.todo) throw new AuthError("todo_role_required");
@@ -602,6 +701,18 @@ app.use(
 app.get(["/login", "/access"], (_req, res) =>
   res.sendFile(`${dist}/index.html`),
 );
+app.get("/minecraft", async (req, res) => {
+  try {
+    await signedIn(req, { allowUnlinked: true });
+    res.sendFile(`${dist}/index.html`);
+  } catch (error) {
+    if (error.status === 401)
+      return res.redirect(
+        `/login?next=${encodeURIComponent(safeNext(req.query.next))}`,
+      );
+    throw error;
+  }
+});
 app.get("/office", async (req, res) => {
   try {
     const user = await signedIn(req);
@@ -609,16 +720,22 @@ app.get("/office", async (req, res) => {
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401) res.redirect("/login");
+    else if (error.code === "minecraft_name_required")
+      res.redirect("/minecraft?next=/huly");
     else throw error;
   }
 });
-app.get(["/", "/settings"], async (req, res) => {
+app.get(["/", "/settings", "/accounts"], async (req, res) => {
   try {
-    await signedIn(req);
+    const user = await signedIn(req);
+    if (req.path === "/accounts" && !managementAccess(config, user).manager)
+      throw new AuthError("management_role_required");
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401)
       res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
+    else if (error.code === "minecraft_name_required")
+      res.redirect(`/minecraft?next=${encodeURIComponent(req.path)}`);
     else throw error;
   }
 });
@@ -635,6 +752,8 @@ app.use((error, req, res, _next) => {
   )
     return res.status(status).json({ error: code });
   if (req.headers.host === todoHost) {
+    if (code === "minecraft_name_required")
+      return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     const message =
       code === "todo_role_required"
         ? "You need the Todo role in the Drakora Discord server."
@@ -648,6 +767,10 @@ app.use((error, req, res, _next) => {
         `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#101319;color:#edf0f4;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Huly access unavailable"}</h1><p>${message}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
       );
   }
+  if (code === "minecraft_name_required")
+    return res.redirect(
+      `/minecraft?next=${encodeURIComponent(safeNext(req.path))}`,
+    );
   res.redirect(`/login?error=${encodeURIComponent(code)}`);
 });
 
@@ -694,7 +817,11 @@ const sweep = setInterval(async () => {
       )
         throw new Error("Session expired");
       let user = await discord.check(socket.userId);
-      if (!user.permissions.dashboard || !user.permissions.todo)
+      if (
+        !user.permissions.dashboard ||
+        !user.permissions.todo ||
+        !minecraft.get(user.id)
+      )
         throw new Error("Access revoked");
       if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
     } catch {
