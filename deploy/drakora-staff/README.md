@@ -25,6 +25,8 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 
 The staff root redirects unauthenticated users to `/login`. `/huly` and `/todo` start the Huly sign-in handoff. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
 
+The Drakora Huly frontend hides the Chat and HR applications from workspace navigation. Staff communication stays in Discord. Existing Huly chat channels and meeting minutes remain stored; hiding the applications does not delete their records.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:

@@ -1,0 +1,7 @@
+*
+!dev
+!dev/prod
+!dev/prod/dist
+!dev/prod/dist/**
+!dev/prod/public
+!dev/prod/public/**

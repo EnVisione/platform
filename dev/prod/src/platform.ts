@@ -69,7 +69,7 @@ import { uploaderId } from '@hcengineering/uploader'
 import { mediaId } from '@hcengineering/media'
 import recorder, { recorderId } from '@hcengineering/recorder'
 import { viewId } from '@hcengineering/view'
-import workbench, { workbenchId } from '@hcengineering/workbench'
+import workbench, { type Application, workbenchId } from '@hcengineering/workbench'
 import { mailId } from '@hcengineering/mail'
 import { chatId } from '@hcengineering/chat'
 import github, { githubId } from '@hcengineering/github'
@@ -143,7 +143,7 @@ import '@hcengineering/huly-mail-assets'
 import '@hcengineering/ai-assistant-assets'
 import '@hcengineering/rating-assets'
 
-import { coreId } from '@hcengineering/core'
+import { coreId, type Ref } from '@hcengineering/core'
 import presentation, { loadServerConfig, createFileStorage, presentationId } from '@hcengineering/presentation'
 
 import { setMetadata } from '@hcengineering/platform'
@@ -493,7 +493,10 @@ export async function configurePlatform() {
   setMetadata(presentation.metadata.MailUrl, config.MAIL_URL)
   setMetadata(presentation.metadata.SignupUrl, config.SIGNUP_URL ?? 'https://huly.io/signup')
 
-  const disabledFeatures = (config.DISABLED_FEATURES ??'').split(',').map(it => it.trim()).filter(it => it.length > 0)
+  const disabledFeatures = (config.DISABLED_FEATURES ?? '')
+    .split(',')
+    .map((it) => it.trim())
+    .filter((it) => it.length > 0)
   setMetadata(presentation.metadata.DisabledFeatures, new Set(disabledFeatures))
 
   setMetadata(recorder.metadata.StreamUrl, config.STREAM_URL)
@@ -575,7 +578,10 @@ export async function configurePlatform() {
     async () => await import(/* webpackChunkName: "workbench" */ '@hcengineering/workbench-resources')
   )
   addLocation(viewId, async () => await import(/* webpackChunkName: "view" */ '@hcengineering/view-resources'))
-  addLocation(converterId, async () => await import(/* webpackChunkName: "converter" */ '@hcengineering/converter-resources'))
+  addLocation(
+    converterId,
+    async () => await import(/* webpackChunkName: "converter" */ '@hcengineering/converter-resources')
+  )
   addLocation(taskId, async () => await import(/* webpackChunkName: "task" */ '@hcengineering/task-resources'))
   addLocation(contactId, async () => await import(/* webpackChunkName: "contact" */ '@hcengineering/contact-resources'))
   addLocation(chunterId, async () => await import(/* webpackChunkName: "chunter" */ '@hcengineering/chunter-resources'))
@@ -739,6 +745,9 @@ export async function configurePlatform() {
   setMetadata(workbench.metadata.DefaultApplication, myBranding.defaultApplication ?? 'tracker')
   setMetadata(workbench.metadata.DefaultSpace, myBranding.defaultSpace ?? tracker.project.DefaultProject)
   setMetadata(workbench.metadata.DefaultSpecial, myBranding.defaultSpecial ?? 'issues')
+  setMetadata(workbench.metadata.ExcludedApplications, ['chat:app:Chat', 'chunter:app:Chunter', 'hr:app:HR'] as Array<
+    Ref<Application>
+  >)
 
   setMetadata(setting.metadata.DefaultInviteRole, myBranding.defaultInviteRole)
   setMetadata(setting.metadata.DefaultInviteLinkGeneratorRoles, myBranding.inviteLinkGeneratorRoles)

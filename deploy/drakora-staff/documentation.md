@@ -33,6 +33,8 @@ The Office uses Guilds, Guild Members, Guild Presences, and Guild Voice States G
 
 Huly's Office keeps its original floor and room layout. Matching room tiles open Discord voice channels when joining is allowed. The Discord control in the native Huly header opens staff presence, the searchable server roster, room occupancy, and meeting actions. The dashboard no longer includes a separate Office navigation item. Minecraft identities and game activity are reserved for the later proxy unification.
 
+The Drakora Huly frontend excludes the current Chat application, the legacy Chunter application, and HR from workspace navigation. Their models and existing records stay intact, including previously created meeting minutes. This is a navigation change, not a data migration.
+
 ## Meeting lifecycle
 
 Only configured meeting host roles with Todo access can start or end a meeting. A start first persists an operation record, unlocks the room, then sends one private invitation mentioning only the Todo role. The invitation's button opens the voice channel in Discord. The UI asks the host to confirm before sending.
