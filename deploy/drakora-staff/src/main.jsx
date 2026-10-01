@@ -410,6 +410,21 @@ function Accounts({ csrf, founder }) {
               )}
               <div className="registered-details">
                 <strong>{account.name}</strong>
+                <div className="registered-ranks" aria-label="Staff ranks">
+                  {account.ranks === null ? (
+                    <span className="rank-unavailable">Ranks unavailable</span>
+                  ) : account.ranks.length ? (
+                    account.ranks.map((rank) => (
+                      <span className="chip" key={rank}>
+                        {rank}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rank-unavailable">
+                      No assigned staff rank
+                    </span>
+                  )}
+                </div>
                 <span>Discord ID {account.id}</span>
                 <span>
                   Last active on Discord: {timeLabel(account.lastActiveAt)} ·{" "}

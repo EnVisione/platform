@@ -459,8 +459,9 @@ app.get("/api/accounts", async (req, res) => {
   const user = await signedIn(req);
   if (!managementAccess(config, user).manager)
     throw new AuthError("management_role_required");
+  const officeSnapshot = office?.snapshot(user);
   const live = new Map(
-    (office?.snapshot(user).members ?? []).map((member) => [member.id, member]),
+    (officeSnapshot?.members ?? []).map((member) => [member.id, member]),
   );
   const accounts = minecraft.entries().map(([id, link]) => {
     const stored = store.get("user", id);
@@ -469,6 +470,7 @@ app.get("/api/accounts", async (req, res) => {
       id,
       name: member?.name ?? stored?.name ?? id,
       avatar: member?.avatar ?? stored?.avatar ?? null,
+      ranks: officeSnapshot?.connected ? (member?.ranks ?? []) : null,
       minecraft: link,
       discordStatus: member?.status ?? "unknown",
       lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
