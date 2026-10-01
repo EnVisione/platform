@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { Office } from "./office.jsx";
+import logo from "./assets/drakora-logo.png";
 
 const messages = {
   discord_cancelled:
@@ -26,11 +27,14 @@ const messages = {
   huly_account_mismatch:
     "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
 };
-function Mark() {
+function Brand({ href = "/" }) {
   return (
-    <span className="mark" aria-hidden="true">
-      D<span>◈</span>
-    </span>
+    <a className="brand" href={href}>
+      <img src={logo} alt="" />
+      <span>
+        Drakora <small>STAFF</small>
+      </span>
+    </a>
   );
 }
 function DiscordIcon() {
@@ -96,38 +100,22 @@ function App() {
   if (state.loading)
     return (
       <main className="loading">
-        <Mark />
+        <img src={logo} alt="" />
         <p>Opening Drakora Staff…</p>
       </main>
     );
   if (loginPage || !state.user?.dashboard)
     return (
       <main className="login-layout">
-        <section className="intro">
-          <a className="brand" href="/login">
-            <Mark />
-            <span>
-              DRAKORA<small>STAFF</small>
-            </span>
-          </a>
-          <div className="intro-copy">
-            <span className="eyebrow">BEHIND THE NETWORK</span>
-            <h1>
-              A place for the
-              <br />
-              <em>people behind it.</em>
-            </h1>
-            <p>One place to organize the work that keeps Drakora moving.</p>
-          </div>
-          <footer>
-            Drakora Network <span>Staff workspace</span>
-          </footer>
-        </section>
-        <section className="login-panel">
-          <div className="login-card">
-            <span className="eyebrow">STAFF ACCESS</span>
-            <h2>Welcome back.</h2>
-            <p>Sign in with your Discord account to continue.</p>
+        <div className="login-shell">
+          <Brand href="/login" />
+          <section className="login-card" aria-labelledby="login-title">
+            <span className="login-label">DRAKORA NETWORK</span>
+            <h1 id="login-title">Staff sign-in</h1>
+            <p>
+              Staff tools for Prominence II, Restless Horizons, and community
+              events.
+            </p>
             {error && (
               <p className="notice" role="alert">
                 {messages[error] ||
@@ -139,86 +127,107 @@ function App() {
               href={`/auth/discord?${new URLSearchParams({ next: params.get("next") || "/" })}`}
             >
               <DiscordIcon />
-              Continue with Discord<span className="arrow">↗</span>
+              Continue with Discord
             </a>
-            <div className="login-note">
-              <span className="status-dot" />
-              For authorized Drakora staff
-            </div>
-            <p className="help">
-              Your Discord roles determine which staff tools you can open.
+            <p className="login-note">
+              Access follows your Discord staff roles.
             </p>
             {state.user?.dashboard && !error && (
               <a className="text-link" href="/">
-                Continue as {state.user.name} →
+                Already signed in? Continue as {state.user.name}
               </a>
             )}
-          </div>
-          <div className="panel-foot">Private access. Shared purpose.</div>
-        </section>
+          </section>
+          <footer className="login-footer">Drakora Network · Staff</footer>
+        </div>
       </main>
     );
   const user = state.user;
   return (
     <div className="workspace">
-      <aside className="sidebar">
-        <a className="brand" href="/">
-          <Mark />
-          <span>
-            DRAKORA<small>STAFF</small>
-          </span>
+      <aside className="server-rail" aria-label="Server links">
+        <a className="server-icon active" href="/" aria-label="Drakora Staff">
+          <img src={logo} alt="" />
         </a>
-        <span className="nav-label">WORKSPACE</span>
+        <span className="rail-divider" />
+        <a
+          className="server-icon discord-icon"
+          href="https://discord.com/channels/1554936494479642714"
+          aria-label="Open staff Discord server"
+        >
+          <DiscordIcon />
+        </a>
+      </aside>
+      <aside className="sidebar">
+        <div className="sidebar-heading">Drakora Staff</div>
+        <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a className="nav-item active" href="/" aria-current="page">
-            <span>◈</span>Overview
+            <span aria-hidden="true">⌂</span>Overview
           </a>
           {user.todo && (
             <a className="nav-item" href="/huly">
-              <span>✓</span>Huly<span className="arrow">↗</span>
+              <span aria-hidden="true">✓</span>Huly
             </a>
           )}
         </nav>
-        <div className="sidebar-bottom">
-          <span className="status-dot" />
-          Connected with Discord
+        <div className="account-bar">
+          {user.avatar ? (
+            <img className="account-avatar" src={user.avatar} alt="" />
+          ) : (
+            <span className="account-avatar fallback" aria-hidden="true">
+              {user.name.slice(0, 1).toUpperCase()}
+            </span>
+          )}
+          <div>
+            <strong>{user.name}</strong>
+            <span>Connected to Discord</span>
+          </div>
         </div>
       </aside>
       <div className="main-area">
-        <header>
-          <span>
-            Staff workspace <b>/</b> Overview
-          </span>
+        <header className="topbar">
+          <h1>Overview</h1>
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>
         </header>
         <main className="dashboard">
           <div className="welcome">
-            <div>
-              <span className="eyebrow">DRAKORA STAFF</span>
-              <h1>Welcome, {user.name}.</h1>
-              <p>Your workspace, ready when you are.</p>
-            </div>
-            {user.avatar && <img className="avatar" src={user.avatar} alt="" />}
+            <h2>Welcome, {user.name}</h2>
+            <p>Your staff space for the Drakora Network.</p>
           </div>
           {error && (
             <p role="alert" className="notice">
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          <section className="identity-card" aria-labelledby="your-roles">
-            <div>
-              <span className="section-kicker">YOUR TEAM</span>
-              <h2 id="your-roles">Staff roles</h2>
+          {user.todo && (
+            <section className="tools" aria-labelledby="staff-tools">
+              <h3 id="staff-tools" className="section-title">
+                Tools
+              </h3>
+              <article className="tool-card">
+                <div className="tool-icon">✓</div>
+                <div className="tool-content">
+                  <h4>Huly</h4>
+                  <p>Projects and tasks for Drakora staff</p>
+                </div>
+                <a className="button open-tool" href="/huly">
+                  Open Huly <span aria-hidden="true">↗</span>
+                </a>
+              </article>
+            </section>
+          )}
+          <section className="roles-card" aria-labelledby="your-roles">
+            <div className="roles-heading">
+              <h3 id="your-roles">Your roles</h3>
+              <span>Managed in Discord</span>
             </div>
             <div className="chips">
               {user.dashboardRanks.length ? (
                 user.dashboardRanks.map((rank) => (
-                  <span
-                    className={`chip ${rank === "Founder" ? "founder" : ""}`}
-                    key={rank}
-                  >
+                  <span className="chip" key={rank}>
                     {rank}
                   </span>
                 ))
@@ -226,38 +235,7 @@ function App() {
                 <span className="chip">Staff</span>
               )}
             </div>
-            <span className="identity-note">Managed in Discord</span>
           </section>
-          {user.todo && (
-            <section className="tools" aria-labelledby="staff-tools">
-              <div className="section-title">
-                <h2 id="staff-tools">Your tools</h2>
-                <span>1 available</span>
-              </div>
-              <article className="tool-card">
-                <div className="tool-icon">✓</div>
-                <div className="tool-content">
-                  <span className="section-kicker">TASKS & COLLABORATION</span>
-                  <h3>Huly</h3>
-                  <p>Plan work, track progress, and keep the team in sync.</p>
-                  <div className="chips small">
-                    {user.hulyRanks.map((rank) => (
-                      <span className="chip" key={rank}>
-                        {rank}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <a className="button open-tool" href="/huly">
-                  Open Huly<span>↗</span>
-                </a>
-              </article>
-            </section>
-          )}
-          <footer className="dashboard-footer">
-            <span>Drakora Network</span>
-            <span>Built around the team.</span>
-          </footer>
         </main>
       </div>
     </div>
