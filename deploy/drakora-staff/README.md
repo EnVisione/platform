@@ -25,6 +25,8 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 
 The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. If Huly loses its browser session, its login page restarts the same handoff automatically. The public Huly view hides local email and password login. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout with Discord room links and a member panel.
 
+Signed-in staff can open Dashboard Settings to choose a 3 or 6 digit hex accent color. Save applies it to the dashboard and keeps it across refreshes for that Discord account in the same browser. Reset restores the default Discord blue. This appearance setting stays in browser storage and does not sync across devices.
+
 The Drakora Huly frontend hides the Chat and HR applications from workspace navigation. Staff communication stays in Discord. Existing Huly chat channels and meeting minutes remain stored; hiding the applications does not delete their records.
 
 ## Huly frontend image

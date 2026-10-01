@@ -44,7 +44,8 @@ button {
 }
 
 a:focus-visible,
-button:focus-visible {
+button:focus-visible,
+input:focus-visible {
   outline: 2px solid #c1c7ff;
   outline-offset: 3px;
 }
@@ -215,6 +216,8 @@ button:disabled {
 }
 
 .workspace {
+  --accent: #5865f2;
+  --accent-text: #fff;
   display: grid;
   grid-template-columns: 72px 240px minmax(0, 1fr);
   min-height: 100svh;
@@ -246,8 +249,8 @@ button:disabled {
 
 .server-icon:hover {
   border-radius: 14px;
-  background: #5865f2;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 .server-icon.active::before {
@@ -324,6 +327,10 @@ button:disabled {
   color: #f2f3f5;
 }
 
+.nav-item.active {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
 .nav-item > span {
   display: grid;
   place-items: center;
@@ -354,7 +361,8 @@ button:disabled {
 .account-avatar.fallback {
   display: grid;
   place-items: center;
-  background: #5865f2;
+  background: var(--accent);
+  color: var(--accent-text);
   font-weight: 700;
 }
 
@@ -397,6 +405,10 @@ button:disabled {
 .topbar h1 {
   font-size: 16px;
   font-weight: 700;
+}
+
+.mobile-page-link {
+  display: none;
 }
 
 .signout {
@@ -467,8 +479,8 @@ button:disabled {
   height: 44px;
   flex: none;
   border-radius: 12px;
-  background: #3d424f;
-  color: #c1c7ff;
+  background: color-mix(in srgb, var(--accent) 25%, #2b2d31);
+  color: var(--accent);
   font-size: 22px;
 }
 
@@ -491,12 +503,121 @@ button:disabled {
   margin-left: auto;
   padding: 0 16px;
   flex: none;
-  background: #5865f2;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 .open-tool:hover {
-  background: #4752c4;
+  background: color-mix(in srgb, var(--accent) 80%, #000);
+}
+
+.settings-card {
+  max-width: 640px;
+  padding: 24px;
+  border: 1px solid #42444a;
+  border-radius: 9px;
+  background: #2b2d31;
+}
+
+.settings-heading {
+  margin-bottom: 28px;
+}
+
+.settings-heading h2 {
+  font-size: 21px;
+}
+
+.settings-heading p,
+.settings-help {
+  color: #b5bac1;
+  font-size: 13px;
+}
+
+.settings-heading p {
+  margin-top: 6px;
+}
+
+.settings-card label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.accent-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.accent-swatch {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border: 1px solid #949ba4;
+  border-radius: 8px;
+}
+
+.accent-field input {
+  width: min(100%, 220px);
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #59606c;
+  border-radius: 6px;
+  background: #1e1f22;
+  color: #f2f3f5;
+  font: inherit;
+}
+
+.accent-field input[aria-invalid="true"] {
+  border-color: #ef8f89;
+}
+
+.settings-help {
+  margin-top: 10px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.save-accent {
+  padding: 0 17px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.save-accent:hover {
+  background: color-mix(in srgb, var(--accent) 80%, #000);
+}
+
+.reset-accent {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: #404249;
+  color: #f2f3f5;
+  cursor: pointer;
+}
+
+.reset-accent:hover {
+  background: #4e5058;
+}
+
+.settings-message {
+  margin-top: 16px;
+  color: #b5f2c6;
+  font-size: 13px;
+}
+
+.settings-message.error {
+  color: #ffb4ad;
 }
 
 .roles-card {
@@ -575,8 +696,20 @@ button:disabled {
     padding: 0 18px;
   }
 
+  .mobile-page-link {
+    display: inline-flex;
+    margin-left: auto;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
   .dashboard {
     padding: 32px 18px;
+  }
+
+  .settings-card {
+    padding: 20px;
   }
 
   .welcome {

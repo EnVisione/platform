@@ -111,7 +111,7 @@ app.use((req, res, next) => {
 });
 
 function safeNext(value) {
-  if (["/", "/huly"].includes(value)) return value;
+  if (["/", "/huly", "/settings"].includes(value)) return value;
   if (
     typeof value === "string" &&
     /^\/interaction\/[A-Za-z0-9_-]+$/.test(value)
@@ -608,12 +608,13 @@ app.get("/office", async (req, res) => {
     else throw error;
   }
 });
-app.get("/", async (req, res) => {
+app.get(["/", "/settings"], async (req, res) => {
   try {
     await signedIn(req);
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
-    if (error.status === 401) res.redirect("/login");
+    if (error.status === 401)
+      res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
     else throw error;
   }
 });

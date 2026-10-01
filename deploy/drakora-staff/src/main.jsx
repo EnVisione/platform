@@ -27,6 +27,139 @@ const messages = {
   huly_account_mismatch:
     "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
 };
+const defaultAccent = "#5865F2";
+function normalizeHex(value) {
+  if (typeof value !== "string") return null;
+  const hex = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(hex)) return hex.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(hex))
+    return `#${[...hex.slice(1)].map((digit) => digit.repeat(2)).join("")}`.toUpperCase();
+  return null;
+}
+function accentText(hex) {
+  const channels = [1, 3, 5].map((offset) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance =
+    channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return luminance > 0.179 ? "#16171C" : "#FFFFFF";
+}
+function accentKey(userId) {
+  return `drakora.staff.accent:${userId}`;
+}
+function savedAccent(userId) {
+  try {
+    return (
+      normalizeHex(localStorage.getItem(accentKey(userId))) || defaultAccent
+    );
+  } catch {
+    return defaultAccent;
+  }
+}
+function AccentSettings({ userId, accent, onChange }) {
+  const [draft, setDraft] = useState(accent);
+  const [message, setMessage] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const [messageError, setMessageError] = useState(false);
+  const preview = normalizeHex(draft);
+
+  function save(event) {
+    event.preventDefault();
+    if (!preview) {
+      setInvalid(true);
+      setMessageError(true);
+      setMessage("Enter a hex color such as #5865F2 or #F63.");
+      return;
+    }
+    try {
+      localStorage.setItem(accentKey(userId), preview);
+      onChange(preview);
+      setDraft(preview);
+      setInvalid(false);
+      setMessageError(false);
+      setMessage("Accent color saved in this browser.");
+    } catch {
+      setMessageError(true);
+      setMessage(
+        "This browser could not save your color. Check your storage settings.",
+      );
+    }
+  }
+
+  function reset() {
+    try {
+      localStorage.removeItem(accentKey(userId));
+      onChange(defaultAccent);
+      setDraft(defaultAccent);
+      setInvalid(false);
+      setMessageError(false);
+      setMessage("Default accent restored.");
+    } catch {
+      setMessageError(true);
+      setMessage(
+        "This browser could not reset your color. Check your storage settings.",
+      );
+    }
+  }
+
+  return (
+    <section className="settings-card" aria-labelledby="appearance-title">
+      <div className="settings-heading">
+        <h2 id="appearance-title">Appearance</h2>
+        <p>Choose an accent color for your dashboard.</p>
+      </div>
+      <form onSubmit={save} noValidate>
+        <label htmlFor="accent-hex">Accent color</label>
+        <div className="accent-field">
+          <span
+            className="accent-swatch"
+            style={{ backgroundColor: preview || accent }}
+            aria-hidden="true"
+          />
+          <input
+            id="accent-hex"
+            type="text"
+            value={draft}
+            maxLength={7}
+            spellCheck="false"
+            autoComplete="off"
+            aria-invalid={invalid}
+            aria-describedby="accent-help"
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setInvalid(false);
+              setMessageError(false);
+              setMessage("");
+            }}
+          />
+        </div>
+        <p id="accent-help" className="settings-help">
+          Enter a 3 or 6 digit hex color. Saved for this account in this
+          browser.
+        </p>
+        <div className="settings-actions">
+          <button className="button save-accent" type="submit">
+            Save color
+          </button>
+          <button className="reset-accent" type="button" onClick={reset}>
+            Reset to default
+          </button>
+        </div>
+        {message && (
+          <p
+            className={
+              messageError ? "settings-message error" : "settings-message"
+            }
+            role="status"
+          >
+            {message}
+          </p>
+        )}
+      </form>
+    </section>
+  );
+}
 function Brand({ href = "/" }) {
   return (
     <a className="brand" href={href}>
@@ -53,14 +186,17 @@ function DiscordIcon() {
 function App() {
   const [state, setState] = useState({ loading: true });
   const [busy, setBusy] = useState(false);
+  const [accent, setAccent] = useState(defaultAccent);
   const params = new URLSearchParams(location.search);
   const loginPage = location.pathname === "/login";
+  const settingsPage = location.pathname === "/settings";
   useEffect(() => {
     let active = true;
     fetch("/api/me")
       .then(async (response) => {
         const data = await response.json();
-        if (active)
+        if (active) {
+          if (response.ok) setAccent(savedAccent(data.user.id));
           setState(
             response.ok
               ? { ...data, loading: false }
@@ -69,6 +205,7 @@ function App() {
                   error: response.status === 401 ? null : data.error,
                 },
           );
+        }
       })
       .catch(
         () =>
@@ -144,7 +281,10 @@ function App() {
     );
   const user = state.user;
   return (
-    <div className="workspace">
+    <div
+      className="workspace"
+      style={{ "--accent": accent, "--accent-text": accentText(accent) }}
+    >
       <aside className="server-rail" aria-label="Server links">
         <a className="server-icon active" href="/" aria-label="Drakora Staff">
           <img src={logo} alt="" />
@@ -162,7 +302,11 @@ function App() {
         <div className="sidebar-heading">Drakora Staff</div>
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
-          <a className="nav-item active" href="/" aria-current="page">
+          <a
+            className={`nav-item${settingsPage ? "" : " active"}`}
+            href="/"
+            aria-current={settingsPage ? undefined : "page"}
+          >
             <span aria-hidden="true">⌂</span>Overview
           </a>
           {user.todo && (
@@ -170,6 +314,13 @@ function App() {
               <span aria-hidden="true">✓</span>Huly
             </a>
           )}
+          <a
+            className={`nav-item${settingsPage ? " active" : ""}`}
+            href="/settings"
+            aria-current={settingsPage ? "page" : undefined}
+          >
+            <span aria-hidden="true">⚙</span>Settings
+          </a>
         </nav>
         <div className="account-bar">
           {user.avatar ? (
@@ -187,55 +338,71 @@ function App() {
       </aside>
       <div className="main-area">
         <header className="topbar">
-          <h1>Overview</h1>
+          <h1>{settingsPage ? "Settings" : "Overview"}</h1>
+          <a
+            className="mobile-page-link"
+            href={settingsPage ? "/" : "/settings"}
+          >
+            {settingsPage ? "Overview" : "Settings"}
+          </a>
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>
         </header>
         <main className="dashboard">
-          <div className="welcome">
-            <h2>Welcome, {user.name}</h2>
-            <p>Your staff space for the Drakora Network.</p>
-          </div>
           {error && (
             <p role="alert" className="notice">
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {user.todo && (
-            <section className="tools" aria-labelledby="staff-tools">
-              <h3 id="staff-tools" className="section-title">
-                Tools
-              </h3>
-              <article className="tool-card">
-                <div className="tool-icon">✓</div>
-                <div className="tool-content">
-                  <h4>Huly</h4>
-                  <p>Projects and tasks for Drakora staff</p>
-                </div>
-                <a className="button open-tool" href="/huly">
-                  Open Huly <span aria-hidden="true">↗</span>
-                </a>
-              </article>
-            </section>
-          )}
-          <section className="roles-card" aria-labelledby="your-roles">
-            <div className="roles-heading">
-              <h3 id="your-roles">Your roles</h3>
-              <span>Managed in Discord</span>
-            </div>
-            <div className="chips">
-              {user.dashboardRanks.length ? (
-                user.dashboardRanks.map((rank) => (
-                  <span className="chip" key={rank}>
-                    {rank}
-                  </span>
-                ))
-              ) : (
-                <span className="chip">Staff</span>
+          {settingsPage ? (
+            <AccentSettings
+              userId={user.id}
+              accent={accent}
+              onChange={setAccent}
+            />
+          ) : (
+            <>
+              <div className="welcome">
+                <h2>Welcome, {user.name}</h2>
+                <p>Your staff space for the Drakora Network.</p>
+              </div>
+              {user.todo && (
+                <section className="tools" aria-labelledby="staff-tools">
+                  <h3 id="staff-tools" className="section-title">
+                    Tools
+                  </h3>
+                  <article className="tool-card">
+                    <div className="tool-icon">✓</div>
+                    <div className="tool-content">
+                      <h4>Huly</h4>
+                      <p>Projects and tasks for Drakora staff</p>
+                    </div>
+                    <a className="button open-tool" href="/huly">
+                      Open Huly <span aria-hidden="true">↗</span>
+                    </a>
+                  </article>
+                </section>
               )}
-            </div>
-          </section>
+              <section className="roles-card" aria-labelledby="your-roles">
+                <div className="roles-heading">
+                  <h3 id="your-roles">Your roles</h3>
+                  <span>Managed in Discord</span>
+                </div>
+                <div className="chips">
+                  {user.dashboardRanks.length ? (
+                    user.dashboardRanks.map((rank) => (
+                      <span className="chip" key={rank}>
+                        {rank}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="chip">Staff</span>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
