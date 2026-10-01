@@ -12,12 +12,13 @@ export async function syncAvatar(config, token, account, avatar) {
     const person = await client.findOne("contact:class:Person", {
       personUuid: account,
     });
-    if (!person) throw new Error("Huly member profile was not found");
+    if (!person) return false;
     if (person.avatarType !== "external" || person.avatarProps?.url !== avatar)
       await client.updateDoc(person._class, person.space, person._id, {
         avatarType: "external",
         avatarProps: { url: avatar },
       });
+    return true;
   } finally {
     await client.close();
   }

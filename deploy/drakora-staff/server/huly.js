@@ -71,12 +71,15 @@ export function hulyClient(config, store, fetcher = fetch) {
     } else if (current && account !== config.hulyOwner) {
       await rpc("leaveWorkspace", { account });
     }
+    let syncedAvatar = user.syncedAvatar;
     if (
       user.permissions.todo &&
       user.avatar &&
       user.syncedAvatar !== user.avatar
-    )
-      await syncAvatar(config, serviceToken(), account, user.avatar);
+    ) {
+      if (await syncAvatar(config, serviceToken(), account, user.avatar))
+        syncedAvatar = user.avatar;
+    }
     const projectRanks = user.permissions.todo
       ? user.permissions.hulyRanks
       : [];
@@ -88,7 +91,7 @@ export function hulyClient(config, store, fetcher = fetch) {
       hulyAccount: account,
       syncedAt: user.checkedAt,
       projectRanks,
-      syncedAvatar: user.permissions.todo ? user.avatar : user.syncedAvatar,
+      syncedAvatar,
     };
     store.set("user", user.id, saved, Number.MAX_SAFE_INTEGER);
     return saved;
