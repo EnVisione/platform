@@ -80,6 +80,7 @@ export async function handleProviderAuth (
     const branding = getBranding(brandings, state?.branding)
 
     if (state.inviteId != null && state.inviteId !== '' && state.autoJoin !== true) {
+      // A valid invite permits account creation when public signup is disabled.
       loginInfo = await joinWithProvider(
         measureCtx,
         db,
@@ -89,7 +90,7 @@ export async function handleProviderAuth (
         last,
         state.inviteId as any,
         socialKey,
-        signUpDisabled
+        false
       )
     } else {
       loginInfo = await loginOrSignUpWithProvider(

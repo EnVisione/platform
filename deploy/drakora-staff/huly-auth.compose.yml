@@ -1,5 +1,6 @@
 services:
   account:
+    image: ${HULY_ACCOUNT_IMAGE:?Set HULY_ACCOUNT_IMAGE}
     environment:
       OPENID_CLIENT_ID: drakora-huly
       OPENID_CLIENT_SECRET: ${HULY_OIDC_SECRET:?Set HULY_OIDC_SECRET}

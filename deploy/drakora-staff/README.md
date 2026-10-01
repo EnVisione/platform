@@ -20,7 +20,7 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 4. Create the Office category and channels described in [the technical documentation](documentation.md). Add the IDs to the private configuration. Keep rank entries in highest to lowest priority order.
 5. Create the data directory for container user 1000. Run `docker compose build staff` and `docker compose up -d staff` from this directory.
 6. Add the supplied `huly-auth.compose.yml` to the Huly Compose files. Set its variables privately. The OIDC secret must match `oidcClientSecret`, and `STAFF_SOURCE_PATH` points to this directory on the host. The issuer wait script resolves the first startup dependency.
-7. Build the Huly frontend image below, set `HULY_OFFICE_IMAGE`, and recreate Huly's front and account services.
+7. Build the Huly frontend and account images below, set `HULY_OFFICE_IMAGE` and `HULY_ACCOUNT_IMAGE`, and recreate Huly's front and account services.
 8. Route both public origins to this service on port 3000 through the private network, or to its loopback port 8088. Keep Huly's nginx and account services inaccessible directly from the public internet.
 
 The staff root redirects unauthenticated users to `/login`. Discord sign-in is denied without the Dashboard role. Huly is hidden unless the signed-in member also has the Todo role. `/huly` and `/todo` start the Huly sign-in handoff. If Huly loses its browser session, its login page restarts the same handoff automatically. The public Huly view hides local email and password login. `/office` opens the standalone Discord view. Huly's Office keeps its native floor layout and room clicks, with Discord room links and a member panel available separately.
@@ -44,6 +44,18 @@ docker build -f deploy/drakora-staff/Dockerfile.huly-front \
 ```
 
 Use the exact front image digest from the matching installation as the base. This image replaces browser assets while preserving the matching front server. Never mix platform tags and server versions. The optional `OFFICE_URL` browser configuration activates Discord controls in Huly's original Office layout; deployments without it retain Huly's original Office. Room tiles still open Huly's room view. Huly audio and video calls require a separately configured Love service and LiveKit endpoint; Discord voice links remain independent.
+
+## Huly account image
+
+Build the account overlay from the exact pinned account image digest used by the matching installation:
+
+```sh
+docker build -f deploy/drakora-staff/Dockerfile.huly-account \
+  --build-arg HULY_ACCOUNT_IMAGE=your-existing-pinned-huly-account-image \
+  -t drakora-huly-account:sso-invites deploy/drakora-staff
+```
+
+Set `HULY_ACCOUNT_IMAGE=drakora-huly-account:sso-invites` in the private Huly environment. The overlay permits an OpenID user with a valid workspace invitation to create an account while `DISABLE_SIGNUP=true`; a direct OpenID sign-in without an invitation still cannot create an account. The build fails if the pinned image no longer contains the expected account handler. Rebuild and review the overlay when changing the base image digest.
 
 ## GitHub integration
 

@@ -1,0 +1,5 @@
+ARG HULY_ACCOUNT_IMAGE
+FROM ${HULY_ACCOUNT_IMAGE}
+
+COPY patch-huly-account.cjs /tmp/patch-huly-account.cjs
+RUN node /tmp/patch-huly-account.cjs && rm /tmp/patch-huly-account.cjs
