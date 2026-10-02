@@ -378,6 +378,47 @@ button.mail-row-star:hover {
   white-space: pre-wrap;
   font-family: inherit;
 }
+.mail-body-loading {
+  padding: 24px 0;
+  color: #b5bac1;
+  font-size: 14px;
+}
+.mail-body-skeleton {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+  margin-top: 20px;
+}
+.mail-body-skeleton i {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #30323a, #404355, #30323a);
+  background-size: 200% 100%;
+  animation: mail-loading 1.5s ease-in-out infinite;
+}
+.mail-body-skeleton i:nth-child(2) {
+  width: 92%;
+}
+.mail-body-skeleton i:nth-child(4) {
+  width: 62%;
+}
+.mail-reader-error {
+  margin: 20px 0;
+}
+@keyframes mail-loading {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mail-body-skeleton i {
+    animation: none;
+  }
+}
 .mail-html p {
   margin: 0 0 14px;
 }

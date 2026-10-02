@@ -579,7 +579,7 @@ export function Mail({ csrf, capabilities }) {
   const [list, setList] = useState(null),
     [listLoading, setListLoading] = useState(true);
   const [selected, setSelected] = useState(null),
-    [message, setMessage] = useState(null),
+    [messageResult, setMessage] = useState(null),
     [messageLoading, setMessageLoading] = useState(false);
   const [error, setError] = useState(null),
     [detailError, setDetailError] = useState(null),
@@ -589,6 +589,14 @@ export function Mail({ csrf, capabilities }) {
   const [replyHost, setReplyHost] = useState(null);
   const [draftOpen, setDraftOpen] = useState(0);
   const [sentReply, setSentReply] = useState(null);
+  const message =
+    selected &&
+    messageResult?.uid === selected.uid &&
+    messageResult?.folder === selected.folder &&
+    messageResult?.validity === selected.validity
+      ? messageResult
+      : null;
+  const readerHeader = message ?? selected;
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
@@ -930,13 +938,16 @@ export function Mail({ csrf, capabilities }) {
                     )}
                     <button
                       className="mail-message-open"
-                      onClick={() =>
+                      onClick={() => {
+                        setMessage(null);
+                        setDetailError(null);
+                        setMessageLoading(true);
                         setSelected({
-                          uid: item.uid,
+                          ...item,
                           folder,
                           validity: list.validity,
-                        })
-                      }
+                        });
+                      }}
                     >
                       <span
                         className="mail-sender"
@@ -1009,98 +1020,120 @@ export function Mail({ csrf, capabilities }) {
             >
               ← Back to {folderTitle.toLowerCase()}
             </button>
+            <header className="mail-reader-header">
+              <div className="mail-reader-title">
+                <h3>{readerHeader.subject}</h3>
+                <span
+                  className={`mail-read-badge${readerHeader.seen ? " read" : ""}`}
+                >
+                  {readerHeader.seen ? "Read" : "Unread"}
+                </span>
+              </div>
+              <div className="mail-sender-card">
+                <span className="mail-sender-avatar" aria-hidden="true">
+                  {Array.from(
+                    readerHeader.from[0]?.name ||
+                      readerHeader.from[0]?.address ||
+                      "?",
+                  )[0].toUpperCase()}
+                </span>
+                <div className="mail-sender-identity">
+                  <strong>
+                    {readerHeader.from[0]?.name ||
+                      readerHeader.from[0]?.address ||
+                      "Unknown sender"}
+                  </strong>
+                  <span>{emailSender(readerHeader.from)}</span>
+                  <details className="mail-envelope-details">
+                    <summary>
+                      to {people(readerHeader.to)}{" "}
+                      <span aria-hidden="true">⌄</span>
+                    </summary>
+                    <dl>
+                      <div>
+                        <dt>From</dt>
+                        <dd>{people(readerHeader.from)}</dd>
+                      </div>
+                      <div>
+                        <dt>To</dt>
+                        <dd>{people(readerHeader.to)}</dd>
+                      </div>
+                      {readerHeader.cc.length > 0 && (
+                        <div>
+                          <dt>Cc</dt>
+                          <dd>{people(readerHeader.cc)}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Received</dt>
+                        <dd>{formatDate(readerHeader.date)}</dd>
+                      </div>
+                    </dl>
+                  </details>
+                </div>
+                <time
+                  className="mail-reader-date"
+                  title={formatDate(readerHeader.date)}
+                >
+                  {formatDate(readerHeader.date)}
+                </time>
+                {capabilities["mail.flags"] && (
+                  <div className="mail-reader-flags">
+                    <button
+                      className="mail-read-action"
+                      disabled={flagBusy || messageLoading || !message}
+                      onClick={() =>
+                        changeFlag("seen", !readerHeader.seen, message)
+                      }
+                    >
+                      {readerHeader.seen ? "Mark unread" : "Mark read"}
+                    </button>
+                    <button
+                      className={`mail-row-star${readerHeader.starred ? " starred" : ""}`}
+                      aria-label={
+                        readerHeader.starred ? "Remove star" : "Star email"
+                      }
+                      aria-pressed={readerHeader.starred}
+                      disabled={flagBusy || messageLoading || !message}
+                      onClick={() =>
+                        changeFlag("starred", !readerHeader.starred, message)
+                      }
+                    >
+                      {readerHeader.starred ? "★" : "☆"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </header>
             {detailError && (
-              <p className="mail-error" role="alert">
-                {detailError}
-              </p>
+              <div className="mail-reader-error">
+                <p className="mail-error" role="alert">
+                  {detailError}
+                </p>
+                <button
+                  className="mail-secondary"
+                  onClick={() => {
+                    setDetailError(null);
+                    setMessageLoading(true);
+                    setSelected({ ...selected });
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
             )}
             {messageLoading ? (
-              <p className="mail-empty">Opening email…</p>
+              <div className="mail-body-loading" role="status">
+                <span>Loading message…</span>
+                <div className="mail-body-skeleton" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </div>
+              </div>
             ) : message ? (
               <>
-                <header className="mail-reader-header">
-                  <div className="mail-reader-title">
-                    <h3>{message.subject}</h3>
-                    <span
-                      className={`mail-read-badge${message.seen ? " read" : ""}`}
-                    >
-                      {message.seen ? "Read" : "Unread"}
-                    </span>
-                  </div>
-                  <div className="mail-sender-card">
-                    <span className="mail-sender-avatar" aria-hidden="true">
-                      {Array.from(
-                        message.from[0]?.name ||
-                          message.from[0]?.address ||
-                          "?",
-                      )[0].toUpperCase()}
-                    </span>
-                    <div className="mail-sender-identity">
-                      <strong>
-                        {message.from[0]?.name ||
-                          message.from[0]?.address ||
-                          "Unknown sender"}
-                      </strong>
-                      <span>{emailSender(message.from)}</span>
-                      <details className="mail-envelope-details">
-                        <summary>
-                          to {people(message.to)}{" "}
-                          <span aria-hidden="true">⌄</span>
-                        </summary>
-                        <dl>
-                          <div>
-                            <dt>From</dt>
-                            <dd>{people(message.from)}</dd>
-                          </div>
-                          <div>
-                            <dt>To</dt>
-                            <dd>{people(message.to)}</dd>
-                          </div>
-                          {message.cc.length > 0 && (
-                            <div>
-                              <dt>Cc</dt>
-                              <dd>{people(message.cc)}</dd>
-                            </div>
-                          )}
-                          <div>
-                            <dt>Received</dt>
-                            <dd>{formatDate(message.date)}</dd>
-                          </div>
-                        </dl>
-                      </details>
-                    </div>
-                    <time
-                      className="mail-reader-date"
-                      title={formatDate(message.date)}
-                    >
-                      {formatDate(message.date)}
-                    </time>
-                    {capabilities["mail.flags"] && (
-                      <div className="mail-reader-flags">
-                        <button
-                          className="mail-read-action"
-                          disabled={flagBusy}
-                          onClick={() => changeFlag("seen", !message.seen)}
-                        >
-                          {message.seen ? "Mark unread" : "Mark read"}
-                        </button>
-                        <button
-                          className={`mail-row-star${message.starred ? " starred" : ""}`}
-                          aria-label={
-                            message.starred ? "Remove star" : "Star email"
-                          }
-                          aria-pressed={message.starred}
-                          disabled={flagBusy}
-                          onClick={() =>
-                            changeFlag("starred", !message.starred)
-                          }
-                        >
-                          {message.starred ? "★" : "☆"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </header>
                 {message.html ? (
                   <div
                     className="mail-body mail-html"

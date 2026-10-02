@@ -51,7 +51,6 @@ function harness(t, overrides = {}) {
     fetches: [],
     sends: [],
     flags: [],
-    allowed: true,
     records: Array.from({ length: 37 }, (_, index) => ({
       uid: index + 1,
       envelope: {
@@ -131,7 +130,6 @@ function harness(t, overrides = {}) {
           )
           .map((record) => record.uid);
       }
-      if (query.uid) return state.allowed ? [Number(query.uid)] : [];
       return state.records.map((record) => record.uid);
     }
     async fetchAll(uids, query) {
@@ -140,17 +138,23 @@ function harness(t, overrides = {}) {
       state.fetchQueries.push(query);
       return state.records.filter((record) => uids.includes(record.uid));
     }
-    async fetchOne(uid) {
+    async fetchOne(uid, query, options) {
       if (state.fetchError) throw new Error("private message detail");
+      state.directFetches ??= [];
+      state.directFetches.push({ uid, query, options });
+      const record = state.records.find((record) => record.uid === Number(uid));
+      if (!record) return false;
       return {
-        ...state.records.find((record) => record.uid === Number(uid)),
+        ...record,
         bodyStructure: state.structure,
         headers: Buffer.from(
-          "Message-ID: <original@example.invalid>\r\nReferences: <prior@example.invalid>\r\nReply-To: Player <player@example.invalid>\r\n\r\n",
+          `Message-ID: <original@example.invalid>\r\nReferences: <prior@example.invalid>\r\nReply-To: Player <player@example.invalid>\r\n${state.deliveryHeaders ?? ""}\r\n`,
         ),
       };
     }
     async download(_uid, part) {
+      state.downloads ??= [];
+      state.downloads.push(part);
       return {
         content: Readable.from([Buffer.from(state.bodies[part] ?? "")]),
       };
@@ -354,7 +358,9 @@ test("stale UID validity and out-of-scope direct reads cannot bypass mailbox che
     code: "mail_changed",
   });
   assert.equal(state.clients.at(-1).released, 1);
-  state.allowed = false;
+  state.records.find((record) => record.uid === key.uid).envelope.to = [
+    { address: "personal@example.invalid" },
+  ];
   await assert.rejects(service.detail(key), { code: "mail_not_found" });
   await assert.rejects(service.attachment({ ...key, part: "3" }), {
     code: "mail_not_found",
@@ -363,9 +369,60 @@ test("stale UID validity and out-of-scope direct reads cannot bypass mailbox che
     code: "mail_not_found",
   });
   assert.equal(state.flags.length, 0);
+  assert.equal(state.downloads?.length ?? 0, 0);
+  await assert.rejects(
+    service.send("staff-user", {
+      ...input(),
+      reply: { ...key, kind: "reply" },
+    }),
+    { code: "mail_not_found" },
+  );
+  assert.equal(state.sends.length, 0);
+  await assert.rejects(service.detail({ ...key, uid: 999 }), {
+    code: "mail_not_found",
+  });
   await assert.rejects(service.detail({ ...key, uid: "4:*" }), {
     code: "invalid_mail_request",
   });
+});
+
+test("direct reads verify configured addresses without scanning the mailbox", async (t) => {
+  const { service, state } = harness(t);
+  const record = state.records.find((record) => record.uid === key.uid);
+  for (const field of ["from", "to", "cc", "bcc"]) {
+    record.envelope = { [field]: [{ address: "SUPPORT@DRAKORA.ORG" }] };
+    assert.equal((await service.detail(key)).uid, key.uid);
+  }
+  record.envelope = {
+    to: [{ address: "support@drakora.org.attacker.invalid" }],
+    from: [
+      { name: "support@drakora.org", address: "personal@example.invalid" },
+    ],
+  };
+  await assert.rejects(service.detail(key), { code: "mail_not_found" });
+  state.deliveryHeaders =
+    "Delivered-To: personal@example.invalid\r\nDelivered-To:\r\n Shared <NO-REPLY@DRAKORA.ORG>\r\n";
+  assert.equal((await service.detail(key)).uid, key.uid);
+  assert.equal(
+    (await service.attachment({ ...key, part: "3" })).content.toString(),
+    "proof",
+  );
+  await service.flags({ ...key, flag: "starred", value: true });
+  await service.send("staff-user", {
+    ...input(),
+    reply: { ...key, kind: "reply" },
+  });
+  assert.equal(state.searches.length, 0);
+  for (const fetch of state.directFetches) {
+    assert.equal(fetch.uid, key.uid);
+    assert.deepEqual(fetch.options, { uid: true });
+    assert.equal(fetch.query.envelope, true);
+    assert.equal(fetch.query.headers.includes("delivered-to"), true);
+  }
+  assert.equal(state.sends[0].inReplyTo, "<original@example.invalid>");
+  state.deliveryHeaders =
+    "Delivered-To: support@drakora.org.attacker.invalid\r\n";
+  await assert.rejects(service.detail(key), { code: "mail_not_found" });
 });
 
 test("attachment downloads are explicit, bounded and restricted to real MIME parts", async (t) => {

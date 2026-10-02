@@ -240,6 +240,16 @@ export function mailboxService(config, store, dependencies = {}) {
       { header: { "Delivered-To": address } },
     ]),
   };
+  const identityAddresses = new Set(
+    identities.map(({ address }) => lower(address)),
+  );
+  function matchesIdentity(values = []) {
+    return values.some(
+      ({ address, group }) =>
+        identityAddresses.has(lower(String(address ?? ""))) ||
+        (group && matchesIdentity(group)),
+    );
+  }
   async function connection(action) {
     if (closed || active.size >= 4) throw new AuthError("mail_busy", 503);
     const client = makeClient({
@@ -323,13 +333,36 @@ export function mailboxService(config, store, dependencies = {}) {
   }
   async function scopedMessage(client, input, query) {
     const uid = messageKey(input);
-    const matches = await client.search(
-      { ...identityScope, uid: String(uid) },
+    const record = await client.fetchOne(
+      uid,
+      {
+        ...query,
+        uid: true,
+        envelope: true,
+        headers:
+          query.headers === true
+            ? true
+            : [...new Set([...(query.headers || []), "delivered-to"])],
+      },
       { uid: true },
     );
-    if (!matches?.includes(uid)) throw new AuthError("mail_not_found", 404);
-    const record = await client.fetchOne(uid, query, { uid: true });
-    if (!record) throw new AuthError("mail_not_found", 404);
+    if (!record || record.uid !== uid)
+      throw new AuthError("mail_not_found", 404);
+    const envelope = record.envelope ?? {};
+    if (
+      [envelope.from, envelope.to, envelope.cc, envelope.bcc].some(
+        matchesIdentity,
+      )
+    )
+      return record;
+    const parsed = await simpleParser(record.headers ?? Buffer.alloc(0), {
+      skipHtmlToText: true,
+      skipTextToHtml: true,
+    });
+    const deliveredTo = parsed.headers.get("delivered-to");
+    const deliveries = Array.isArray(deliveredTo) ? deliveredTo : [deliveredTo];
+    if (!deliveries.some((entry) => matchesIdentity(entry?.value)))
+      throw new AuthError("mail_not_found", 404);
     return record;
   }
   function summary(record) {
