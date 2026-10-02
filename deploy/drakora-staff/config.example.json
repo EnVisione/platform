@@ -80,6 +80,40 @@
       "dashboard": false
     }
   ],
+  "roleSync": {
+    "guildId": "REPLACE_MAIN_GUILD_ID",
+    "initialSource": "staff",
+    "roles": [
+      {
+        "staffId": "REPLACE_FOUNDER_ROLE_ID",
+        "mainId": "REPLACE_MAIN_FOUNDER_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_MANAGER_ROLE_ID",
+        "mainId": "REPLACE_MAIN_MANAGER_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_ADMIN_ROLE_ID",
+        "mainId": "REPLACE_MAIN_ADMIN_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_SR_MODERATOR_ROLE_ID",
+        "mainId": "REPLACE_MAIN_SR_MODERATOR_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_MODERATOR_ROLE_ID",
+        "mainId": "REPLACE_MAIN_MODERATOR_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_JR_MODERATOR_ROLE_ID",
+        "mainId": "REPLACE_MAIN_JR_MODERATOR_ROLE_ID"
+      },
+      {
+        "staffId": "REPLACE_HELPER_ROLE_ID",
+        "mainId": "REPLACE_MAIN_HELPER_ROLE_ID"
+      }
+    ]
+  },
   "office": {
     "categoryId": "REPLACE_CATEGORY_ID",
     "inviteChannelId": "REPLACE_INVITES_CHANNEL_ID",

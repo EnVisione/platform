@@ -91,6 +91,38 @@ export function validateConfig(config) {
         "Configure the Discord bot, Office channels, and meeting host roles",
       );
   }
+  if (config.roleSync !== undefined) {
+    const settings = config.roleSync;
+    const staffRoleIds = new Set([
+      ...config.ranks.map((rank) => rank.id),
+      ...Object.values(config.applications?.specialistRoles ?? {}),
+    ]);
+    if (
+      !config.office ||
+      !settings ||
+      !snowflake(settings.guildId) ||
+      settings.guildId === config.guildId ||
+      !["unchanged", "main", "staff"].includes(settings.initialSource) ||
+      !Array.isArray(settings.roles) ||
+      !settings.roles.length ||
+      settings.roles.length > 20 ||
+      settings.roles.some(
+        (role) =>
+          !role ||
+          !staffRoleIds.has(role.staffId) ||
+          Object.values(config.accessRoles).includes(role.staffId) ||
+          !snowflake(role.mainId) ||
+          role.mainId === settings.guildId,
+      ) ||
+      new Set(settings.roles.map((role) => role.staffId)).size !==
+        settings.roles.length ||
+      new Set(settings.roles.map((role) => role.mainId)).size !==
+        settings.roles.length
+    )
+      throw new Error(
+        "Configure distinct staff rank mappings and an initial conflict policy with Office enabled",
+      );
+  }
   if (config.todoForums !== undefined) {
     if (
       !config.discordBotToken ||

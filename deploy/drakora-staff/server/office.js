@@ -10,6 +10,7 @@ import { AuthError } from "./discord.js";
 import { canHost, permissions } from "./roles.js";
 import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
+import { discordRoleTransport, staffRoleSync } from "./role-sync.js";
 
 export function discordOffice(config, store) {
   let guild;
@@ -34,6 +35,12 @@ export function discordOffice(config, store) {
     allowedMentions: { parse: [] },
   });
   let ready = false;
+  const roleSync = config.roleSync
+    ? staffRoleSync(config, store, discordRoleTransport(config, client))
+    : undefined;
+  let roleTimer;
+  const roleFailure = () =>
+    console.error("Discord staff rank synchronization is pending.");
   let reconnectTimer;
   let connecting = false;
   let attempts = 0;
@@ -193,6 +200,14 @@ export function discordOffice(config, store) {
       await meetings.reconcile();
       attempts = 0;
       console.log("Discord office connected.");
+      if (roleSync) {
+        void roleSync.initialize().catch(roleFailure);
+        if (!roleTimer)
+          roleTimer = setInterval(
+            () => void roleSync.retry().catch(roleFailure),
+            60000,
+          ).unref();
+      }
       if (!activityRefresh)
         activityRefresh = refreshActivity().finally(() => {
           activityRefresh = undefined;
@@ -226,6 +241,46 @@ export function discordOffice(config, store) {
   });
   client.on("messageCreate", (message) => {
     if (!stopped) activity.observeMessage(message);
+  });
+  client.on("raw", (packet) => {
+    if (stopped || !roleSync) return;
+    const data = packet.d;
+    if (![config.guildId, config.roleSync.guildId].includes(data?.guild_id))
+      return;
+    if (
+      ["GUILD_ROLE_UPDATE", "GUILD_ROLE_CREATE", "GUILD_ROLE_DELETE"].includes(
+        packet.t,
+      )
+    ) {
+      void roleSync.retry(true).catch(roleFailure);
+      return;
+    }
+    if (
+      !["GUILD_MEMBER_UPDATE", "GUILD_MEMBER_ADD"].includes(packet.t) ||
+      !data.user ||
+      !Array.isArray(data.roles)
+    )
+      return;
+    if (data.guild_id === config.guildId) {
+      const user = store.get("user", data.user.id);
+      if (user) {
+        user.checkedAt = 0;
+        store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
+      }
+    }
+    const member = {
+      guildId: data.guild_id,
+      id: data.user.id,
+      bot: data.user.bot,
+      roles: data.roles,
+      pending: data.pending,
+      joinedAt: data.joined_at,
+    };
+    void (
+      packet.t === "GUILD_MEMBER_ADD"
+        ? roleSync.join(member)
+        : roleSync.update(member)
+    ).catch(roleFailure);
   });
   client.on("error", () => {
     ready = false;
@@ -286,7 +341,9 @@ export function discordOffice(config, store) {
     close: async () => {
       stopped = true;
       clearTimeout(reconnectTimer);
+      clearInterval(roleTimer);
       ready = false;
+      await roleSync?.close();
       await client.destroy();
       await activityRefresh;
     },
