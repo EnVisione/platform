@@ -25,6 +25,15 @@
   font: inherit;
   cursor: pointer;
 }
+.roles-page .button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  padding: 0.7rem 1rem;
+}
+.roles-page .button:hover:enabled {
+  filter: brightness(1.1);
+}
 .roles-page button:disabled {
   cursor: not-allowed;
   opacity: 0.5;

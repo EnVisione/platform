@@ -131,7 +131,14 @@ export function roleAssignments(config, store, policy, transport, sync) {
             actor: request.actor,
           }
         : null,
-      discord: ranks?.delivery ?? {},
+      discord: Object.fromEntries(
+        [
+          ["Staff server", config.guildId],
+          ["Main server", config.roleSync.guildId],
+        ]
+          .filter(([, id]) => ranks?.delivery?.[id])
+          .map(([name, id]) => [name, ranks.delivery[id]]),
+      ),
       minecraft: "Not connected",
     };
   }

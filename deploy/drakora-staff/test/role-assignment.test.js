@@ -172,7 +172,7 @@ test("queued ranks and access survive restart and wait until the member joins st
   );
   assert.equal(app.assignments.status("42").request.status, "waiting_member");
   assert.equal(
-    app.assignments.status("42").discord["1"].status,
+    app.assignments.status("42").discord["Staff server"].status,
     "waiting_member",
   );
   await app.restart();
@@ -198,7 +198,7 @@ test("blocked Founder promotion keeps the existing rank until bot permissions al
   assert.ok(app.roster.get("2:42").roles.includes("128"));
   assert.equal(app.changes.length, 0);
   assert.equal(
-    app.assignments.status("42").discord["1"].error,
+    app.assignments.status("42").discord["Staff server"].error,
     "discord_role_hierarchy_required",
   );
   app.blocked.clear();
