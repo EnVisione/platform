@@ -3,7 +3,7 @@
   const { staffOrigin, workspace } = document.currentScript.dataset;
   const base = `/workbench/${encodeURIComponent(workspace)}/`;
   const views = { tracker: "tracker", calendar: "time", office: "love" };
-  document.documentElement.classList.add("drakora-embedded");
+  document.documentElement.setAttribute("data-drakora-embedded", "");
   let previous = "";
   let scheduled = false;
   const report = () => {

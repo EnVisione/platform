@@ -159,6 +159,7 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
     messages = [],
     destinations = [],
     styles = [];
+  const attributes = new Map([["class", "theme-dark normal-font"]]);
   const parent = {
     postMessage: (message, origin) => messages.push({ message, origin }),
   };
@@ -178,7 +179,7 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
       dataset: { staffOrigin: config.staffOrigin, workspace: "staff" },
     },
     documentElement: {
-      classList: { add() {} },
+      setAttribute: (name, value) => attributes.set(name, value),
       style: { setProperty: (...args) => styles.push(args) },
     },
     querySelector: () => ({}),
@@ -202,6 +203,8 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
       URL,
     },
   );
+  document.documentElement.setAttribute("class", "theme-dark small-font");
+  assert.equal(attributes.get("data-drakora-embedded"), "");
   assert.equal(messages[0].message.view, "tracker");
   assert.equal(messages[0].origin, config.staffOrigin);
   assert.equal(Object.hasOwn(messages[0].message, "token"), false);
