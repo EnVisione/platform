@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { newDraft, replyDraft, draftPayload } from "./mail-draft.js";
 import "./mail.css";
 
 const errors = {
@@ -53,11 +55,8 @@ const people = (values = []) =>
   values
     .map(({ name, address }) => (name ? `${name} <${address}>` : address))
     .join(", ");
-const emailAddresses = (values = []) =>
-  values
-    .map(({ address }) => address)
-    .filter(Boolean)
-    .join(", ");
+const emailSender = (values = []) =>
+  values.map(({ address }) => address).join(", ");
 const sizeLabel = (value) =>
   value >= 1048576
     ? `${(value / 1048576).toFixed(1)} MB`
@@ -72,25 +71,32 @@ const folderNames = {
   "\\All": "All mail",
   "\\Flagged": "Starred",
 };
-const blankDraft = (from) => ({
-  sendId: crypto.randomUUID(),
-  from,
-  to: "",
-  cc: "",
-  bcc: "",
-  subject: "",
-  text: "",
-  attachments: [],
-});
-
-function Composer({ draft, identities, csrf, onClose, onSent }) {
-  const [value, setValue] = useState(draft);
+function Composer({
+  draft: value,
+  identities,
+  csrf,
+  inlineHost,
+  openRequest,
+  onChange,
+  onClose,
+  onSent,
+}) {
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState(null);
   const [uncertain, setUncertain] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [poppedOut, setPoppedOut] = useState(false);
+  const [showCc, setShowCc] = useState(Boolean(value.cc));
+  const [showBcc, setShowBcc] = useState(Boolean(value.bcc));
+  const [editSubject, setEditSubject] = useState(false);
+  const inline = Boolean(inlineHost && !poppedOut && !expanded);
   const dialog = useRef(null),
-    toInput = useRef(null);
+    toInput = useRef(null),
+    textInput = useRef(null),
+    form = useRef(null),
+    filesInput = useRef(null);
   const hasContent = Boolean(
     value.to ||
     value.cc ||
@@ -108,10 +114,17 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
       onClose();
   };
   useEffect(() => {
+    if (openRequest) setMinimized(false);
+  }, [openRequest]);
+  useEffect(() => {
     const previous = document.activeElement;
-    toInput.current?.focus();
+    if (!minimized)
+      (value.composeKind === "new" || value.composeKind === "forward"
+        ? toInput
+        : textInput
+      ).current?.focus();
     return () => previous?.focus();
-  }, []);
+  }, [minimized, inline, expanded]);
   useEffect(() => {
     const beforeUnload = (event) => {
       if (hasContent || busy) {
@@ -125,14 +138,22 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
   function trapFocus(event) {
     if (event.key === "Escape") {
       event.preventDefault();
-      discard();
+      if (!busy && !reading) setMinimized(true);
     }
-    if (event.key !== "Tab") return;
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key === "Enter" &&
+      !event.isComposing
+    ) {
+      event.preventDefault();
+      if (!busy && !reading && !uncertain) form.current?.requestSubmit();
+    }
+    if (event.key !== "Tab" || !expanded) return;
     const elements = [
       ...dialog.current.querySelectorAll(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
+        "button:not(:disabled), input:not(:disabled):not([type=hidden]), select:not(:disabled), textarea:not(:disabled), summary, a[href]",
       ),
-    ];
+    ].filter((element) => element.getClientRects().length);
     const first = elements[0],
       last = elements.at(-1);
     if (event.shiftKey && document.activeElement === first) {
@@ -144,7 +165,7 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
     }
   }
   const update = (key, next) =>
-    setValue((previous) => ({ ...previous, [key]: next }));
+    onChange((previous) => ({ ...previous, [key]: next }));
   async function attach(event) {
     const files = [...event.target.files];
     event.target.value = "";
@@ -179,7 +200,7 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
             }),
         ),
       );
-      setValue((previous) => ({
+      onChange((previous) => ({
         ...previous,
         attachments: [...previous.attachments, ...attachments],
       }));
@@ -199,7 +220,7 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
       const result = await request("/send", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify(value),
+        body: JSON.stringify(draftPayload(value)),
       });
       onSent(result);
     } catch (failure) {
@@ -219,56 +240,136 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
       setBusy(false);
     }
   }
-  return (
-    <div className="mail-modal-backdrop">
-      <section
-        className="mail-composer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="mail-compose-title"
-        ref={dialog}
-        onKeyDown={trapFocus}
-      >
-        <header>
-          <div>
-            <span className="mail-eyebrow">DRAKORA EMAIL</span>
-            <h2 id="mail-compose-title">
-              {value.reply?.kind === "reply"
-                ? "Reply"
-                : value.reply?.kind === "forward"
-                  ? "Forward email"
-                  : "New email"}
-            </h2>
-          </div>
+  const title =
+    value.composeKind === "new"
+      ? "New message"
+      : value.composeKind === "forward"
+        ? "Forward"
+        : value.composeKind === "all"
+          ? "Reply all"
+          : "Reply";
+  const keepDraft = () => {
+    if (busy || reading) return;
+    if (hasContent) setMinimized(true);
+    else onClose();
+  };
+  if (minimized)
+    return (
+      <div className="mail-draft-tray">
+        <button
+          className="mail-draft-restore"
+          onClick={() => setMinimized(false)}
+        >
+          <span className="mail-draft-badge">Draft</span>
+          <span>{value.subject || "New message"}</span>
+          <span aria-hidden="true">↗</span>
+        </button>
+        <button
+          className="mail-discard"
+          aria-label="Discard draft"
+          onClick={discard}
+        >
+          🗑
+        </button>
+      </div>
+    );
+  const content = (
+    <section
+      className={`mail-composer${inline ? " mail-composer-inline" : ""}${expanded ? " mail-composer-expanded" : ""}`}
+      role={expanded ? "dialog" : "region"}
+      aria-modal={expanded ? "true" : undefined}
+      aria-labelledby="mail-compose-title"
+      ref={dialog}
+      onKeyDown={trapFocus}
+    >
+      <header>
+        <h2 id="mail-compose-title">
+          <span aria-hidden="true">
+            {value.composeKind === "new" ? "✎" : "↩"}
+          </span>{" "}
+          {["reply", "all"].includes(value.composeKind) ? (
+            <select
+              className="mail-reply-mode"
+              aria-label="Reply mode"
+              disabled={busy || reading}
+              value={value.composeKind}
+              onChange={(event) => {
+                const kind = event.target.value;
+                onChange((previous) => ({
+                  ...previous,
+                  composeKind: kind,
+                  cc: kind === "all" ? previous.replyAllCc : "",
+                }));
+              }}
+            >
+              <option value="reply">Reply</option>
+              <option value="all">Reply all</option>
+            </select>
+          ) : (
+            title
+          )}
+        </h2>
+        <span className="mail-draft-badge">Draft</span>
+        <div className="mail-window-controls">
           <button
             type="button"
-            className="mail-icon-button"
-            aria-label="Close composer"
+            aria-label="Minimize draft"
             disabled={busy || reading}
-            onClick={discard}
+            onClick={() => setMinimized(true)}
+          >
+            −
+          </button>
+          {inline && (
+            <button
+              type="button"
+              aria-label="Pop out reply"
+              disabled={busy || reading}
+              onClick={() => setPoppedOut(true)}
+            >
+              ↗
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label={expanded ? "Exit full screen" : "Expand composer"}
+            disabled={busy || reading}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "↙" : "⛶"}
+          </button>
+          <button
+            type="button"
+            aria-label="Close and keep draft"
+            disabled={busy || reading}
+            onClick={keepDraft}
           >
             ✕
           </button>
-        </header>
-        <form onSubmit={send}>
-          <fieldset disabled={busy || reading}>
-            <label>
-              Send from
-              <select
-                value={value.from}
-                onChange={(event) => update("from", event.target.value)}
-              >
-                {identities.map((identity) => (
-                  <option key={identity.address} value={identity.address}>
-                    {identity.name} · {identity.address}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              To{" "}
-              <span className="mail-required" aria-label="required">
-                *
+        </div>
+      </header>
+      <form ref={form} onSubmit={send}>
+        <fieldset disabled={busy || reading}>
+          <label className="mail-compose-line">
+            <span>From</span>
+            <select
+              aria-label="Send from"
+              value={value.from}
+              onChange={(event) => update("from", event.target.value)}
+            >
+              {identities.map((identity) => (
+                <option key={identity.address} value={identity.address}>
+                  {identity.name} · {identity.address}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mail-compose-recipients">
+            <label className="mail-compose-line">
+              <span>
+                To{" "}
+                <span className="mail-required" aria-label="required">
+                  *
+                </span>
               </span>
               <input
                 ref={toInput}
@@ -278,120 +379,189 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
                 value={value.to}
                 maxLength={5200}
                 onChange={(event) => update("to", event.target.value)}
-                placeholder="name@example.com"
+                placeholder="Recipients"
               />
             </label>
-            <div className="mail-compose-columns">
-              <label>
-                Cc
-                <input
-                  type="email"
-                  multiple
-                  value={value.cc}
-                  maxLength={5200}
-                  onChange={(event) => update("cc", event.target.value)}
-                />
-              </label>
-              <label>
-                Bcc
-                <input
-                  type="email"
-                  multiple
-                  value={value.bcc}
-                  maxLength={5200}
-                  onChange={(event) => update("bcc", event.target.value)}
-                />
-              </label>
+            <div className="mail-recipient-toggles">
+              {!showCc && !value.cc && (
+                <button type="button" onClick={() => setShowCc(true)}>
+                  Cc
+                </button>
+              )}
+              {!showBcc && !value.bcc && (
+                <button type="button" onClick={() => setShowBcc(true)}>
+                  Bcc
+                </button>
+              )}
             </div>
-            <label>
-              Subject{" "}
-              <span className="mail-required" aria-label="required">
-                *
+          </div>
+          {(showCc || value.cc) && (
+            <label className="mail-compose-line">
+              <span>Cc</span>
+              <input
+                type="email"
+                multiple
+                value={value.cc}
+                maxLength={5200}
+                onChange={(event) => update("cc", event.target.value)}
+              />
+            </label>
+          )}
+          {(showBcc || value.bcc) && (
+            <label className="mail-compose-line">
+              <span>Bcc</span>
+              <input
+                type="email"
+                multiple
+                value={value.bcc}
+                maxLength={5200}
+                onChange={(event) => update("bcc", event.target.value)}
+              />
+            </label>
+          )}
+          {value.composeKind === "new" || editSubject ? (
+            <label className="mail-compose-line">
+              <span>
+                Subject{" "}
+                <span className="mail-required" aria-label="required">
+                  *
+                </span>
               </span>
               <input
                 required
                 value={value.subject}
                 maxLength={200}
                 onChange={(event) => update("subject", event.target.value)}
+                placeholder="Subject"
               />
             </label>
-            <label>
+          ) : (
+            <div className="mail-reply-subject">
+              <span>{value.subject}</span>
+              <button type="button" onClick={() => setEditSubject(true)}>
+                Edit subject
+              </button>
+            </div>
+          )}
+          <label className="mail-compose-body">
+            <span className="mail-message-label">
               Message{" "}
               <span className="mail-required" aria-label="required">
                 *
               </span>
-              <textarea
-                required
-                rows={10}
-                value={value.text}
-                maxLength={50000}
-                onChange={(event) => update("text", event.target.value)}
-                placeholder="Write your message…"
-              />
-            </label>
-            <label className="mail-file-input">
-              Attach files
-              <input type="file" multiple onChange={attach} />
-              <small>
-                Up to five files, 10 MB total. Files go with the email and are
-                not saved in the staff database.
-              </small>
-            </label>
-            {value.attachments.length > 0 && (
-              <ul className="mail-compose-attachments">
-                {value.attachments.map((file, index) => (
-                  <li key={`${index}:${file.filename}`}>
-                    <span>
-                      {file.filename} · {sizeLabel(file.size)}
-                    </span>
-                    <button
-                      type="button"
-                      className="mail-icon-button"
-                      aria-label={`Remove ${file.filename}`}
-                      onClick={() =>
-                        update(
-                          "attachments",
-                          value.attachments.filter(
-                            (_, position) => position !== index,
-                          ),
-                        )
-                      }
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </fieldset>
-          {error && (
-            <p className="mail-error" role="alert">
-              {error}
-            </p>
+            </span>
+            <textarea
+              ref={textInput}
+              required
+              rows={inline ? 7 : 12}
+              value={value.text}
+              maxLength={Math.max(
+                1,
+                50000 - (value.quoteText ? value.quoteText.length + 2 : 0),
+              )}
+              onChange={(event) => update("text", event.target.value)}
+              placeholder={
+                value.composeKind === "new" || value.composeKind === "forward"
+                  ? "Write your message…"
+                  : "Write your reply…"
+              }
+            />
+          </label>
+          {value.quoteText && (
+            <details className="mail-quoted-history">
+              <summary>Show quoted message</summary>
+              {value.composeKind === "forward" && (
+                <p>
+                  Original attachments are not included. Attach any files you
+                  want to forward.
+                </p>
+              )}
+              <pre>{value.quoteText}</pre>
+              <button type="button" onClick={() => update("quoteText", "")}>
+                Remove quoted message
+              </button>
+            </details>
           )}
-          <footer>
-            <p>
-              Shared staff mailbox. This draft stays only in this open page.
-            </p>
-            <div>
-              <button
-                type="button"
-                className="mail-secondary"
-                disabled={busy || reading}
-                onClick={discard}
-              >
-                Discard
-              </button>
-              <button
-                className="mail-primary"
-                disabled={busy || reading || uncertain}
-              >
-                {busy ? "Sending…" : reading ? "Reading files…" : "Send email"}
-              </button>
-            </div>
-          </footer>
-        </form>
-      </section>
+          <input
+            ref={filesInput}
+            className="mail-hidden-file"
+            type="file"
+            multiple
+            onChange={attach}
+            aria-label="Attach files"
+          />
+          {value.attachments.length > 0 && (
+            <ul className="mail-compose-attachments">
+              {value.attachments.map((file, index) => (
+                <li key={`${index}:${file.filename}`}>
+                  <span>
+                    ⌁ {file.filename} · {sizeLabel(file.size)}
+                  </span>
+                  <button
+                    type="button"
+                    className="mail-icon-button"
+                    aria-label={`Remove ${file.filename}`}
+                    onClick={() =>
+                      update(
+                        "attachments",
+                        value.attachments.filter(
+                          (_, position) => position !== index,
+                        ),
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </fieldset>
+        {error && (
+          <p className="mail-error" role="alert">
+            {error}
+          </p>
+        )}
+        <footer>
+          <div className="mail-send-tools">
+            <button
+              className="mail-primary mail-send-button"
+              title="Send email. Ctrl or Command and Enter."
+              disabled={busy || reading || uncertain}
+            >
+              {busy ? "Sending…" : reading ? "Reading files…" : "Send"}{" "}
+              <span aria-hidden="true">➤</span>
+            </button>
+            <button
+              type="button"
+              className="mail-attach-button"
+              aria-label="Attach files"
+              title="Up to five files, 10 MB total"
+              disabled={busy || reading}
+              onClick={() => filesInput.current?.click()}
+            >
+              📎
+            </button>
+          </div>
+          <span className="mail-draft-note">Kept in this open page</span>
+          <button
+            type="button"
+            className="mail-discard"
+            aria-label="Discard draft"
+            title="Discard draft"
+            disabled={busy || reading}
+            onClick={discard}
+          >
+            🗑
+          </button>
+        </footer>
+      </form>
+    </section>
+  );
+  if (inline) return createPortal(content, inlineHost);
+  return (
+    <div className={expanded ? "mail-modal-backdrop" : "mail-compose-window"}>
+      {content}
     </div>
   );
 }
@@ -416,6 +586,9 @@ export function Mail({ csrf, capabilities }) {
     [notice, setNotice] = useState(null);
   const [draft, setDraft] = useState(null),
     [flagBusy, setFlagBusy] = useState(false);
+  const [replyHost, setReplyHost] = useState(null);
+  const [draftOpen, setDraftOpen] = useState(0);
+  const [sentReply, setSentReply] = useState(null);
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
@@ -546,58 +719,20 @@ export function Mail({ csrf, capabilities }) {
     }
   }
   function compose(kind) {
-    const original = kind && message;
-    const own = new Set(
-      metadata.identities.map((entry) => entry.address.toLowerCase()),
-    );
-    const from =
-      original?.to.find((entry) => own.has(entry.address.toLowerCase()))
-        ?.address ??
-      identity ??
-      "";
-    const next = blankDraft(
-      metadata.identities.find(
-        (entry) => entry.address.toLowerCase() === from.toLowerCase(),
-      )?.address ?? metadata.identities[0].address,
-    );
-    if (original) {
-      const reply = original.replyTo.filter(
-        (entry) => !own.has(entry.address.toLowerCase()),
+    if (draft) {
+      setDraftOpen((previous) => previous + 1);
+      setNotice(
+        "Your unsent draft is open. Send or discard it before starting another message.",
       );
-      const fallback = reply.length
-        ? reply
-        : original.to.filter((entry) => !own.has(entry.address.toLowerCase()));
-      next.to = kind === "forward" ? "" : emailAddresses(fallback);
-      if (kind === "all") {
-        const used = new Set(
-          fallback.map((entry) => entry.address.toLowerCase()),
-        );
-        next.cc = emailAddresses(
-          [...original.to, ...original.cc].filter((entry) => {
-            const key = entry.address.toLowerCase();
-            if (own.has(key) || used.has(key)) return false;
-            used.add(key);
-            return true;
-          }),
-        );
-      }
-      const prefix = kind === "forward" ? "Fwd" : "Re";
-      next.subject = new RegExp(`^${prefix}:`, "i").test(original.subject)
-        ? original.subject
-        : `${prefix}: ${original.subject}`;
-      next.subject = next.subject.slice(0, 200);
-      next.text = `\n\nOn ${formatDate(original.date)}, ${people(original.from)} wrote:\n${original.replyText
-        .slice(0, 20000)
-        .split("\n")
-        .map((line) => `> ${line}`)
-        .join("\n")}`;
-      next.reply = {
-        kind: kind === "forward" ? "forward" : "reply",
-        folder: original.folder,
-        uid: original.uid,
-        validity: original.validity,
-      };
+      return;
     }
+    const next =
+      kind && message
+        ? replyDraft(kind, message, metadata.identities, identity)
+        : newDraft(
+            metadata.identities.find((entry) => entry.address === identity)
+              ?.address ?? metadata.identities[0].address,
+          );
     setDraft(next);
     setNotice(null);
   }
@@ -884,67 +1019,77 @@ export function Mail({ csrf, capabilities }) {
             ) : message ? (
               <>
                 <header className="mail-reader-header">
-                  <span className="mail-eyebrow">
-                    {message.seen ? "READ EMAIL" : "UNREAD EMAIL"}
-                  </span>
-                  <h3>{message.subject}</h3>
-                  <dl>
-                    <div>
-                      <dt>From</dt>
-                      <dd>{people(message.from)}</dd>
+                  <div className="mail-reader-title">
+                    <h3>{message.subject}</h3>
+                    <span
+                      className={`mail-read-badge${message.seen ? " read" : ""}`}
+                    >
+                      {message.seen ? "Read" : "Unread"}
+                    </span>
+                  </div>
+                  <div className="mail-sender-card">
+                    <span className="mail-sender-avatar" aria-hidden="true">
+                      {Array.from(
+                        message.from[0]?.name ||
+                          message.from[0]?.address ||
+                          "?",
+                      )[0].toUpperCase()}
+                    </span>
+                    <div className="mail-sender-identity">
+                      <strong>
+                        {message.from[0]?.name ||
+                          message.from[0]?.address ||
+                          "Unknown sender"}
+                      </strong>
+                      <span>{emailSender(message.from)}</span>
+                      <details className="mail-envelope-details">
+                        <summary>
+                          to {people(message.to)}{" "}
+                          <span aria-hidden="true">⌄</span>
+                        </summary>
+                        <dl>
+                          <div>
+                            <dt>From</dt>
+                            <dd>{people(message.from)}</dd>
+                          </div>
+                          <div>
+                            <dt>To</dt>
+                            <dd>{people(message.to)}</dd>
+                          </div>
+                          {message.cc.length > 0 && (
+                            <div>
+                              <dt>Cc</dt>
+                              <dd>{people(message.cc)}</dd>
+                            </div>
+                          )}
+                          <div>
+                            <dt>Received</dt>
+                            <dd>{formatDate(message.date)}</dd>
+                          </div>
+                        </dl>
+                      </details>
                     </div>
-                    <div>
-                      <dt>To</dt>
-                      <dd>{people(message.to)}</dd>
-                    </div>
-                    {message.cc.length > 0 && (
-                      <div>
-                        <dt>Cc</dt>
-                        <dd>{people(message.cc)}</dd>
-                      </div>
-                    )}
-                    <div>
-                      <dt>Received</dt>
-                      <dd>{formatDate(message.date)}</dd>
-                    </div>
-                  </dl>
-                  <div className="mail-reader-actions">
-                    {capabilities["mail.send"] && (
-                      <>
-                        <button
-                          className="mail-primary"
-                          onClick={() => compose("reply")}
-                        >
-                          Reply
-                        </button>
-                        <button
-                          className="mail-secondary"
-                          onClick={() => compose("all")}
-                        >
-                          Reply all
-                        </button>
-                        <button
-                          className="mail-secondary"
-                          onClick={() => compose("forward")}
-                        >
-                          Forward
-                        </button>
-                      </>
-                    )}
+                    <time
+                      className="mail-reader-date"
+                      title={formatDate(message.date)}
+                    >
+                      {formatDate(message.date)}
+                    </time>
                     {capabilities["mail.flags"] && (
-                      <>
+                      <div className="mail-reader-flags">
                         <button
-                          className="mail-secondary"
+                          className="mail-read-action"
                           disabled={flagBusy}
                           onClick={() => changeFlag("seen", !message.seen)}
                         >
                           {message.seen ? "Mark unread" : "Mark read"}
                         </button>
                         <button
-                          className="mail-icon-button"
+                          className={`mail-row-star${message.starred ? " starred" : ""}`}
                           aria-label={
                             message.starred ? "Remove star" : "Star email"
                           }
+                          aria-pressed={message.starred}
                           disabled={flagBusy}
                           onClick={() =>
                             changeFlag("starred", !message.starred)
@@ -952,7 +1097,7 @@ export function Mail({ csrf, capabilities }) {
                         >
                           {message.starred ? "★" : "☆"}
                         </button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </header>
@@ -983,6 +1128,45 @@ export function Mail({ csrf, capabilities }) {
                       ))}
                     </section>
                   )}
+                {sentReply?.uid === message.uid &&
+                  sentReply?.folder === message.folder &&
+                  sentReply?.validity === message.validity && (
+                    <section
+                      className="mail-sent-reply"
+                      aria-label="Your sent reply"
+                    >
+                      <header>
+                        <strong>✓ Reply accepted by Proton</strong>
+                        <span>
+                          {sentReply.from} · {formatDate(sentReply.date)}
+                        </span>
+                      </header>
+                      <pre>{sentReply.text}</pre>
+                    </section>
+                  )}
+                {capabilities["mail.send"] && (
+                  <div className="mail-reply-actions">
+                    <button
+                      className="mail-reply-action"
+                      onClick={() => compose("reply")}
+                    >
+                      <span aria-hidden="true">↩</span> Reply
+                    </button>
+                    <button
+                      className="mail-reply-all-action"
+                      onClick={() => compose("all")}
+                    >
+                      <span aria-hidden="true">↶</span> Reply all
+                    </button>
+                    <button
+                      className="mail-forward-action"
+                      onClick={() => compose("forward")}
+                    >
+                      <span aria-hidden="true">↪</span> Forward
+                    </button>
+                  </div>
+                )}
+                <div className="mail-reply-host" ref={setReplyHost} />
               </>
             ) : null}
           </article>
@@ -994,15 +1178,38 @@ export function Mail({ csrf, capabilities }) {
           draft={draft}
           identities={metadata.identities}
           csrf={csrf}
+          onChange={setDraft}
+          openRequest={draftOpen}
+          inlineHost={
+            selected?.uid === draft.reply?.uid &&
+            selected?.folder === draft.reply?.folder &&
+            selected?.validity === draft.reply?.validity
+              ? replyHost
+              : null
+          }
           onClose={() => setDraft(null)}
           onSent={(result) => {
+            if (
+              draft.reply?.kind === "reply" &&
+              selected?.uid === draft.reply.uid &&
+              selected?.folder === draft.reply.folder &&
+              selected?.validity === draft.reply.validity
+            ) {
+              setSentReply({
+                ...draft.reply,
+                from: draft.from,
+                text: draft.text,
+                date: new Date().toISOString(),
+              });
+            } else {
+              setRefresh((value) => value + 1);
+            }
             setDraft(null);
             setNotice(
               result.rejected.length
                 ? `Email accepted for ${result.accepted.length} recipient(s). Rejected addresses: ${result.rejected.join(", ")}. Check the addresses before sending a separate message.`
                 : "Email accepted by Proton. A copy will appear in Sent.",
             );
-            setRefresh((value) => value + 1);
           }}
         />
       )}
