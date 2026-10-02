@@ -39,6 +39,10 @@ export function applicationRouter(config, applications, dist) {
     mutation(req);
     res.json(applications.patch(req.sessionID, req.body));
   });
+  router.put("/apply/api/notifications", async (req, res) => {
+    mutation(req);
+    res.json(await applications.updateNotifications(req.sessionID, req.body));
+  });
   router.post("/apply/api/new", (req, res) => {
     mutation(req);
     res.json(applications.restart(req.sessionID));

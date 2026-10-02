@@ -37,10 +37,11 @@ function setup(
   t,
   fetcher = async () => new Response(null, { status: 404 }),
   getMinecraftLink,
+  settings = config,
 ) {
   const database = openStore(":memory:", randomBytes(32).toString("base64"));
   const service = applicationService(
-    config,
+    settings,
     database.store,
     fetcher,
     getMinecraftLink,
@@ -1154,7 +1155,10 @@ test("staff denial notices support anonymous applicants and legacy jobs without 
     embed.fields[1].value,
     `<t:${deadline}:F> · <t:${deadline}:R>\nMinimum wait: 10 days.`,
   );
-  assert.match(embed.fields.at(-1).value, /No Discord account linked/);
+  assert.match(
+    embed.fields.at(-1).value,
+    /Email selected.*awaiting SMTP setup/,
+  );
   assert.ok(embed.footer.text.includes(id));
   assert.equal(
     notice.components[0].components[0].url,
@@ -1294,4 +1298,341 @@ test("notification queue failures roll back submission and decisions together", 
   assert.equal(service.get(id).status, "Received");
   assert.equal(service.list().items[0].status, "Received");
   assert.equal(store.page("application-cooldown").total, 0);
+});
+
+test("email opt-out requires an explicit address and preserves updates without sending Discord messages", async (t) => {
+  const calls = [];
+  const { service, store } = setup(t, async (url, options) => {
+    calls.push(url);
+    return Response.json({ id: "900" });
+  });
+  connectedDraft(service);
+  service.patch("session", {
+    answers: { notificationPreference: "email", contactEmail: "" },
+  });
+  assert.ok((await service.submit("session")).errors.contactEmail);
+  service.patch("session", { answers: { contactEmail: "chosen@example.com" } });
+  const { id } = await service.submit("session");
+  service.startReview(id, reviewer("28"));
+  service.decide(
+    id,
+    reviewer("28"),
+    "deny",
+    "Try again after gaining more experience.",
+    10,
+  );
+  await service.delivery();
+  assert.equal(
+    calls.filter((url) => url.includes("/users/@me/channels")).length,
+    0,
+  );
+  assert.equal(calls.filter((url) => url.includes("/channels/")).length, 3);
+  assert.equal(service.get(id).contactEmail, "chosen@example.com");
+  assert.deepEqual(
+    service
+      .get(id)
+      .notifications.map((update) => [
+        update.event,
+        update.route,
+        update.awaitingSetup,
+      ]),
+    [
+      ["received", "email", true],
+      ["reviewing", "email", true],
+      ["denied", "email", true],
+    ],
+  );
+  const receipt = service.view("session").submitted;
+  assert.equal(
+    receipt.decision.reason,
+    "Try again after gaining more experience.",
+  );
+  assert.equal(receipt.decision.author, undefined);
+  assert.ok(receipt.decision.reapplyAfter);
+  assert.equal(receipt.comments, undefined);
+  assert.equal(store.page("application-email-notification", 10).total, 3);
+  assert.equal(store.page("application-notification", 10).total, 0);
+  assert.throws(
+    () =>
+      service.patch("other", { answers: { notificationPreference: "public" } }),
+    /invalid_notification_preference/,
+  );
+});
+
+test("receipt preferences are session-bound, cancel queued DMs, persist, and keep the role cooldown", async (t) => {
+  const { service, store } = setup(t);
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await assert.rejects(
+    service.updateNotifications("other", {
+      preference: "email",
+      email: "chosen@example.com",
+    }),
+    /application_not_found/,
+  );
+  await assert.rejects(
+    service.updateNotifications("session", {
+      preference: "email",
+      email: "bad",
+    }),
+    /invalid_contact_email/,
+  );
+  const updated = await service.updateNotifications("session", {
+    preference: "email",
+    email: "chosen@example.com",
+  });
+  assert.equal(updated.submitted.name, "Application fixture");
+  assert.equal(updated.submitted.notificationPreference, "email");
+  assert.equal(store.page("application-notification", 10).total, 1); // staff notice only
+  service.startReview(id, reviewer("28"));
+  service.decide(id, reviewer("28"), "deny", "More experience needed.", 7);
+  await service.updateNotifications("session", {
+    preference: "email",
+    email: "new@example.com",
+  });
+  assert.equal(
+    service.view("session").submitted.contactEmail,
+    "new@example.com",
+  );
+  assert.equal(
+    store.get("application-email-notification", `${id}:received`).recipient,
+    "new@example.com",
+  );
+  service.restart("session");
+  service.disconnect("session");
+  service.patch("session", {
+    role: "community",
+    answers: { ...answers(), contactEmail: "new@example.com" },
+  });
+  assert.ok((await service.submit("session")).errors.reapplication);
+});
+
+function fallbackFetcher({
+  member = true,
+  dmStatus = 403,
+  repair = true,
+} = {}) {
+  const calls = [];
+  let channel;
+  let creates = 0;
+  const fetcher = async (url, options = {}) => {
+    const path = new URL(url).pathname.replace("/api/v10", "");
+    const method = options.method ?? "GET";
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    calls.push({ path, method, body });
+    if (path === "/users/@me/channels") return Response.json({ id: "100" });
+    if (path === "/channels/100/messages")
+      return Response.json(
+        { code: dmStatus === 403 ? 50007 : undefined, retry_after: 60 },
+        { status: dmStatus },
+      );
+    if (path === "/guilds/60/members/123")
+      return member
+        ? Response.json({ user: { id: "123" } })
+        : new Response(null, { status: 404 });
+    if (path === "/users/@me") return Response.json({ id: "999" });
+    if (path === "/guilds/60/roles") return Response.json([{ id: "61" }]);
+    if (path === "/channels/62")
+      return Response.json({ id: "62", guild_id: "60", type: 4 });
+    if (path === "/guilds/60/channels" && method === "GET")
+      return Response.json(channel ? [channel] : []);
+    if (path === "/guilds/60/channels" && method === "POST") {
+      creates++;
+      channel = { id: "200", guild_id: "60", ...body };
+      return Response.json(channel);
+    }
+    if (path === "/channels/200" && method === "PATCH") {
+      if (repair) channel = { ...channel, ...body };
+      return Response.json(channel);
+    }
+    if (path === "/channels/200") return Response.json(channel);
+    if (path.endsWith("/messages"))
+      return Response.json({ id: String(300 + calls.length) });
+    if (url.includes("minecraft")) return new Response(null, { status: 404 });
+    throw new Error(`Unexpected synthetic request ${method} ${path}`);
+  };
+  return {
+    fetcher,
+    calls,
+    get creates() {
+      return creates;
+    },
+    widen() {
+      channel.permission_overwrites.push({
+        id: "70",
+        type: 0,
+        allow: "1024",
+        deny: "0",
+      });
+    },
+  };
+}
+const fallbackConfig = {
+  ...config,
+  applications: {
+    ...config.applications,
+    fallback: { guildId: "60", categoryId: "62", reviewerRoleIds: ["61"] },
+  },
+};
+
+test("blocked DMs use one private channel, repair its permissions, and report the delivery route", async (t) => {
+  const fixture = fallbackFetcher();
+  const { service } = setup(t, fixture.fetcher, undefined, fallbackConfig);
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await service.delivery();
+  const delivery = service.get(id).notifications[0];
+  assert.equal(delivery.route, "private");
+  assert.ok(delivery.sentAt);
+  assert.equal(delivery.channelUrl, "https://discord.com/channels/60/200");
+  const created = fixture.calls.find(
+    (call) => call.path === "/guilds/60/channels" && call.method === "POST",
+  ).body;
+  assert.deepEqual(
+    created.permission_overwrites.find((overwrite) => overwrite.id === "60"),
+    { id: "60", type: 0, allow: "0", deny: "1024" },
+  );
+  assert.deepEqual(
+    created.permission_overwrites.map((overwrite) => overwrite.id),
+    ["60", "61", "123", "999"],
+  );
+  fixture.widen();
+  service.startReview(id, reviewer("28"));
+  await service.delivery();
+  assert.equal(fixture.creates, 1);
+  assert.ok(
+    fixture.calls.some(
+      (call) => call.path === "/channels/200" && call.method === "PATCH",
+    ),
+  );
+  assert.equal(
+    fixture.calls.filter((call) => call.path === "/channels/100/messages")
+      .length,
+    1,
+  );
+  const notice = fixture.calls.find(
+    (call) => call.path === "/channels/50/messages" && call.body.embeds,
+  )?.body;
+  assert.match(
+    notice.embeds[0].fields.at(-1).value,
+    /notified in a private channel/,
+  );
+  for (const call of fixture.calls.filter((call) =>
+    call.path.endsWith("/messages"),
+  ))
+    assert.deepEqual(call.body.allowed_mentions.parse, []);
+});
+
+test("fallback never exposes an absent member or posts into a channel whose permissions cannot be repaired", async (t) => {
+  for (const options of [{ member: false }, { repair: false }]) {
+    const fixture = fallbackFetcher(options);
+    const { service } = setup(t, fixture.fetcher, undefined, fallbackConfig);
+    connectedDraft(service);
+    const { id } = await service.submit("session");
+    await service.delivery();
+    if (options.repair === false) {
+      fixture.widen();
+      service.startReview(id, reviewer("28"));
+      await service.delivery();
+    }
+    const update = service.get(id).notifications.at(-1);
+    assert.ok(update.failedAt);
+    assert.equal(
+      update.reason,
+      options.member === false
+        ? "fallback_join_required"
+        : "fallback_permissions_failed",
+    );
+    assert.equal(
+      fixture.calls.filter((call) => call.path === "/channels/200/messages")
+        .length,
+      options.member === false ? 0 : 1,
+    );
+    if (options.member === false) assert.equal(fixture.creates, 0);
+  }
+});
+
+test("rate-limited DMs stay queued without creating a private fallback channel", async (t) => {
+  const fixture = fallbackFetcher({ dmStatus: 429 });
+  const { service } = setup(t, fixture.fetcher, undefined, fallbackConfig);
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await service.delivery();
+  assert.equal(service.get(id).notifications[0].pending, true);
+  assert.equal(fixture.creates, 0);
+  assert.equal(
+    fixture.calls.some((call) => call.path.startsWith("/guilds/60")),
+    false,
+  );
+});
+
+test("opt-out waits for an in-flight update and prevents later Discord updates", async (t) => {
+  let release;
+  let began;
+  const entered = new Promise((resolve) => {
+    began = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const calls = [];
+  const { service } = setup(t, async (url, options) => {
+    if (url.endsWith("/users/@me/channels"))
+      return Response.json({ id: "100" });
+    if (url.endsWith("/channels/100/messages")) {
+      began();
+      await blocked;
+    }
+    calls.push(url);
+    return Response.json({ id: "200" });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  const delivery = service.delivery();
+  await entered;
+  const update = service.updateNotifications("session", {
+    preference: "email",
+    email: "chosen@example.com",
+  });
+  assert.equal(service.get(id).notificationPreference, "discord");
+  release();
+  await delivery;
+  await update;
+  service.startReview(id, reviewer("28"));
+  await service.delivery();
+  assert.equal(
+    calls.filter((url) => url.endsWith("/channels/100/messages")).length,
+    1,
+  );
+  assert.equal(service.get(id).notifications.at(-1).route, "email");
+});
+
+test("switching an undelivered email update back to Discord exposes the new queue instead of an old failure", async (t) => {
+  const { service, store } = setup(t);
+  connectedDraft(service);
+  service.patch("session", {
+    answers: {
+      notificationPreference: "email",
+      contactEmail: "chosen@example.com",
+    },
+  });
+  const { id } = await service.submit("session");
+  store.set(
+    "application-dm-delivery",
+    `${id}:received`,
+    { failedAt: Date.now() },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await service.updateNotifications("session", {
+    preference: "discord",
+    email: "chosen@example.com",
+  });
+  assert.equal(
+    service.view("session").submitted.notifications[0].pending,
+    true,
+  );
+  assert.equal(
+    service.view("session").submitted.notifications[0].failedAt,
+    undefined,
+  );
 });

@@ -11,7 +11,10 @@ import {
   parseEvidenceLinks,
 } from "../shared/application-form.js";
 import { applicationForms } from "./application-forms.js";
-import { applicationNotifications } from "./application-notifications.js";
+import {
+  applicationNotifications,
+  notificationMode,
+} from "./application-notifications.js";
 import {
   communityRankNames,
   applicationReviewAccess,
@@ -97,13 +100,27 @@ export function applicationService(
   }
   function view(sessionId) {
     const draft = load(sessionId);
-    if (draft.submittedId)
+    if (draft.submittedId) {
+      const record = store.get("application", draft.submittedId);
       return {
         submitted: {
           id: draft.submittedId,
           role: applicationRoles[draft.role].label,
+          name: record.answers.displayName,
+          status: record.status,
+          discordLinked: Boolean(record.discord),
+          notificationPreference: notificationMode(record),
+          contactEmail: record.contactEmail,
+          notifications: notifications.status(record.id),
+          decision: record.decision
+            ? {
+                reason: record.decision.reason,
+                reapplyAfter: record.decision.reapplyAfter,
+              }
+            : undefined,
         },
       };
+    }
     const identity = draft.identity;
     const linked = linkedMinecraft(draft);
     return {
@@ -191,6 +208,11 @@ export function applicationService(
         throw new AuthError("application_minecraft_link_changed", 409);
       for (const [key, value] of Object.entries(input.answers)) {
         if (!fields.has(key)) throw new AuthError("invalid_request", 400);
+        if (
+          key === "notificationPreference" &&
+          !["discord", "email"].includes(value)
+        )
+          throw new AuthError("invalid_notification_preference", 400);
         if (key === "communities") {
           if (
             !Array.isArray(value) ||
@@ -304,9 +326,64 @@ export function applicationService(
       ...cooldownKeys(
         draft.role,
         draft.identity?.id,
-        draft.identity?.email || draft.answers.contactEmail,
+        contactEmail(draft),
         draft.answers.ign,
       ).map((key) => store.get("application-cooldown", key)?.until ?? 0),
+    );
+  }
+  function contactEmail(draft) {
+    return draft.answers.notificationPreference === "email"
+      ? text(draft.answers.contactEmail)
+      : draft.identity?.email || text(draft.answers.contactEmail);
+  }
+  async function updateNotifications(sessionId, input) {
+    if (
+      !input ||
+      typeof input !== "object" ||
+      Array.isArray(input) ||
+      Object.keys(input).some(
+        (key) => !["preference", "email"].includes(key),
+      ) ||
+      !["discord", "email"].includes(input.preference)
+    )
+      throw new AuthError("invalid_notification_preference", 400);
+    const email = text(input.email);
+    if (
+      typeof input.email !== "string" ||
+      email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    )
+      throw new AuthError("invalid_contact_email", 400);
+    return notifications.preferencesChanged(() =>
+      store.transaction(() => {
+        const draft = load(sessionId);
+        const record =
+          draft.submittedId && store.get("application", draft.submittedId);
+        if (!record) throw new AuthError("application_not_found", 404);
+        if (input.preference === "discord" && !record.discord)
+          throw new AuthError("invalid_notification_preference", 400);
+        record.notificationPreference = input.preference;
+        record.contactEmail = email;
+        if (
+          record.status === "Denied" &&
+          record.decision.reapplyAfter > Date.now()
+        )
+          for (const key of cooldownKeys(
+            record.role,
+            record.discord?.id,
+            email,
+            record.answers.ign,
+          ))
+            store.set(
+              "application-cooldown",
+              key,
+              { until: record.decision.reapplyAfter },
+              record.decision.reapplyAfter,
+            );
+        store.set("application", record.id, record, permanent);
+        notifications.reconcile(record);
+        return view(sessionId);
+      }),
     );
   }
   function validate(draft) {
@@ -346,7 +423,7 @@ export function applicationService(
           "Tell us whether you would download Discord for staff communication if approved.";
     }
     if (
-      (!draft.identity?.email &&
+      ((!draft.identity?.email || a.notificationPreference === "email") &&
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text(a.contactEmail))) ||
       text(a.contactEmail).length > 254
     )
@@ -460,7 +537,11 @@ export function applicationService(
               email: identity.email,
             }
           : null,
-        contactEmail: identity?.email || answers.contactEmail,
+        contactEmail: contactEmail(draft),
+        notificationPreference: notificationMode({
+          discord: identity,
+          notificationPreference: answers.notificationPreference,
+        }),
         minecraft: {
           ...profile,
           submittedName: answers.ign,
@@ -624,6 +705,7 @@ export function applicationService(
     forms,
     view,
     patch,
+    updateNotifications,
     connect,
     disconnect,
     restart,

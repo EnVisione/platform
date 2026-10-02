@@ -1,3 +1,4 @@
+import { applicationChannels } from "./application-channels.js";
 import { hash } from "./store.js";
 import { applicationRoles } from "../shared/application-form.js";
 
@@ -7,6 +8,10 @@ const escape = (value) => value.replace(/([\\*_~`|<>@])/g, "\\$1");
 const keyFor = (id, event) => `${id}:${event}`;
 const staffKeyFor = (id, event) =>
   event === "received" ? id : `${id}:staff:${event}`;
+export const notificationMode = (record) =>
+  record.discord && record.notificationPreference !== "email"
+    ? "discord"
+    : "email";
 const mentions = { parse: [], users: [], roles: [], replied_user: false };
 const colors = {
   received: 0x2dd4bf,
@@ -26,6 +31,7 @@ export function applicationNotifications(config, store, fetcher) {
   let running;
   let closed = false;
   let offset = 0;
+  const fallback = applicationChannels(config, store, request);
 
   function queueStaff(record, event = "received") {
     const key = staffKeyFor(record.id, event);
@@ -45,7 +51,6 @@ export function applicationNotifications(config, store, fetcher) {
     );
   }
   function queueApplicant(record, event) {
-    if (!record.discord) return;
     const label = applicationRoles[record.role].label;
     const name = escape(record.answers.displayName);
     const descriptions = {
@@ -84,7 +89,7 @@ export function applicationNotifications(config, store, fetcher) {
           denied: "💬 An update on your application",
         }[event],
         color: colors[event],
-        thumbnail: record.discord.avatar
+        thumbnail: record.discord?.avatar
           ? { url: record.discord.avatar }
           : undefined,
         description: descriptions[event],
@@ -106,6 +111,10 @@ export function applicationNotifications(config, store, fetcher) {
         color: colors[event],
         description: feedback,
       });
+    if (notificationMode(record) === "email") {
+      queueEmail(record, event, { embeds });
+      return;
+    }
     const key = keyFor(record.id, event);
     store.set(
       "application-notification",
@@ -121,31 +130,97 @@ export function applicationNotifications(config, store, fetcher) {
       permanent,
     );
   }
+  function queueEmail(record, event, payload) {
+    const key = keyFor(record.id, event);
+    store.set(
+      "application-email-notification",
+      key,
+      {
+        id: record.id,
+        event,
+        recipient: record.contactEmail,
+        queuedAt: Date.now(),
+        payload,
+        awaitingSetup: true,
+      },
+      permanent,
+    );
+    store.delete("application-notification", key);
+  }
+  async function preferencesChanged(change) {
+    // Finish any in-flight delivery before cancelling queued Discord updates.
+    if (running) await running;
+    return change();
+  }
+  function reconcile(record) {
+    for (const event of events) {
+      const key = keyFor(record.id, event);
+      const pending = store.get("application-notification", key);
+      const email = store.get("application-email-notification", key);
+      if (notificationMode(record) === "email") {
+        if (pending) queueEmail(record, event, pending.payload);
+        else if (email)
+          store.set(
+            "application-email-notification",
+            key,
+            { ...email, recipient: record.contactEmail },
+            permanent,
+          );
+      } else if (email) {
+        store.delete("application-email-notification", key);
+        if (!store.get("application-dm-delivery", key)?.sentAt)
+          store.set(
+            "application-notification",
+            key,
+            {
+              key,
+              id: record.id,
+              event,
+              payload: email.payload,
+              attempts: 0,
+              nextAt: Date.now(),
+            },
+            permanent,
+          );
+      }
+    }
+  }
   function status(id) {
     return events.flatMap((event) => {
       const key = keyFor(id, event);
+      const email = store.get("application-email-notification", key);
+      if (email)
+        return [
+          {
+            event,
+            route: "email",
+            awaitingSetup: true,
+            queuedAt: email.queuedAt,
+          },
+        ];
+      const pending = store.get("application-notification", key);
+      if (pending)
+        return [{ event, pending: true, route: pending.route ?? "discord" }];
       const delivered = store.get("application-dm-delivery", key);
-      if (delivered) return [{ event, ...delivered }];
-      return store.get("application-notification", key)
-        ? [{ event, pending: true }]
-        : [];
+      return delivered ? [{ event, ...delivered }] : [];
     });
   }
-  async function post(path, payload) {
+  async function request(path, method = "GET", payload) {
     const response = await fetcher(`https://discord.com/api/v10${path}`, {
-      method: "POST",
+      method,
       signal: AbortSignal.timeout(10000),
       headers: {
         Authorization: `Bot ${config.discordBotToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     });
     if (!response.ok) {
       const error = new Error("Discord delivery failed");
       error.status = response.status;
+      const body = await response.json().catch(() => ({}));
+      error.code = body.code;
       if (response.status === 429) {
-        const body = await response.json().catch(() => ({}));
         const seconds = Number(
           body.retry_after ?? response.headers.get("retry-after"),
         );
@@ -155,7 +230,10 @@ export function applicationNotifications(config, store, fetcher) {
       }
       throw error;
     }
-    const result = await response.json();
+    return response.json();
+  }
+  async function post(path, payload) {
+    const result = await request(path, "POST", payload);
     if (typeof result.id !== "string" || !result.id)
       throw new Error("Invalid Discord delivery response");
     return result;
@@ -221,16 +299,27 @@ export function applicationNotifications(config, store, fetcher) {
     };
   }
   function applicantUpdate(record, event) {
-    if (!record.discord)
-      return "No Discord account linked. Use the contact details to follow up.";
+    if (notificationMode(record) === "email")
+      return "Email selected. Automatic email is awaiting SMTP setup; follow up manually using the contact email.";
+    const pending = store.get(
+      "application-notification",
+      keyFor(record.id, event),
+    );
+    if (pending)
+      return pending.route === "private"
+        ? "Private channel update queued for delivery."
+        : "Applicant DM queued for delivery.";
     const delivery = store.get(
       "application-dm-delivery",
       keyFor(record.id, event),
     );
-    if (delivery?.sentAt) return "Applicant notified by DM.";
+    if (delivery?.sentAt)
+      return delivery.route === "private"
+        ? `Applicant notified in a private channel: ${delivery.channelUrl}`
+        : "Applicant notified by DM.";
     if (delivery?.failedAt)
-      return "Could not deliver the applicant's DM. Use the contact details to follow up.";
-    return "Applicant DM queued for delivery.";
+      return "Could not deliver the applicant's Discord update. Use the contact details to follow up.";
+    return "Applicant update is not scheduled.";
   }
   async function deliver() {
     if (store.get("application-discord-limit", "pause")) return;
@@ -245,6 +334,10 @@ export function applicationNotifications(config, store, fetcher) {
       const record = store.get("application", pending.id);
       if (!record || (applicant && !record.discord)) {
         store.delete("application-notification", key);
+        continue;
+      }
+      if (applicant && notificationMode(record) === "email") {
+        queueEmail(record, pending.event, pending.payload);
         continue;
       }
       if (
@@ -266,7 +359,18 @@ export function applicationNotifications(config, store, fetcher) {
         : "application-delivery";
       try {
         let channelId = config.applications.notificationChannelId;
-        if (applicant) {
+        if (
+          applicant &&
+          (pending.route === "private" ||
+            store.get("application-private-channel", record.discord.id))
+        ) {
+          pending.route = "private";
+          const channel = await fallback.channel(record.discord.id);
+          pending.channelId = channel.id;
+          pending.channelUrl = channel.url;
+          store.set("application-notification", key, pending, permanent);
+          channelId = channel.id;
+        } else if (applicant) {
           if (!pending.channelId) {
             const channel = await post("/users/@me/channels", {
               recipient_id: record.discord.id,
@@ -294,22 +398,66 @@ export function applicationNotifications(config, store, fetcher) {
             })),
           };
         }
-        const message = await post(`/channels/${channelId}/messages`, {
-          ...payload,
-          allowed_mentions: mentions,
-          nonce: hash(key).slice(0, 24),
-          enforce_nonce: true,
-        });
+        const send = (destination) =>
+          post(`/channels/${destination}/messages`, {
+            ...payload,
+            allowed_mentions: mentions,
+            nonce: hash(key).slice(0, 24),
+            enforce_nonce: true,
+          });
+        let message;
+        try {
+          message = await send(channelId);
+        } catch (error) {
+          if (
+            !applicant ||
+            pending.route === "private" ||
+            !config.applications.fallback ||
+            error.status !== 403 ||
+            (error.code !== undefined && error.code !== 50007)
+          )
+            throw error;
+          pending.route = "private";
+          delete pending.channelId;
+          store.set("application-notification", key, pending, permanent);
+          const channel = await fallback.channel(record.discord.id);
+          pending.channelId = channel.id;
+          pending.channelUrl = channel.url;
+          store.set("application-notification", key, pending, permanent);
+          message = await send(channel.id);
+        }
         store.transaction(() => {
           store.set(
             deliveryKind,
             key,
-            { messageId: message.id, sentAt: Date.now() },
+            {
+              messageId: message.id,
+              sentAt: Date.now(),
+              ...(applicant
+                ? {
+                    route: pending.route ?? "discord",
+                    channelUrl: pending.channelUrl,
+                  }
+                : {}),
+            },
             permanent,
           );
           store.delete("application-notification", key);
         });
       } catch (error) {
+        if (
+          applicant &&
+          pending.route !== "private" &&
+          config.applications.fallback &&
+          error.status === 403 &&
+          (error.code === undefined || error.code === 50007)
+        ) {
+          pending.route = "private";
+          delete pending.channelId;
+          pending.nextAt = Date.now();
+          store.set("application-notification", key, pending, permanent);
+          continue;
+        }
         pending.attempts++;
         const terminal =
           error.status >= 400 && error.status < 500 && error.status !== 429;
@@ -318,7 +466,15 @@ export function applicationNotifications(config, store, fetcher) {
             store.set(
               deliveryKind,
               key,
-              { failedAt: Date.now(), blocked: error.status === 403 },
+              {
+                failedAt: Date.now(),
+                blocked: error.status === 403,
+                route: pending.route ?? "discord",
+                reason:
+                  typeof error.code === "string"
+                    ? error.code
+                    : "delivery_failed",
+              },
               permanent,
             );
             store.delete("application-notification", key);
@@ -356,6 +512,8 @@ export function applicationNotifications(config, store, fetcher) {
   return {
     queueStaff,
     queueApplicant,
+    preferencesChanged,
+    reconcile,
     status,
     delivery: tick,
     start() {

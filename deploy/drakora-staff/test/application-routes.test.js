@@ -96,6 +96,25 @@ test("public form mutations require its browser session, CSRF token, and origin"
     (await accepted.json()).answers.displayName,
     "Synthetic applicant",
   );
+  const preferences = (overrides = {}) =>
+    fetch(`${origin}/apply/api/notifications`, {
+      method: "PUT",
+      headers: { ...headers, ...overrides },
+      body: JSON.stringify({
+        preference: "email",
+        email: "fixture@example.com",
+      }),
+    });
+  assert.equal(
+    (await preferences({ Origin: "https://other.example.com" })).status,
+    403,
+  );
+  assert.equal(
+    (await preferences({ "X-CSRF-Token": "wrong-token" })).status,
+    403,
+  );
+  assert.equal((await preferences({ Cookie: "" })).status, 403);
+  assert.equal((await preferences()).status, 404);
   const upload = await fetch(`${origin}/apply/api/evidence/images`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "image/png" },

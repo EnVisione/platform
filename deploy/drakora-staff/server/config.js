@@ -126,6 +126,24 @@ export function validateConfig(config) {
       throw new Error(
         "Configure the application database key, notification channel, and specialist roles",
       );
+    if (settings.fallback !== undefined) {
+      const fallback = settings.fallback;
+      if (
+        !fallback ||
+        !snowflake(fallback.guildId) ||
+        !snowflake(fallback.categoryId) ||
+        !Array.isArray(fallback.reviewerRoleIds) ||
+        !fallback.reviewerRoleIds.length ||
+        fallback.reviewerRoleIds.length > 20 ||
+        !fallback.reviewerRoleIds.every(snowflake) ||
+        fallback.reviewerRoleIds.includes(fallback.guildId) ||
+        new Set(fallback.reviewerRoleIds).size !==
+          fallback.reviewerRoleIds.length
+      )
+        throw new Error(
+          "Configure a private application fallback category and reviewer roles in its guild",
+        );
+    }
   }
   return config;
 }

@@ -6,6 +6,7 @@ import {
   questionList,
 } from "../shared/application-form.js";
 import "./apply.css";
+import { NotificationDeliveries } from "./application-notification-settings.jsx";
 import { EvidenceLinks } from "./application-evidence.jsx";
 import { ApplicationPlayer } from "./application-player.jsx";
 import { ApplicationFormEditor } from "./application-form-editor.jsx";
@@ -528,50 +529,18 @@ function ApplicationReviews({ csrf, canDecide }) {
               </p>
             )}
           </section>
-          {data.discord ? (
-            <section
-              className="application-response"
-              aria-labelledby="application-dm-title"
-            >
-              <h3 id="application-dm-title">Applicant Discord updates</h3>
-              <p>
-                Messages go to the Discord account linked when this application
-                was submitted. Refresh to see delivery updates.
-              </p>
-              {data.notifications?.length ? (
-                <ul>
-                  {data.notifications.map((notification) => (
-                    <li key={notification.event}>
-                      {
-                        {
-                          received: "Submission confirmation",
-                          reviewing: "Review started",
-                          approved: "Approval",
-                          denied: "Denial",
-                        }[notification.event]
-                      }
-                      :{" "}
-                      {notification.pending
-                        ? "Queued"
-                        : notification.sentAt
-                          ? `Sent ${new Date(notification.sentAt).toLocaleString()}`
-                          : "Could not deliver. Use the contact email to follow up."}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>
-                  No updates scheduled for this older submission. Starting
-                  review or making a decision will send an update.
-                </p>
-              )}
-            </section>
-          ) : (
-            <p className="apply-muted">
-              Discord is not linked. Use the contact email to communicate review
-              updates and decisions.
+          <section
+            className="application-response"
+            aria-labelledby="application-dm-title"
+          >
+            <h3 id="application-dm-title">Applicant updates</h3>
+            <p>
+              {data.notificationPreference === "email" || !data.discord
+                ? "Email contact selected. Automatic sending is awaiting SMTP setup. Use the contact email to follow up manually."
+                : "Discord DMs are preferred. Blocked DMs fall back to a private channel in the main Drakora server. Refresh to see delivery updates."}
             </p>
-          )}
+            <NotificationDeliveries notifications={data.notifications} />
+          </section>
           <p className="apply-muted">
             Reference {data.id} · Questionnaire version{" "}
             {data.questionnaireVersion}

@@ -26,14 +26,14 @@ Discord profiles sync during authenticated activity. Guild avatars take preceden
 
 Create one private Staff Office category containing:
 
-| Channel | Type | Default state |
-| --- | --- | --- |
-| All Hands | Voice, meeting | Locked |
-| Meeting Room 1 | Voice, meeting | Locked |
-| Meeting Room 2 | Voice, meeting | Locked |
-| Voice Room 1 | Voice | Open |
-| Voice Room 2 | Voice | Open |
-| meeting-invites | Text | Visible to Todo members |
+| Channel         | Type           | Default state           |
+| --------------- | -------------- | ----------------------- |
+| All Hands       | Voice, meeting | Locked                  |
+| Meeting Room 1  | Voice, meeting | Locked                  |
+| Meeting Room 2  | Voice, meeting | Locked                  |
+| Voice Room 1    | Voice          | Open                    |
+| Voice Room 2    | Voice          | Open                    |
+| meeting-invites | Text           | Visible to Todo members |
 
 Deny View Channel and Connect to everyone. Allow View Channel, Connect, and Speak to the Todo role on the category and casual voice rooms. Meeting rooms override the Todo role's Connect permission to deny until started. Discord administrators retain their platform-level permission bypass. Avoid other role or member overrides that independently grant access to meeting rooms.
 
@@ -105,9 +105,15 @@ Portfolio and evidence questions provide an Imgur upload shortcut in a separate 
 
 Applicants who answer that they do not use Discord receive a final required Yes/No question about downloading Discord for staff communication if approved. Both answers allow submission and appear in the private staff view. Connected Discord users and applicants who already use Discord skip this question. Earlier questionnaire versions display that the question was not asked, rather than inferring an answer.
 
-Submission writes the application, list summary, staff notification, applicant confirmation when Discord is linked, and receipt atomically. Repeating submission from the same draft returns its existing reference without scheduling duplicate messages. `server/application-notifications.js` owns the durable encrypted outbox. It retains compatibility with existing staff notification jobs. Temporary delivery failures retry with backoff up to eight attempts; Discord's reported rate limit delays are respected. Other HTTP client errors stop that message without retrying. A failed delivery does not lose the application. Every notification disables user, role, and automatic mentions, even when the display text includes a Discord user mention. Discord's deterministic nonce reduces duplicate messages within Discord's recent-message uniqueness window; it does not guarantee indefinite exactly-once delivery after an uncertain network result.
+Submission writes the application, list summary, staff notification, applicant confirmation for the selected notification method, and receipt atomically. Repeating submission from the same draft returns its existing reference without scheduling duplicate messages. `server/application-notifications.js` owns the durable encrypted outbox. It retains compatibility with existing staff notification jobs. Temporary delivery failures retry with backoff up to eight attempts; Discord's reported rate limit delays are respected. Other HTTP client errors stop that message without retrying. A failed delivery does not lose the application. Every notification disables user, role, and automatic mentions, even when the display text includes a Discord user mention. Discord's deterministic nonce reduces duplicate messages within Discord's recent-message uniqueness window; it does not guarantee indefinite exactly-once delivery after an uncertain network result.
 
-Only the verified Discord account linked at submission can receive applicant DMs. The worker opens a DM using the bot and sends immutable event messages for Received, Reviewing, Approved, and Denied. Messages for one application wait until earlier queued status messages have completed or failed. They include the role and reference, but never private staff feedback or questionnaire answers. Approval and denial messages include the staff's applicant-facing message; denials also include the reapplication date. Private application detail responses include DM delivery states and timestamps. Discord privacy settings and API restrictions may prevent delivery; staff can use the stored contact email instead. No automated email sender is configured. Existing applications do not receive retroactive submission confirmations, but a new review or decision schedules the corresponding update.
+Only the verified Discord account linked at submission can receive applicant Discord updates. The encrypted worker outbox sends immutable event messages for Received, Reviewing, Approved, and Denied in order. Messages include the role, reference, and applicant-facing decision message, but never private staff feedback or questionnaire answers. Temporary failures and rate limits retry; blocked DMs (Discord 403/50007) use the configured private fallback. Other errors do not create channels.
+
+Configure `applications.fallback` with `guildId`, `categoryId`, and `reviewerRoleIds`, using IDs from the main guild. The bot requires Manage Channels and permission to view, send, embed, and read history. Use the main guild's moderation roles equivalent to Jr Moderator and above. Every fallback checks current membership, role existence, category ownership, and channel ownership. Creation includes private overwrites atomically: deny View Channel for everyone, grant view/reply/history to the applicant and reviewers, and embedding to the bot. Before every post, unexpected overwrites are repaired and checked; a failed repair prevents delivery. Discord administrators inherently bypass channel restrictions. The worker reuses its stored channel or recovers a channel by its exact ownership topic after an uncertain creation response. Channels are retained until operator removal.
+
+`notificationPreference` is a protected identity field, not an editable questionnaire question. Linked applicants default to Discord; anonymous applicants use email. Explicit email selection requires `contactEmail` even if Discord supplies a verified address. Events enter the encrypted `application-email-notification` outbox with `awaitingSetup`, recipient, and payload. No SMTP transport or delivery claim is provided yet. Email opt-out suppresses applicant Discord updates and channel creation, while staff channel notices continue.
+
+The receipt is accessible only through the submitting browser session, expires with its seven-day draft, and exposes name, role, review status, notification preference, contact email, and delivery states. `PUT /apply/api/notifications` requires that session, matching Origin, and CSRF token; it accepts only preference and email. Preference changes finish in-flight delivery, then transfer unsent updates to the selected outbox. Changing contact email after denial also preserves the same-role cooldown for the new address. Delivered Discord messages are not removed. Existing applications default to their previous contact method; no earlier confirmation or failure is automatically replayed.
 
 The configured staff notification channel also receives review, acceptance, and denial updates. Each names the acting Manager or Founder and applicant with silent Discord mentions when available and links to the private application. Review notices are blue, acceptance notices green, and denial notices red. Denials include the applicant-facing reason, minimum waiting period, and both the date and relative time when that application type becomes available again. Private feedback and questionnaire answers are not posted. Event snapshots preserve the original reviewer, decision, and reason if delivery occurs after another status change. Repeating an existing review does not enqueue duplicate channel notices, and existing statuses are not backfilled.
 

@@ -8,6 +8,10 @@ import {
   parseEvidenceLinks,
 } from "../shared/application-form.js";
 import { RequiredMark, EvidenceLinks } from "./application-evidence.jsx";
+import {
+  NotificationSettings,
+  NotificationDeliveries,
+} from "./application-notification-settings.jsx";
 import logo from "./assets/drakora-logo.png";
 import "./apply.css";
 
@@ -99,7 +103,15 @@ export function PublicApplication() {
         if (!active) return;
         csrf.current = data.csrf;
         setDraft(data);
-        setAnswers(data.answers ?? {});
+        setAnswers(
+          data.answers ??
+            (data.submitted
+              ? {
+                  notificationPreference: data.submitted.notificationPreference,
+                  contactEmail: data.submitted.contactEmail,
+                }
+              : {}),
+        );
         if (data.submitted) setReceipt(data.submitted);
         if (!data.role) setStep(0);
         else if (
@@ -178,6 +190,45 @@ export function PublicApplication() {
           question,
         ])
       : [];
+  const notificationPreference =
+    draft?.discord && answers.notificationPreference !== "email"
+      ? "discord"
+      : "email";
+  async function refreshReceipt() {
+    setBusy(true);
+    setError("");
+    try {
+      setReceipt((await request("draft")).submitted);
+    } catch {
+      setError(notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveNotifications(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const data = await request("notifications", "PUT", {
+        preference:
+          answers.notificationPreference ?? receipt.notificationPreference,
+        email: answers.contactEmail ?? receipt.contactEmail,
+      });
+      setReceipt(data.submitted);
+      setSaveState(
+        "Notification preference saved. Future updates will use your choice.",
+      );
+    } catch (error) {
+      setError(
+        error.message === "invalid_contact_email"
+          ? "Enter a valid contact email."
+          : notices.service_unavailable,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   const needsDiscordQuestion = !draft?.discord && answers.discordUses === "no";
   const stages = [
     "name",
@@ -309,10 +360,7 @@ export function PublicApplication() {
             "Please correct the answers listed below before submitting.",
           );
         } else {
-          setReceipt({
-            id: result.id,
-            role: applicationRoles[draft.role].label,
-          });
+          setReceipt((await request("draft")).submitted);
           changed.current = false;
         }
       } else setStep(index + 1);
@@ -394,7 +442,8 @@ export function PublicApplication() {
                 <div>
                   <span className="apply-eyebrow">APPLICATION RECEIVED</span>
                   <h1 id="apply-title">
-                    Thank you, {answers.displayName || "applicant"}.
+                    Thank you,{" "}
+                    {receipt.name || answers.displayName || "applicant"}.
                   </h1>
                 </div>
               </div>
@@ -408,10 +457,55 @@ export function PublicApplication() {
                   contact details.
                 </p>
                 <p className="apply-muted">
-                  If you connected Discord, watch for a confirmation and review
-                  updates in your DMs. Make sure the Drakora bot can message
-                  you.
+                  {receipt.notificationPreference === "email"
+                    ? "You chose email contact. Automatic email sending is awaiting setup; staff can use your saved address manually."
+                    : "Watch for a Discord DM. If DMs are blocked, check your private update channel in Drakora."}
                 </p>
+              </div>
+              <div className="apply-receipt-next">
+                <h2>Application status: {receipt.status || "Received"}</h2>
+                {receipt.decision?.reason && (
+                  <p className="apply-applicant-feedback">
+                    {receipt.decision.reason}
+                  </p>
+                )}
+                {receipt.decision?.reapplyAfter && (
+                  <p>
+                    You can apply for this role again from{" "}
+                    {new Date(receipt.decision.reapplyAfter).toLocaleString()}.
+                  </p>
+                )}
+                <NotificationDeliveries notifications={receipt.notifications} />
+                <button
+                  type="button"
+                  className="apply-secondary"
+                  onClick={refreshReceipt}
+                  disabled={busy}
+                >
+                  Refresh updates
+                </button>
+                <p className="apply-muted">
+                  This receipt stays available in this browser for 7 days. Keep
+                  your application reference.
+                </p>
+                <details className="apply-answer">
+                  <summary>Change notification preferences</summary>
+                  <form onSubmit={saveNotifications}>
+                    <NotificationSettings
+                      linked={receipt.discordLinked}
+                      preference={
+                        answers.notificationPreference ??
+                        receipt.notificationPreference
+                      }
+                      email={answers.contactEmail ?? receipt.contactEmail}
+                      onChange={update}
+                    />
+                    <button type="submit" disabled={busy}>
+                      Save notification preferences
+                    </button>
+                  </form>
+                </details>
+                {saveState && <p role="status">{saveState}</p>}
               </div>
               <p className="apply-receipt-reference">
                 <span>Application reference</span>
@@ -721,18 +815,15 @@ export function PublicApplication() {
                         )}
                       </>
                     )}
-                    {(!draft.discord || !draft.discord.emailAvailable) && (
-                      <>
-                        {field("contactEmail", "Contact email", {
-                          type: "email",
-                          maxLength: 254,
-                          autoComplete: "email",
-                        })}
-                        <p className="apply-muted">
-                          Staff will use this to contact you about your
-                          application. It is not shown publicly.
-                        </p>
-                      </>
+                    <NotificationSettings
+                      linked={Boolean(draft.discord)}
+                      preference={notificationPreference}
+                      email={answers.contactEmail}
+                      emailAvailable={draft.discord?.emailAvailable}
+                      onChange={update}
+                    />
+                    {errors.contactEmail && (
+                      <p className="apply-error">{errors.contactEmail}</p>
                     )}
                   </>
                 )}
@@ -1008,9 +1099,16 @@ export function PublicApplication() {
                       )}
                       <dt>Contact</dt>
                       <dd>
-                        {draft.discord?.emailAvailable
-                          ? "Your verified Discord email"
-                          : answers.contactEmail}
+                        {notificationPreference === "email" ||
+                        !draft.discord?.emailAvailable
+                          ? answers.contactEmail
+                          : "Your verified Discord email"}
+                      </dd>
+                      <dt>Application updates</dt>
+                      <dd>
+                        {notificationPreference === "email"
+                          ? "Email contact · automatic sending awaits setup"
+                          : "Discord DMs with a private channel fallback"}
                       </dd>
                       <dt>Pronouns / age / timezone</dt>
                       <dd>
@@ -1054,11 +1152,12 @@ export function PublicApplication() {
                       include passwords, home addresses, or private documents.
                     </p>
                     <p className="apply-muted">
-                      If you linked Discord, the Drakora bot will DM your
-                      submission confirmation and review updates, including the
-                      decision. If denied, you must wait at least 7 days before
-                      applying for the same role again. The decision will
-                      include your reapplication date.
+                      Updates use your selected contact method. Discord updates
+                      use DMs, with a private channel in Drakora when DMs are
+                      blocked. Email sending is awaiting setup; staff can use
+                      your address manually. If denied, you must wait at least 7
+                      days before applying for the same role again. The decision
+                      will include your reapplication date.
                     </p>
                     {check(
                       "privacyConsent",

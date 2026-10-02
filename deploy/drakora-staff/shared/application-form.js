@@ -295,6 +295,7 @@ export const applicationBaseFields = [
   "discordWhy",
   "discordWilling",
   "contactEmail",
+  "notificationPreference",
   "pronouns",
   "age",
   "timezone",
