@@ -63,6 +63,8 @@ Only Managers and Founders can start reviewing, approve, or deny applications. S
 
 Applicants who link Discord receive queued DMs confirming submission and announcing review, approval, or denial. A denial DM includes the staff message and earliest reapplication date. The staff view shows queued, sent, and failed DM updates. Discord may prevent delivery because of the applicant's privacy settings or lack of access; use their contact email if delivery fails. Submission remains saved when a message cannot be delivered. Applicants without linked Discord receive no automated DMs or emails.
 
+The notification channel also receives blue review, green acceptance, and red denial updates identifying the acting Manager or Founder and applicant. Denials include the reason and the date and time remaining before that application type can be submitted again. Each update links to the application and reports whether the applicant's DM was delivered, failed, or remains queued at posting time. Mentions stay silent, private feedback stays in the panel, and existing statuses are not backfilled.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:

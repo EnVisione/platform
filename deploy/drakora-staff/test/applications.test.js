@@ -674,12 +674,14 @@ test("starting another application keeps the submitted record and creates a new 
 
 test("review starts once, requires decision access, and queues ordered applicant updates", async (t) => {
   const dms = [];
+  const notices = [];
   const { service, store } = setup(t, async (url, options) => {
     if (url.includes("mojang")) return new Response(null, { status: 404 });
     if (url.endsWith("/users/@me/channels"))
       return Response.json({ id: "999" });
     const payload = JSON.parse(options.body);
     if (url.includes("/channels/999/")) dms.push(payload);
+    if (url.includes("/channels/50/")) notices.push(payload);
     return Response.json({ id: `message-${dms.length}` });
   });
   connectedDraft(service);
@@ -701,7 +703,7 @@ test("review starts once, requires decision access, and queues ordered applicant
     service.startReview(id, reviewer("20")).review,
     reviewing.review,
   );
-  assert.equal(store.page("application-notification").total, 3);
+  assert.equal(store.page("application-notification").total, 4);
   service.decide(id, reviewer("20"), "approve", "Welcome to the team.");
   assert.throws(
     () => service.startReview(id, reviewer()),
@@ -717,8 +719,38 @@ test("review starts once, requires decision access, and queues ordered applicant
     ],
   );
   assert.equal(new Set(dms.map((message) => message.nonce)).size, 3);
-  for (const message of dms)
-    assert.deepEqual(message.allowed_mentions.parse, []);
+  assert.equal(notices.length, 3);
+  assert.match(notices[0].content, /just filled out/);
+  assert.match(notices[1].content, /^<@28> started reviewing .*<@123>/);
+  assert.match(notices[2].content, /^<@20> accepted .*<@123>/);
+  assert.match(notices[2].content, /Welcome to the staff team!/);
+  assert.equal(notices[1].embeds[0].title, "Application under review");
+  assert.equal(notices[1].embeds[0].color, 0x5865f2);
+  assert.equal(notices[2].embeds[0].color, 0x3ba55c);
+  assert.equal(notices[2].embeds[0].description, "Welcome to the team.");
+  for (const notice of notices.slice(1)) {
+    assert.equal(
+      notice.embeds[0].fields.at(-1).value,
+      "Applicant notified by DM.",
+    );
+    assert.equal(
+      notice.components[0].components[0].url,
+      `${config.staffOrigin}/applications/${id}`,
+    );
+  }
+  assert.equal(
+    new Set([...dms, ...notices].map((message) => message.nonce)).size,
+    6,
+  );
+  for (const message of [...dms, ...notices]) {
+    assert.deepEqual(message.allowed_mentions, {
+      parse: [],
+      users: [],
+      roles: [],
+      replied_user: false,
+    });
+    assert.equal(message.enforce_nonce, true);
+  }
   assert.equal(store.page("application-notification").total, 0);
 });
 
@@ -815,12 +847,14 @@ test("denial during a new submission blocks it after profile lookup", async (t) 
 });
 
 test("closed Discord DMs do not undo submission or staff delivery", async (t) => {
-  const { service, store } = setup(t, async (url) => {
+  const notices = [];
+  const { service, store } = setup(t, async (url, options) => {
     if (url.includes("mojang")) return new Response(null, { status: 404 });
     if (url.endsWith("/users/@me/channels"))
       return Response.json({ id: "999" });
     if (url.includes("/channels/999/"))
       return new Response(null, { status: 403 });
+    notices.push(JSON.parse(options.body));
     return Response.json({ id: "notice" });
   });
   connectedDraft(service);
@@ -831,7 +865,142 @@ test("closed Discord DMs do not undo submission or staff delivery", async (t) =>
   assert.equal(service.get(id).notifications[0].blocked, true);
   assert.ok(service.get(id).notifications[0].failedAt);
   assert.ok(store.get("application-delivery", id).sentAt);
+  service.startReview(id, reviewer());
+  await service.delivery();
+  assert.equal(service.get(id).status, "Reviewing");
+  assert.match(
+    notices.at(-1).embeds[0].fields.at(-1).value,
+    /Could not deliver/,
+  );
   assert.equal(store.page("application-notification").total, 0);
+});
+
+test("staff denial notices support anonymous applicants and legacy jobs without sending DMs", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const notices = [];
+  const { service, store } = setup(t, async (url, options) => {
+    if (url.includes("mojang")) return new Response(null, { status: 404 });
+    assert.ok(url.endsWith("/channels/50/messages"));
+    notices.push(JSON.parse(options.body));
+    return Response.json({ id: `notice-${notices.length}` });
+  });
+  service.patch("session", {
+    role: "community",
+    answers: { ...answers(), displayName: "Applicant @everyone" },
+  });
+  const { id } = await service.submit("session");
+  store.set(
+    "application-notification",
+    id,
+    { id, attempts: 0, nextAt: 0 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  service.addComment(
+    id,
+    reviewer(),
+    "This private discussion must stay in the panel.",
+  );
+  const reason = "_".repeat(2000);
+  const denied = service.decide(id, reviewer("20"), "deny", reason, 10);
+  assert.throws(
+    () => service.decide(id, reviewer(), "approve"),
+    /application_already_decided/,
+  );
+  await service.delivery();
+  assert.equal(notices.length, 2);
+  assert.match(notices[0].content, /just filled out/);
+  const notice = notices[1];
+  assert.match(notice.content, /^<@20> denied Applicant/);
+  assert.ok(notice.content.includes("\\@everyone"));
+  const embed = notice.embeds[0];
+  assert.equal(embed.title, "Application denied");
+  assert.equal(embed.color, 0xed4245);
+  assert.equal(embed.description, "\\_".repeat(2000));
+  assert.ok(embed.description.length <= 4096);
+  const deadline = Math.ceil(denied.decision.reapplyAfter / 1000);
+  assert.equal(
+    embed.fields[1].value,
+    `<t:${deadline}:F> · <t:${deadline}:R>\nMinimum wait: 10 days.`,
+  );
+  assert.match(embed.fields.at(-1).value, /No Discord account linked/);
+  assert.ok(embed.footer.text.includes(id));
+  assert.equal(
+    notice.components[0].components[0].url,
+    `${config.staffOrigin}/applications/${id}`,
+  );
+  assert.equal(JSON.stringify(notices).includes("private discussion"), false);
+  assert.deepEqual(notice.allowed_mentions.parse, []);
+  assert.ok(store.get("application-delivery", `${id}:staff:denied`).sentAt);
+  assert.equal(store.page("application-notification").total, 0);
+});
+
+test("staff status notices describe queued DMs accurately without repeating the notice after a retry", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const notices = [];
+  let unavailable = false;
+  const { service, store } = setup(t, async (url, options) => {
+    if (url.includes("mojang")) return new Response(null, { status: 404 });
+    if (url.endsWith("/users/@me/channels"))
+      return Response.json({ id: "999" });
+    if (url.includes("/channels/999/") && unavailable)
+      return new Response(null, { status: 503 });
+    if (url.includes("/channels/50/")) notices.push(JSON.parse(options.body));
+    return Response.json({ id: "delivered" });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await service.delivery();
+  unavailable = true;
+  service.startReview(id, reviewer());
+  await service.delivery();
+  assert.equal(notices.length, 2);
+  assert.equal(
+    notices[1].embeds[0].fields.at(-1).value,
+    "Applicant DM queued for delivery.",
+  );
+  const pending = store.get("application-notification", `${id}:reviewing`);
+  assert.equal(pending.attempts, 1);
+  unavailable = false;
+  t.mock.timers.setTime(pending.nextAt);
+  await service.delivery();
+  assert.ok(
+    service.get(id).notifications.find((event) => event.event === "reviewing")
+      .sentAt,
+  );
+  assert.equal(notices.length, 2);
+  assert.equal(store.page("application-notification").total, 0);
+});
+
+test("staff notification queue failure rolls back review and decision updates", async (t) => {
+  const { service, store } = setup(t);
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  const original = store.set.bind(store);
+  t.mock.method(store, "set", (kind, key, value, expires) => {
+    if (kind === "application-notification" && key.includes(":staff:"))
+      throw new Error("staff queue failed");
+    return original(kind, key, value, expires);
+  });
+  assert.throws(
+    () => service.startReview(id, reviewer()),
+    /staff queue failed/,
+  );
+  assert.throws(
+    () =>
+      service.decide(
+        id,
+        reviewer(),
+        "deny",
+        "More community experience needed.",
+      ),
+    /staff queue failed/,
+  );
+  assert.equal(service.get(id).status, "Received");
+  assert.equal(service.get(id).review, undefined);
+  assert.equal(service.get(id).decision, undefined);
+  assert.equal(service.list().items[0].status, "Received");
+  assert.equal(store.page("application-cooldown").total, 0);
+  assert.equal(store.page("application-notification").total, 2);
 });
 
 test("Discord rate limits retain messages and delay retries for the specified time", async (t) => {

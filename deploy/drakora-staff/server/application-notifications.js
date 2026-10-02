@@ -5,7 +5,21 @@ const permanent = Number.MAX_SAFE_INTEGER;
 const events = ["received", "reviewing", "approved", "denied"];
 const escape = (value) => value.replace(/([\\*_~`|<>@])/g, "\\$1");
 const keyFor = (id, event) => `${id}:${event}`;
+const staffKeyFor = (id, event) =>
+  event === "received" ? id : `${id}:staff:${event}`;
 const mentions = { parse: [], users: [], roles: [], replied_user: false };
+const colors = {
+  received: 0xf0b94c,
+  reviewing: 0x5865f2,
+  approved: 0x3ba55c,
+  denied: 0xed4245,
+};
+function priority(pending) {
+  const event = events.indexOf(pending.event ?? "received");
+  return (
+    event + (pending.event && pending.target !== "staff" ? 0 : events.length)
+  );
+}
 
 export function applicationNotifications(config, store, fetcher) {
   let timer;
@@ -13,11 +27,20 @@ export function applicationNotifications(config, store, fetcher) {
   let closed = false;
   let offset = 0;
 
-  function queueStaff(record) {
+  function queueStaff(record, event = "received") {
+    const key = staffKeyFor(record.id, event);
     store.set(
       "application-notification",
-      record.id,
-      { id: record.id, attempts: 0, nextAt: record.createdAt },
+      key,
+      {
+        key,
+        id: record.id,
+        target: "staff",
+        event: event === "received" ? undefined : event,
+        payload: event === "received" ? undefined : staffPayload(record, event),
+        attempts: 0,
+        nextAt: Date.now(),
+      },
       permanent,
     );
   }
@@ -58,6 +81,7 @@ export function applicationNotifications(config, store, fetcher) {
                 approved: "Application approved",
                 denied: "Application denied",
               }[event],
+              color: colors[event],
               description: descriptions[event],
               fields,
               footer: { text: `Drakora · Reference ${record.id}` },
@@ -107,34 +131,90 @@ export function applicationNotifications(config, store, fetcher) {
       throw new Error("Invalid Discord delivery response");
     return result;
   }
-  function staffPayload(record) {
+  function applicationLink(id) {
+    return [
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 5,
+            label: "Click to view",
+            url: `${config.staffOrigin}/applications/${id}`,
+          },
+        ],
+      },
+    ];
+  }
+  function staffPayload(record, event) {
     const name = escape(record.answers.displayName).replace(/[\r\n]/g, " ");
+    const applicant = `${name}${record.discord ? ` (<@${record.discord.id}>)` : ""}`;
+    const label = applicationRoles[record.role].label;
+    if (!event)
+      return {
+        content: `${applicant} just filled out a ${label} application.`,
+        components: applicationLink(record.id),
+      };
+    const author =
+      event === "reviewing" ? record.review.author : record.decision.author;
+    const actor = `<@${author.id}>`;
+    const fields = [{ name: "Application type", value: label }];
+    if (event === "denied") {
+      const timestamp = Math.ceil(record.decision.reapplyAfter / 1000);
+      fields.push({
+        name: "Can reapply for this role",
+        value: `<t:${timestamp}:F> · <t:${timestamp}:R>\nMinimum wait: ${record.decision.reapplyDays} days.`,
+      });
+    }
     return {
-      content: `${name}${record.discord ? ` (<@${record.discord.id}>)` : ""} just filled out a ${applicationRoles[record.role].label} application.`,
-      components: [
+      content: {
+        reviewing: `${actor} started reviewing ${applicant}'s ${label} application.`,
+        approved: `${actor} accepted ${applicant}'s ${label} application. Welcome to the staff team!`,
+        denied: `${actor} denied ${applicant}'s ${label} application.`,
+      }[event],
+      embeds: [
         {
-          type: 1,
-          components: [
-            {
-              type: 2,
-              style: 5,
-              label: "Click to view",
-              url: `${config.staffOrigin}/applications/${record.id}`,
-            },
-          ],
+          title: {
+            reviewing: "Application under review",
+            approved: "Application accepted",
+            denied: "Application denied",
+          }[event],
+          color: colors[event],
+          description:
+            event === "reviewing"
+              ? undefined
+              : escape(record.decision.reason) || undefined,
+          fields,
+          footer: { text: `Drakora · Reference ${record.id}` },
         },
       ],
+      components: applicationLink(record.id),
     };
+  }
+  function applicantUpdate(record, event) {
+    if (!record.discord)
+      return "No Discord account linked. Use the contact details to follow up.";
+    const delivery = store.get(
+      "application-dm-delivery",
+      keyFor(record.id, event),
+    );
+    if (delivery?.sentAt) return "Applicant notified by DM.";
+    if (delivery?.failedAt)
+      return "Could not deliver the applicant's DM. Use the contact details to follow up.";
+    return "Applicant DM queued for delivery.";
   }
   async function deliver() {
     if (store.get("application-discord-limit", "pause")) return;
     const page = store.page("application-notification", 20, offset);
     offset = offset + 20 < page.total ? offset + 20 : 0;
-    for (const pending of page.items) {
+    for (const pending of page.items.sort(
+      (a, b) => priority(a) - priority(b),
+    )) {
       if (closed || pending.nextAt > Date.now()) continue;
       const key = pending.key ?? pending.id;
+      const applicant = Boolean(pending.event && pending.target !== "staff");
       const record = store.get("application", pending.id);
-      if (!record || (pending.event && !record.discord)) {
+      if (!record || (applicant && !record.discord)) {
         store.delete("application-notification", key);
         continue;
       }
@@ -143,16 +223,21 @@ export function applicationNotifications(config, store, fetcher) {
         events
           .slice(0, events.indexOf(pending.event))
           .some((event) =>
-            store.get("application-notification", keyFor(record.id, event)),
+            store.get(
+              "application-notification",
+              applicant
+                ? keyFor(record.id, event)
+                : staffKeyFor(record.id, event),
+            ),
           )
       )
         continue;
-      const deliveryKind = pending.event
+      const deliveryKind = applicant
         ? "application-dm-delivery"
         : "application-delivery";
       try {
         let channelId = config.applications.notificationChannelId;
-        if (pending.event) {
+        if (applicant) {
           if (!pending.channelId) {
             const channel = await post("/users/@me/channels", {
               recipient_id: record.discord.id,
@@ -164,8 +249,24 @@ export function applicationNotifications(config, store, fetcher) {
           }
           channelId = pending.channelId;
         }
+        let payload = pending.payload ?? staffPayload(record);
+        if (!applicant && pending.event) {
+          payload = {
+            ...payload,
+            embeds: payload.embeds.map((embed) => ({
+              ...embed,
+              fields: [
+                ...embed.fields,
+                {
+                  name: "Applicant update",
+                  value: applicantUpdate(record, pending.event),
+                },
+              ],
+            })),
+          };
+        }
         const message = await post(`/channels/${channelId}/messages`, {
-          ...(pending.event ? pending.payload : staffPayload(record)),
+          ...payload,
           allowed_mentions: mentions,
           nonce: hash(key).slice(0, 24),
           enforce_nonce: true,

@@ -537,6 +537,7 @@ export function applicationService(
       permanent,
     );
     notifications.queueApplicant(record, event);
+    notifications.queueStaff(record, event);
     return applicationView(record);
   }
   function startReview(id, user) {
