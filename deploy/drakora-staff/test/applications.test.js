@@ -1208,16 +1208,12 @@ test("application filters reject invalid types, statuses, names, and offsets", (
   });
 });
 
-test("denial needs a message and at least seven days, persists cooldown across drafts and service restart", async (t) => {
+test("denial validates wait bounds and persists cooldown across drafts and service restart", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
   const { service, store } = setup(t);
   connectedDraft(service);
   const { id } = await service.submit("session");
-  assert.throws(
-    () => service.decide(id, reviewer(), "deny", "  "),
-    /application_denial_reason_required/,
-  );
-  for (const days of [6, 0, 7.5, "7", null, 366])
+  for (const days of [-1, 7.5, "7", null, 366, NaN, Infinity])
     assert.throws(
       () =>
         service.decide(id, reviewer(), "deny", "More experience needed.", days),
@@ -1280,6 +1276,61 @@ test("denial needs a message and at least seven days, persists cooldown across d
     undefined,
   );
   assert.ok((await restarted.submit("deadline")).id);
+});
+
+test("blank denial messages use the generic response in applicant and staff updates", async (t) => {
+  const { service, store } = setup(t);
+  for (const [index, reason] of [undefined, "", " \n\t "].entries()) {
+    const session = `blank-reason-${index}`;
+    connectedDraft(service, session);
+    const { id } = await service.submit(session);
+    const denied = service.decide(id, reviewer(), "deny", reason, 0);
+    assert.equal(denied.status, "Denied");
+    assert.match(
+      denied.decision.reason,
+      /not moving forward with your application/,
+    );
+    assert.match(denied.decision.reason, /Thank you/);
+    assert.equal(
+      service.view(session).submitted.decision.reason,
+      denied.decision.reason,
+    );
+    const applicant = store.get("application-notification", `${id}:denied`);
+    const staff = store.get("application-notification", `${id}:staff:denied`);
+    assert.equal(
+      applicant.payload.embeds[1].description,
+      denied.decision.reason,
+    );
+    assert.equal(staff.payload.embeds[0].description, denied.decision.reason);
+  }
+});
+
+test("zero wait allows immediate reapplication while 365 days is the upper boundary", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const { service } = setup(t);
+  connectedDraft(service);
+  const first = await service.submit("session");
+  const denied = service.decide(first.id, reviewer(), "deny", "", 0);
+  assert.equal(denied.decision.reapplyDays, 0);
+  assert.equal(denied.decision.reapplyAfter, Date.now());
+  connectedDraft(service, "immediate");
+  assert.equal(
+    service.view("immediate").reapplicationWaits.community,
+    undefined,
+  );
+  const second = await service.submit("immediate");
+  assert.ok(second.id);
+  const final = service.decide(
+    second.id,
+    reviewer(),
+    "deny",
+    "More experience needed.",
+    365,
+  );
+  assert.equal(final.decision.reason, "More experience needed.");
+  assert.equal(final.decision.reapplyAfter, Date.now() + 365 * 86400000);
+  connectedDraft(service, "blocked");
+  assert.ok((await service.submit("blocked")).errors.reapplication);
 });
 
 test("denial during a new submission blocks it after profile lookup", async (t) => {

@@ -95,10 +95,8 @@ function ApplicationReviews({ csrf, canDecide }) {
             "This application has reached its feedback limit.",
           invalid_application_comment:
             "Write between 3 and 4,000 characters of feedback.",
-          application_denial_reason_required:
-            "Write a denial message so the applicant understands the decision.",
           invalid_reapplication_wait:
-            "Choose a whole number of days between 7 and 365.",
+            "Choose a whole number of days between 0 and 365.",
         };
         throw new Error(
           messages[result.error] ||
@@ -488,9 +486,10 @@ function ApplicationReviews({ csrf, canDecide }) {
                   </button>
                 )}
                 <label className="apply-field">
-                  <span>Message to applicant (required for denial)</span>
+                  <span>Message to applicant (optional)</span>
                   <textarea
                     maxLength={2000}
+                    placeholder="Leave blank to send a generic denial message."
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
                     disabled={busy}
@@ -502,7 +501,7 @@ function ApplicationReviews({ csrf, canDecide }) {
                   </span>
                   <input
                     type="number"
-                    min={7}
+                    min={0}
                     max={365}
                     step={1}
                     value={reapplyDays}
@@ -510,7 +509,8 @@ function ApplicationReviews({ csrf, canDecide }) {
                     disabled={busy}
                   />
                   <small>
-                    The minimum wait is 7 days, counted from the denial.
+                    Choose 0–365 whole days, counted from the denial. Zero adds
+                    no waiting period.
                   </small>
                 </label>
                 <div className="apply-actions">
@@ -530,7 +530,10 @@ function ApplicationReviews({ csrf, canDecide }) {
                       review("decision", {
                         decision: "deny",
                         reason,
-                        reapplyDays: Number(reapplyDays),
+                        reapplyDays:
+                          reapplyDays.trim() === ""
+                            ? null
+                            : Number(reapplyDays),
                       })
                     }
                   >

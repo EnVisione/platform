@@ -23,6 +23,8 @@ import {
 
 const week = 7 * 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
+const defaultDenialReason =
+  "We are not moving forward with your application at this time. Thank you for your interest in joining the Drakora team.";
 const token = () => randomBytes(32).toString("base64url");
 
 const booleans = new Set([
@@ -651,12 +653,10 @@ export function applicationService(
       reason.length > 2000
     )
       throw new AuthError("invalid_request", 400);
-    if (decision === "deny" && !reason.trim())
-      throw new AuthError("application_denial_reason_required", 400);
     if (
       decision === "deny" &&
       (!Number.isSafeInteger(reapplyDays) ||
-        reapplyDays < 7 ||
+        reapplyDays < 0 ||
         reapplyDays > 365)
     )
       throw new AuthError("invalid_reapplication_wait", 400);
@@ -668,7 +668,8 @@ export function applicationService(
       record.status = decision === "approve" ? "Approved" : "Denied";
       record.decision = {
         author: { id: user.id, name: user.name },
-        reason: reason.trim(),
+        reason:
+          reason.trim() || (decision === "deny" ? defaultDenialReason : ""),
         decidedAt: Date.now(),
       };
       if (decision === "deny") {
