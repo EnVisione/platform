@@ -264,6 +264,16 @@ export function applicationService(
     const previous = load(sessionId);
     if (!previous.submittedId)
       throw new AuthError("application_draft_exists", 409);
+    const record = store.get("application", previous.submittedId);
+    const key = record && `${record.createdAt}.${record.id}`;
+    const summary = key && store.get("application-summary", key);
+    if (summary && !summary.discordId && !summary.browserSessionHash)
+      store.set(
+        "application-summary",
+        key,
+        { ...summary, browserSessionHash: hash(sessionId) },
+        permanent,
+      );
     store.delete("application-draft", sessionId);
     const draft = load(sessionId);
     if (previous.identity) {
@@ -562,6 +572,7 @@ export function applicationService(
           name: answers.displayName,
           ign: answers.ign,
           discordId: identity?.id ?? null,
+          browserSessionHash: hash(sessionId),
           status: record.status,
         },
         permanent,
@@ -691,7 +702,7 @@ export function applicationService(
       (status && !Object.hasOwn(applicationStatuses, status))
     )
       throw new AuthError("invalid_request", 400);
-    return store.page(
+    const page = store.page(
       "application-summary",
       50,
       offset,
@@ -700,6 +711,38 @@ export function applicationService(
             (!role || item.role === role) && (!status || item.status === status)
         : undefined,
     );
+    return {
+      ...page,
+      items: page.items.map(({ browserSessionHash, ...summary }) => summary),
+    };
+  }
+  function history(sessionId, offset = 0) {
+    if (!Number.isSafeInteger(offset) || offset < 0)
+      throw new AuthError("invalid_request", 400);
+    const draft = load(sessionId);
+    const sessionHash = hash(sessionId);
+    const pageSize = 20;
+    const page = store.page(
+      "application-summary",
+      pageSize,
+      offset,
+      (summary) =>
+        summary.discordId
+          ? summary.discordId === draft.identity?.id
+          : summary.browserSessionHash === sessionHash ||
+            summary.id === draft.submittedId,
+    );
+    return {
+      total: page.total,
+      pageSize,
+      items: page.items.map((summary) => ({
+        id: summary.id,
+        role: applicationRoles[summary.role].label,
+        ign: summary.ign,
+        createdAt: summary.createdAt,
+        status: summary.status,
+      })),
+    };
   }
   return {
     forms,
@@ -719,6 +762,7 @@ export function applicationService(
     decide,
     minecraftProfile,
     list,
+    history,
     get: (id) => applicationView(store.get("application", id)),
     delivery: notifications.delivery,
     start: notifications.start,

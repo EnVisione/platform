@@ -10,21 +10,7 @@ import { NotificationDeliveries } from "./application-notification-settings.jsx"
 import { EvidenceLinks } from "./application-evidence.jsx";
 import { ApplicationPlayer } from "./application-player.jsx";
 import { ApplicationFormEditor } from "./application-form-editor.jsx";
-
-function ApplicationStatus({ status }) {
-  const tone =
-    {
-      Received: "received",
-      Reviewing: "reviewing",
-      Approved: "approved",
-      Denied: "denied",
-    }[status] || "received";
-  return (
-    <span className={`application-status application-status-${tone}`}>
-      {applicationStatuses[status] || status}
-    </span>
-  );
-}
+import { ApplicationStatus } from "./application-status.jsx";
 
 function applicationListSearch(offset, { role, status }) {
   const query = new URLSearchParams({ offset: String(offset) });

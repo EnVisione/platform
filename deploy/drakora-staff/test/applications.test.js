@@ -737,6 +737,137 @@ test("starting another application keeps the submitted record and creates a new 
   assert.ok(service.get(submitted.id));
 });
 
+test("applicant history finds earlier Discord applications and exposes only their current public summaries", async (t) => {
+  const { service, store } = setup(t);
+  connectedDraft(service, "first", "community", "123");
+  const first = await service.submit("first");
+  service.startReview(first.id, reviewer());
+  service.addComment(first.id, reviewer(), "Private staff feedback.");
+  const record = service.get(first.id);
+  const key = `${record.createdAt}.${record.id}`;
+  const { browserSessionHash, ...legacy } = store.get(
+    "application-summary",
+    key,
+  );
+  store.set("application-summary", key, legacy, Number.MAX_SAFE_INTEGER);
+  connectedDraft(service, "other", "developer", "456");
+  await service.submit("other");
+  connectedDraft(service, "second-browser", "builder", "123");
+  const second = await service.submit("second-browser");
+  const result = service.history("second-browser");
+  assert.equal(result.total, 2);
+  assert.equal(
+    result.items.find((item) => item.id === first.id).status,
+    "Reviewing",
+  );
+  assert.equal(
+    result.items.find((item) => item.id === second.id).status,
+    "Received",
+  );
+  for (const item of result.items)
+    assert.deepEqual(Object.keys(item).sort(), [
+      "createdAt",
+      "id",
+      "ign",
+      "role",
+      "status",
+    ]);
+  assert.equal(service.history("stranger").total, 0);
+  service.decide(first.id, reviewer(), "approve");
+  assert.equal(
+    service.history("second-browser").items.find((item) => item.id === first.id)
+      .status,
+    "Approved",
+  );
+  service.restart("second-browser");
+  service.disconnect("second-browser");
+  assert.equal(service.history("second-browser").total, 0);
+  service.connect("second-browser", { id: "456", name: "Other", roles: [] });
+  assert.equal(service.history("second-browser").total, 1);
+  assert.ok(
+    service.list().items.every((item) => item.browserSessionHash === undefined),
+  );
+});
+
+test("anonymous history stays with its browser through new drafts and service restart, including the existing receipt", async (t) => {
+  const { service, store } = setup(t);
+  service.patch("owner", { role: "community", answers: answers() });
+  const first = await service.submit("owner");
+  const record = service.get(first.id);
+  const key = `${record.createdAt}.${record.id}`;
+  const { browserSessionHash, ...legacy } = store.get(
+    "application-summary",
+    key,
+  );
+  store.set("application-summary", key, legacy, Number.MAX_SAFE_INTEGER);
+  assert.equal(service.history("owner").total, 1);
+  service.restart("owner");
+  service.patch("owner", { role: "builder", answers: answers("builder") });
+  const second = await service.submit("owner");
+  service.decide(
+    first.id,
+    reviewer(),
+    "deny",
+    "Please gain more experience.",
+    7,
+  );
+  service.patch("other", { role: "artist", answers: answers("artist") });
+  await service.submit("other");
+  assert.equal(service.history("owner").total, 2);
+  assert.equal(service.history("other").total, 1);
+  const restarted = applicationService(
+    config,
+    store,
+    async () => new Response(null, { status: 404 }),
+  );
+  t.after(() => restarted.close());
+  const items = restarted.history("owner").items;
+  assert.equal(items.find((item) => item.id === first.id).status, "Denied");
+  assert.equal(items.find((item) => item.id === second.id).status, "Received");
+  assert.equal(restarted.history("new-browser").total, 0);
+});
+
+test("applicant history paginates only owned applications and rejects invalid offsets", (t) => {
+  const { service, store } = setup(t);
+  service.connect("owner", { id: "123", name: "Fixture", roles: [] });
+  for (let i = 0; i < 45; i++)
+    store.set(
+      "application-summary",
+      String(i).padStart(3, "0"),
+      {
+        id: `application-${i}`,
+        createdAt: i,
+        role: "artist",
+        ign: "Test_Player",
+        discordId: i % 2 ? "456" : "123",
+        status: "Received",
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+  const first = service.history("owner");
+  const last = service.history("owner", 20);
+  assert.equal(first.total, 23);
+  assert.equal(first.items.length, 20);
+  assert.equal(last.items.length, 3);
+  assert.deepEqual(
+    last.items.map((item) => item.id),
+    ["application-4", "application-2", "application-0"],
+  );
+  assert.equal(
+    new Set([...first.items, ...last.items].map((item) => item.id)).size,
+    23,
+  );
+  for (const offset of [
+    -1,
+    1.2,
+    NaN,
+    Infinity,
+    "0",
+    Number.MAX_SAFE_INTEGER + 1,
+  ])
+    assert.throws(() => service.history("owner", offset), /invalid_request/);
+});
+
 test("review starts once, requires decision access, and queues ordered applicant updates", async (t) => {
   const dms = [];
   const notices = [];

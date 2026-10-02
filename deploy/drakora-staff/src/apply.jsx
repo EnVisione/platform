@@ -13,6 +13,7 @@ import {
   NotificationDeliveries,
 } from "./application-notification-settings.jsx";
 import logo from "./assets/drakora-logo.png";
+import { ApplicationHistory } from "./application-history.jsx";
 import "./apply.css";
 
 const notices = {
@@ -507,6 +508,7 @@ export function PublicApplication() {
                 </details>
                 {saveState && <p role="status">{saveState}</p>}
               </div>
+              <ApplicationHistory receipt={receipt} />
               <p className="apply-receipt-reference">
                 <span>Application reference</span>
                 <code>{receipt.id}</code>

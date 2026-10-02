@@ -114,6 +114,47 @@
   flex-wrap: wrap;
   gap: 12px;
 }
+.apply-history-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 4px 0 0;
+  list-style: none;
+}
+.apply-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #41434a;
+  border-radius: 8px;
+  padding: 16px;
+  background: #232428;
+}
+.apply-history-item > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.apply-history-item .application-status {
+  flex-shrink: 0;
+}
+.apply-history-current {
+  display: block;
+  font-size: 12px;
+  color: #a8b0ff;
+  margin: 4px 0;
+}
+.apply-history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.apply-history-pagination button {
+  padding: 8px 12px;
+  font-size: 13px;
+}
 .apply-receipt-actions > * {
   box-sizing: border-box;
   text-align: center;
@@ -496,7 +537,7 @@
   color: #b5bac1;
   font-size: 14px;
 }
-.staff-applications .application-status {
+.application-status {
   display: inline-flex;
   width: fit-content;
   border-radius: 20px;
@@ -505,19 +546,19 @@
   font-weight: 600;
   line-height: 1.5;
 }
-.staff-applications .application-status-received {
+.application-status-received {
   color: #f9d88b;
   background: #4d3f22;
 }
-.staff-applications .application-status-reviewing {
+.application-status-reviewing {
   color: #b0cbff;
   background: #283b60;
 }
-.staff-applications .application-status-approved {
+.application-status-approved {
   color: #a0eabd;
   background: #244936;
 }
-.staff-applications .application-status-denied {
+.application-status-denied {
   color: #ffb3b9;
   background: #562a30;
 }
@@ -689,6 +730,10 @@
   white-space: nowrap;
 }
 @media (max-width: 560px) {
+  .apply-history-item {
+    flex-direction: column;
+    gap: 8px;
+  }
   .application-filters {
     grid-template-columns: minmax(0, 1fr);
     padding: 16px;

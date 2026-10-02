@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import session from "express-session";
 import { randomBytes } from "node:crypto";
-import { openStore } from "../server/store.js";
+import { openStore, hash } from "../server/store.js";
 import { applicationService } from "../server/applications.js";
 import { applicationRouter } from "../server/application-routes.js";
 import { config as fixture } from "./fixture.js";
@@ -95,6 +95,44 @@ test("public form mutations require its browser session, CSRF token, and origin"
   assert.equal(
     (await accepted.json()).answers.displayName,
     "Synthetic applicant",
+  );
+  const sessionId = database.store
+    .entries("session")
+    .find(([, value]) => value.csrf === csrf)[0];
+  for (const [id, owner] of [
+    ["own", sessionId],
+    ["other", "other-session"],
+  ])
+    database.store.set(
+      "application-summary",
+      id,
+      {
+        id,
+        role: "builder",
+        ign: "Test_Player",
+        createdAt: 123,
+        status: "Received",
+        discordId: null,
+        browserSessionHash: hash(owner),
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+  const history = await fetch(`${origin}/apply/api/history?discordId=other`, {
+    headers,
+  });
+  assert.equal(history.status, 200);
+  assert.equal(history.headers.get("cache-control"), "no-store");
+  assert.deepEqual(
+    (await history.json()).items.map((item) => item.id),
+    ["own"],
+  );
+  const stranger = await fetch(`${origin}/apply/api/history`, {
+    headers: { "X-Forwarded-Proto": "https" },
+  });
+  assert.equal((await stranger.json()).total, 0);
+  assert.equal(
+    (await fetch(`${origin}/apply/api/history?offset=-1`, { headers })).status,
+    400,
   );
   const preferences = (overrides = {}) =>
     fetch(`${origin}/apply/api/notifications`, {

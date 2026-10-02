@@ -35,6 +35,12 @@ export function applicationRouter(config, applications, dist) {
     await save(req);
     res.json({ ...applications.view(req.sessionID), csrf: req.session.csrf });
   });
+  router.get("/apply/api/history", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json(
+      applications.history(req.sessionID, Number(req.query.offset ?? 0)),
+    );
+  });
   router.patch("/apply/api/draft", (req, res) => {
     mutation(req);
     res.json(applications.patch(req.sessionID, req.body));

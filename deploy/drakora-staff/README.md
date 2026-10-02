@@ -67,6 +67,8 @@ Email choices require an explicit address, including for applicants whose Discor
 
 The notification channel also receives blue review, green acceptance, and red denial updates identifying the acting Manager or Founder and applicant. Denials include the reason and the date and time remaining before that application type can be submitted again. Each update links to the application and reports the applicant's delivery route, failure, or queued update at posting time. Mentions stay silent, private feedback stays in the panel, and existing statuses are not backfilled.
 
+The receipt also lists your current and previous applications with submission dates and colored review statuses. Refresh updates reloads the list. History matches the connected Discord account or applications submitted without Discord in the same browser session. Contact email and Minecraft name alone cannot retrieve another applicant's history. The list uses pages of twenty applications and does not include private staff feedback.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:
