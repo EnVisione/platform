@@ -100,6 +100,8 @@ function harness(t, overrides = {}) {
     }
     async list() {
       return [
+        { path: "Labels/Personal", name: "Personal", flags: new Set() },
+        { path: "Labels/drakora.org", name: "drakora.org", flags: new Set() },
         {
           path: "INBOX",
           name: "Inbox",
@@ -227,8 +229,14 @@ test("mail list scopes configured identities, bounds fetches and paginates newes
   assert.equal(state.clients[0].loggedOut, 1);
   assert.deepEqual(
     (await service.folders()).map((folder) => folder.path),
-    ["INBOX", "Sent"],
+    ["INBOX", "Sent", "Labels/drakora.org"],
   );
+  await assert.rejects(service.list({ folder: "Labels/Personal", offset: 0 }), {
+    code: "mail_not_found",
+  });
+  await assert.rejects(service.detail({ ...key, folder: "Labels/Personal" }), {
+    code: "mail_not_found",
+  });
   assert.throws(
     () =>
       service.list({

@@ -58,6 +58,7 @@ const folderNames = {
   "\\Junk": "Spam",
   "\\Trash": "Trash",
   "\\All": "All mail",
+  "\\Flagged": "Starred",
 };
 const blankDraft = (from) => ({
   sendId: crypto.randomUUID(),

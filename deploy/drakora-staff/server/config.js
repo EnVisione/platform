@@ -217,6 +217,16 @@ export function validateConfig(config) {
       !Array.isArray(settings.identities) ||
       !settings.identities.length ||
       settings.identities.length > 20 ||
+      (settings.folderPaths !== undefined &&
+        (!Array.isArray(settings.folderPaths) ||
+          settings.folderPaths.length > 30 ||
+          settings.folderPaths.some(
+            (path) =>
+              typeof path !== "string" ||
+              !path ||
+              path.length > 300 ||
+              /[\r\n\0]/.test(path),
+          ))) ||
       settings.identities.some(
         (identity) =>
           !identity ||

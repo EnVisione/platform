@@ -8,6 +8,16 @@ import { validMailAddress } from "./mail-address.js";
 
 const bodyLimit = 1024 * 1024;
 const attachmentLimit = 10 * 1024 * 1024;
+const standardFolders = new Map([
+  ["inbox", "\\Inbox"],
+  ["sent", "\\Sent"],
+  ["archive", "\\Archive"],
+  ["all mail", "\\All"],
+  ["starred", "\\Flagged"],
+  ["drafts", "\\Drafts"],
+  ["spam", "\\Junk"],
+  ["trash", "\\Trash"],
+]);
 const invalid = () => new AuthError("invalid_mail_request", 400);
 const lower = (value) => value.toLowerCase();
 const addresses = (values = []) =>
@@ -193,6 +203,34 @@ export function mailboxService(config, store, dependencies = {}) {
   const active = new Set();
   const sending = new Set();
   let closed = false;
+  const domains = new Set(
+    identities.map((identity) => identity.address.split("@")[1].toLowerCase()),
+  );
+  function selectableFolders(entries) {
+    return entries
+      .filter((entry) => !entry.flags?.has("\\Noselect"))
+      .map((entry) => ({
+        ...entry,
+        specialUse:
+          entry.specialUse ??
+          standardFolders.get(entry.path.toLowerCase()) ??
+          null,
+      }))
+      .filter(
+        (entry) =>
+          entry.specialUse ||
+          domains.has(entry.name.toLowerCase()) ||
+          settings.folderPaths?.includes(entry.path),
+      )
+      .sort((a, b) => {
+        const order = [...standardFolders.values()];
+        const priority = (entry) =>
+          order.includes(entry.specialUse)
+            ? order.indexOf(entry.specialUse)
+            : order.length;
+        return priority(a) - priority(b) || a.name.localeCompare(b.name);
+      });
+  }
   const identityScope = {
     or: identities.flatMap(({ address }) => [
       { to: address },
@@ -255,7 +293,7 @@ export function mailboxService(config, store, dependencies = {}) {
   }
   async function mailbox(client, folder, validity, readOnly, action) {
     folderPath(folder);
-    const folders = await client.list({ listOnly: true });
+    const folders = selectableFolders(await client.list({ listOnly: true }));
     if (
       !folders.some(
         (entry) => entry.path === folder && !entry.flags?.has("\\Noselect"),
@@ -320,7 +358,9 @@ export function mailboxService(config, store, dependencies = {}) {
     identities,
     folders: () =>
       connection(async (client) => {
-        const folders = await client.list({ listOnly: true });
+        const folders = selectableFolders(
+          await client.list({ listOnly: true }),
+        );
         return folders
           .filter((entry) => !entry.flags?.has("\\Noselect"))
           .map((entry) => ({
