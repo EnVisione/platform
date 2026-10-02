@@ -1,8 +1,10 @@
 import apiClient from "@hcengineering/api-client";
+import { discordText, syncComments, trackerDocs } from "./todo-comments.js";
 
 const issueClass = "tracker:class:Issue";
 const projectClass = "tracker:class:Project";
 const sourceLabel = "embedded:embedded:Discord post";
+const expiry = Number.MAX_SAFE_INTEGER;
 const statusNames = {
   pending: "Pending",
   "in progress": "In Progress",
@@ -12,6 +14,25 @@ const statusNames = {
   "vetoed/not possible": "Impossible / Void",
   "impossible/void": "Impossible / Void",
 };
+const tagNames = {
+  Pending: "Pending",
+  "In Progress": "In Progress",
+  "Awaiting Verification": "Awaiting Verification",
+  Completed: "Complete",
+  "Impossible / Void": "Vetoed/Not Possible",
+};
+const normalize = (name) =>
+  String(name ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .trim();
+const aliases = (name) => {
+  const value = normalize(name)
+    .replace(/[^\p{L}\p{N}_ ,.-]/gu, "")
+    .trim();
+  return [value, ...value.split(/[\s_,.]+/)].filter(Boolean);
+};
+const starterMarker = (id) => `Tracker issue ${id}`;
 
 export function discordTodoSync(
   config,
@@ -20,26 +41,39 @@ export function discordTodoSync(
   { fetcher = fetch, openClient = apiClient.createRestTxOperations } = {},
 ) {
   let timer;
+  let wakeTimer;
   let active;
   let closed = false;
+  let botId;
+  const publicText = (value, fallback) =>
+    discordText(value, config.todoPublicTextExclusions, fallback);
 
-  async function discordJson(path) {
+  async function discord(path, { method = "GET", body, missingCode } = {}) {
     const response = await fetcher(`https://discord.com/api/v10${path}`, {
-      headers: { Authorization: `Bot ${config.discordBotToken}` },
+      method,
+      headers: {
+        Authorization: `Bot ${config.discordBotToken}`,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(10000),
     });
+    if (response.status === 204) return undefined;
+    const data = await response.json();
+    if (response.status === 404 && missingCode && data.code === missingCode)
+      return undefined;
     if (!response.ok)
       throw new Error(
-        `Discord to-do request failed with HTTP ${response.status}`,
+        `Discord to-do ${method} failed with HTTP ${response.status}`,
       );
-    return response.json();
+    return data;
   }
 
   async function sourceThreads() {
     const forums = new Map(
       config.todoForums.map((forum) => [forum.channelId, forum]),
     );
-    const activeThreads = await discordJson(
+    const activeThreads = await discord(
       `/guilds/${config.guildId}/threads/active`,
     );
     if (!Array.isArray(activeThreads.threads))
@@ -49,159 +83,562 @@ export function discordTodoSync(
         .filter((thread) => forums.has(thread.parent_id))
         .map((thread) => [thread.id, thread]),
     );
-    const tags = new Map();
+    const channels = new Map();
     for (const forum of config.todoForums) {
-      const channel = await discordJson(`/channels/${forum.channelId}`);
+      const channel = await discord(`/channels/${forum.channelId}`);
       if (channel.type !== 15 || !Array.isArray(channel.available_tags))
         throw new Error("Configured Discord to-do channel is not a forum");
-      tags.set(
-        forum.channelId,
-        new Map(channel.available_tags.map((tag) => [tag.id, tag.name])),
-      );
+      channels.set(forum.channelId, channel);
       let before;
-      for (let page = 0; page < 20; page++) {
+      for (let page = 0; page < 100; page++) {
         const query = new URLSearchParams({ limit: "100" });
         if (before) query.set("before", before);
-        const archived = await discordJson(
+        const archived = await discord(
           `/channels/${forum.channelId}/threads/archived/public?${query}`,
         );
         if (!Array.isArray(archived.threads))
           throw new Error("Discord archived threads response is invalid");
         for (const thread of archived.threads) threads.set(thread.id, thread);
         if (!archived.has_more) break;
-        before = archived.threads.at(-1)?.thread_metadata?.archive_timestamp;
-        if (!before || page === 19)
+        const next =
+          archived.threads.at(-1)?.thread_metadata?.archive_timestamp;
+        if (!next || next === before || page === 99)
           throw new Error("Discord archived thread listing was incomplete");
+        before = next;
       }
     }
-    return { tags, threads: [...threads.values()] };
+    return { channels, threads };
   }
 
-  function sourceStatus(thread, tags) {
-    const names = (thread.applied_tags ?? [])
-      .map((id) => tags.get(id)?.toLowerCase())
-      .filter((name) => statusNames[name] !== undefined);
-    if (names.length > 1) return undefined;
-    return names[0] ?? "pending";
+  async function identities(client) {
+    const people = await trackerDocs(client, "contact:class:Person", {});
+    const social = await trackerDocs(
+      client,
+      "contact:class:SocialIdentity",
+      {},
+    );
+    const users = store.entries("user").map(([, user]) => user);
+    const byDiscord = new Map();
+    const bySocial = new Map();
+    for (const person of people) {
+      const user = users.find(
+        (entry) => entry.hulyAccount === person.personUuid,
+      );
+      const identity = social.find(
+        (entry) =>
+          entry.attachedTo === person._id &&
+          entry.type === "oidc" &&
+          entry.value?.startsWith("discord:"),
+      );
+      const id = identity?.value.slice(8) ?? user?.id;
+      const info = {
+        personId: person._id,
+        name:
+          user?.name ?? person.name.split(",").toReversed().join(" ").trim(),
+        discordId: id,
+        socialId: identity?._id,
+        names: [person.name, user?.name, user?.username].flatMap(aliases),
+      };
+      if (id) byDiscord.set(id, info);
+      for (const entry of social.filter(
+        (entry) => entry.attachedTo === person._id,
+      ))
+        bySocial.set(entry._id, info);
+    }
+    const byPerson = new Map(
+      [...byDiscord.values()].map((person) => [person.personId, person]),
+    );
+    return { byDiscord, byPerson, bySocial };
+  }
+
+  function assigneeTags(forum, channel, people) {
+    const saved = store.get("discord-todo-tags", forum.channelId) ?? {};
+    const mapping = new Map();
+    for (const tag of channel.available_tags) {
+      if (statusNames[normalize(tag.name)]) continue;
+      const id = forum.assigneeTags?.[tag.id] ?? saved[tag.id];
+      let person = people.byDiscord.get(id);
+      if (!person && !id && tag.moderated) {
+        const matches = [...people.byDiscord.values()].filter((entry) =>
+          entry.names.includes(normalize(tag.name)),
+        );
+        if (matches.length === 1) person = matches[0];
+      }
+      if (person) {
+        mapping.set(tag.id, person);
+        saved[tag.id] = person.discordId;
+      }
+    }
+    store.set("discord-todo-tags", forum.channelId, saved, expiry);
+    return mapping;
+  }
+
+  function sourceValues(thread, channel, mapping) {
+    const selected = (thread.applied_tags ?? []).map((id) =>
+      channel.available_tags.find((tag) => tag.id === id),
+    );
+    const status = selected
+      .map((tag) => statusNames[normalize(tag?.name)])
+      .filter(Boolean);
+    const assignees = [
+      ...new Set(
+        (thread.applied_tags ?? [])
+          .map((id) => mapping.get(id)?.personId)
+          .filter(Boolean),
+      ),
+    ];
+    return {
+      title: thread.name,
+      status: status.length > 1 ? undefined : (status[0] ?? "Pending"),
+      assignee: assignees.length > 1 ? undefined : (assignees[0] ?? null),
+    };
+  }
+
+  async function tagForStatus(channel, name) {
+    let tag = channel.available_tags.find(
+      (tag) => statusNames[normalize(tag.name)] === name,
+    );
+    if (!tag && name !== "Pending") {
+      if (!tagNames[name] || channel.available_tags.length >= 20)
+        throw new Error("Discord forum cannot represent this Tracker status");
+      const updated = await discord(`/channels/${channel.id}`, {
+        method: "PATCH",
+        body: {
+          available_tags: [...channel.available_tags, { name: tagNames[name] }],
+        },
+      });
+      channel.available_tags = updated.available_tags;
+      tag = channel.available_tags.find(
+        (tag) => statusNames[normalize(tag.name)] === name,
+      );
+      if (!tag) throw new Error("Discord did not create the workflow tag");
+    }
+    return tag?.id;
+  }
+
+  async function tagsForValues(thread, channel, mapping, values, people) {
+    const workflowIds = new Set(
+      channel.available_tags
+        .filter((tag) => statusNames[normalize(tag.name)])
+        .map((tag) => tag.id),
+    );
+    let tags = (thread.applied_tags ?? []).filter(
+      (id) => !workflowIds.has(id) && !mapping.has(id),
+    );
+    const statusId = await tagForStatus(channel, values.status);
+    if (statusId) tags.push(statusId);
+    if (values.assignee) {
+      let assigneeId = [...mapping].find(
+        ([, person]) => person.personId === values.assignee,
+      )?.[0];
+      if (!assigneeId) {
+        const person = people.byPerson.get(values.assignee);
+        if (!person || channel.available_tags.length >= 20)
+          throw new Error(
+            "Tracker assignee has no linked Discord identity or available forum tag",
+          );
+        const updated = await discord(`/channels/${channel.id}`, {
+          method: "PATCH",
+          body: {
+            available_tags: [
+              ...channel.available_tags,
+              {
+                name: publicText(person.name, "Staff member").slice(0, 20),
+                moderated: true,
+              },
+            ],
+          },
+        });
+        const created = updated.available_tags.filter(
+          (tag) => !channel.available_tags.some((old) => old.id === tag.id),
+        );
+        if (created.length !== 1)
+          throw new Error("Discord did not create the assignee tag");
+        channel.available_tags = updated.available_tags;
+        assigneeId = created[0].id;
+        mapping.set(assigneeId, person);
+        const saved = store.get("discord-todo-tags", channel.id) ?? {};
+        saved[assigneeId] = person.discordId;
+        store.set("discord-todo-tags", channel.id, saved, expiry);
+      }
+      tags.push(assigneeId);
+    }
+    tags = [...new Set(tags)];
+    if (tags.length > 5)
+      throw new Error("Discord forum post would exceed five tags");
+    return tags;
+  }
+
+  async function createIssue(client, project, thread, values, statusByName) {
+    const issueId = `drakora:discord:${thread.id}`;
+    let issue = await client.findOne(issueClass, { _id: issueId });
+    if (issue) return issue;
+    const result = await client.updateDoc(
+      projectClass,
+      "core:space:Space",
+      project._id,
+      { $inc: { sequence: 1 } },
+      true,
+    );
+    const number = result?.object?.sequence;
+    if (!Number.isInteger(number))
+      throw new Error("Huly did not return a project issue number");
+    await client.addCollection(
+      issueClass,
+      project._id,
+      "tracker:ids:NoParent",
+      issueClass,
+      "subIssues",
+      {
+        title: thread.name,
+        description: null,
+        assignee: values.assignee ?? null,
+        component: null,
+        milestone: null,
+        number,
+        status: statusByName.get(values.status ?? "Pending"),
+        priority: 0,
+        rank: "",
+        comments: 0,
+        subIssues: 0,
+        dueDate: null,
+        parents: [],
+        reportedTime: 0,
+        remainingTime: 0,
+        estimation: 0,
+        reports: 0,
+        relations: [],
+        childInfo: [],
+        kind: "tracker:taskTypes:Issue",
+        identifier: `${project.identifier}-${number}`,
+      },
+      issueId,
+    );
+    issue = await client.findOne(issueClass, { _id: issueId });
+    if (!issue) throw new Error("Huly did not create the issue");
+    return issue;
+  }
+
+  async function deleteLinked(client, threadId, record, issue, thread) {
+    record.deleted = true;
+    store.set("discord-todo", threadId, record, expiry);
+    store.set("huly-todo", record.issueId, { threadId, deleted: true }, expiry);
+    if (thread)
+      await discord(`/channels/${threadId}`, {
+        method: "DELETE",
+        missingCode: 10003,
+      });
+    if (issue)
+      await client.removeCollection(
+        issue._class,
+        issue.space,
+        issue._id,
+        issue.attachedTo ?? "tracker:ids:NoParent",
+        issue.attachedToClass ?? issueClass,
+        "subIssues",
+      );
   }
 
   async function reconcile() {
-    const { tags, threads } = await sourceThreads();
+    const { channels, threads } = await sourceThreads();
+    botId ??= (await discord("/users/@me")).id;
     const client = await openClient(
       "http://transactor:3333",
       config.hulyWorkspace,
       huly.serviceToken(),
     );
+    const failures = [];
+    const attempt = async (action) => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
     try {
       const attributes = await client.findAll("core:class:Attribute", {
         label: sourceLabel,
       });
       if (attributes.length !== 1)
         throw new Error("Huly Discord post field is missing or ambiguous");
-      const sourceField = attributes[0];
+      const field = attributes[0];
+      const path = `${field.attributeOf}.${field.name}`;
       const statuses = await client.findAll("tracker:class:IssueStatus", {});
       const statusByName = new Map(
         statuses.map((status) => [status.name, status._id]),
       );
+      const nameByStatus = new Map(
+        statuses.map((status) => [status._id, status.name]),
+      );
       for (const name of Object.values(statusNames))
         if (!statusByName.has(name))
           throw new Error(`Huly issue status ${name} is missing`);
+      const people = await identities(client);
       const projects = new Map();
+      const mappings = new Map();
       for (const forum of config.todoForums) {
         const project = await client.findOne(projectClass, {
           _id: forum.projectId,
         });
         if (!project) throw new Error("Configured Huly project is missing");
         projects.set(forum.channelId, project);
-      }
-      for (const thread of threads) {
-        const project = projects.get(thread.parent_id);
-        const statusKey = sourceStatus(thread, tags.get(thread.parent_id));
-        const url = `https://discord.com/channels/${config.guildId}/${thread.id}`;
-        const record = store.get("discord-todo", thread.id);
-        let issue = record?.issueId
-          ? await client.findOne(issueClass, { _id: record.issueId })
-          : undefined;
-        if (!issue) {
-          const matches = await client.findAll(issueClass, {
-            [`${sourceField.attributeOf}.${sourceField.name}`]: url,
-          });
-          if (matches.length > 1)
-            throw new Error("More than one Huly issue links to a Discord post");
-          issue = matches[0];
-        }
-        if (!issue) {
-          const issueId = `drakora:discord:${thread.id}`;
-          issue = await client.findOne(issueClass, { _id: issueId });
-          if (!issue) {
-            const result = await client.updateDoc(
-              projectClass,
-              "core:space:Space",
-              project._id,
-              { $inc: { sequence: 1 } },
-              true,
-            );
-            const number = result?.object?.sequence;
-            if (!Number.isInteger(number))
-              throw new Error("Huly did not return a project issue number");
-            await client.addCollection(
-              issueClass,
-              project._id,
-              "tracker:ids:NoParent",
-              issueClass,
-              "subIssues",
-              {
-                title: thread.name,
-                description: null,
-                assignee: null,
-                component: null,
-                milestone: null,
-                number,
-                status: statusByName.get(statusNames[statusKey ?? "pending"]),
-                priority: 0,
-                rank: "",
-                comments: 0,
-                subIssues: 0,
-                dueDate: null,
-                parents: [],
-                reportedTime: 0,
-                remainingTime: 0,
-                estimation: 0,
-                reports: 0,
-                relations: [],
-                childInfo: [],
-                kind: "tracker:taskTypes:Issue",
-                identifier: `${project.identifier}-${number}`,
-              },
-              issueId,
-            );
-            issue = await client.findOne(issueClass, { _id: issueId });
-            if (!issue) throw new Error("Huly did not create the issue");
-          }
-        }
-        if (issue[sourceField.attributeOf]?.[sourceField.name] !== url)
-          await client.createMixin(
-            issue._id,
-            issue._class,
-            issue.space,
-            sourceField.attributeOf,
-            { [sourceField.name]: url },
-          );
-        if (record?.issueId === issue._id) {
-          const updates = {};
-          if (record.title !== thread.name) updates.title = thread.name;
-          if (statusKey && record.statusKey !== statusKey)
-            updates.status = statusByName.get(statusNames[statusKey]);
-          if (Object.keys(updates).length)
-            await client.updateDoc(issueClass, issue.space, issue._id, updates);
-        }
-        store.set(
-          "discord-todo",
-          thread.id,
-          { issueId: issue._id, title: thread.name, statusKey },
-          Number.MAX_SAFE_INTEGER,
+        mappings.set(
+          forum.channelId,
+          assigneeTags(forum, channels.get(forum.channelId), people),
         );
       }
+      for (const [id, record] of store.entries("discord-todo")) {
+        if (!threads.has(id))
+          await attempt(async () => {
+            const issue = await client.findOne(issueClass, {
+              _id: record.issueId,
+            });
+            if (record.deleted && !issue) return;
+            const channelId =
+              record.forumId ??
+              config.todoForums.find(
+                (forum) => forum.projectId === issue?.space,
+              )?.channelId;
+            if (!channelId || !channels.has(channelId)) return;
+            if (issue && issue.space !== projects.get(channelId)._id)
+              throw new Error(
+                "Linked Tracker issue moved outside its configured project",
+              );
+            const thread = await discord(`/channels/${id}`, {
+              missingCode: 10003,
+            });
+            if (thread && projects.has(thread.parent_id))
+              threads.set(id, thread);
+            else if (!thread) await deleteLinked(client, id, record, issue);
+          });
+      }
+      for (let thread of threads.values())
+        await attempt(async () => {
+          const channel = channels.get(thread.parent_id);
+          const project = projects.get(thread.parent_id);
+          const mapping = mappings.get(thread.parent_id);
+          let record = store.get("discord-todo", thread.id);
+          let issue = record?.issueId
+            ? await client.findOne(issueClass, { _id: record.issueId })
+            : undefined;
+          if (record && (record.deleted || !issue)) {
+            await deleteLinked(client, thread.id, record, issue, thread);
+            return;
+          }
+          const url = `https://discord.com/channels/${config.guildId}/${thread.id}`;
+          if (!issue) {
+            const matches = await client.findAll(issueClass, { [path]: url });
+            if (matches.length > 1)
+              throw new Error(
+                "More than one Huly issue links to a Discord post",
+              );
+            issue = matches[0];
+            if (!issue) {
+              const starter = await discord(
+                `/channels/${thread.id}/messages/${thread.id}`,
+                { missingCode: 10008 },
+              );
+              const footer =
+                starter?.author?.id === botId
+                  ? starter.embeds?.[0]?.footer?.text
+                  : undefined;
+              if (footer?.startsWith("Tracker issue ")) {
+                issue = await client.findOne(issueClass, {
+                  _id: footer.slice(14),
+                });
+                if (!issue)
+                  throw new Error(
+                    "Tracker source issue for this Discord post is missing",
+                  );
+              }
+            }
+          }
+          const source = sourceValues(thread, channel, mapping);
+          const imported = !issue;
+          issue ??= await createIssue(
+            client,
+            project,
+            thread,
+            source,
+            statusByName,
+          );
+          if (issue.space !== project._id)
+            throw new Error(
+              "Linked Tracker issue moved outside its configured project",
+            );
+          if (issue[field.attributeOf]?.[field.name] !== url)
+            await client.createMixin(
+              issue._id,
+              issue._class,
+              issue.space,
+              field.attributeOf,
+              { [field.name]: url },
+            );
+          const target = {
+            title: issue.title,
+            status: nameByStatus.get(issue.status),
+            assignee: issue.assignee ?? null,
+          };
+          const next = {};
+          const updates = {};
+          for (const key of ["title", "status", "assignee"]) {
+            if (source[key] === undefined || target[key] === undefined)
+              throw new Error(
+                "Tracker or Discord task has an ambiguous workflow or assignee",
+              );
+            const legacy =
+              key === "title"
+                ? record?.title
+                : key === "status"
+                  ? statusNames[record?.statusKey]
+                  : undefined;
+            const previous = record?.discord ? record.discord[key] : legacy;
+            const discordChanged =
+              previous !== undefined && previous !== source[key];
+            next[key] =
+              imported ||
+              discordChanged ||
+              (!record?.discord &&
+                key === "assignee" &&
+                source.assignee !== null)
+                ? source[key]
+                : target[key];
+            if (target[key] !== next[key])
+              updates[key] =
+                key === "status" ? statusByName.get(next[key]) : next[key];
+          }
+          if (!tagNames[next.status])
+            throw new Error(
+              "Tracker status is not supported by the Discord forum workflow",
+            );
+          const tags = await tagsForValues(
+            thread,
+            channel,
+            mapping,
+            next,
+            people,
+          );
+          if (
+            publicText(next.title).slice(0, 100) !== thread.name ||
+            JSON.stringify(tags.toSorted()) !==
+              JSON.stringify((thread.applied_tags ?? []).toSorted())
+          ) {
+            const changed = await discord(`/channels/${thread.id}`, {
+              method: "PATCH",
+              body: {
+                name: publicText(next.title).slice(0, 100),
+                applied_tags: tags,
+              },
+            });
+            thread = { ...thread, ...changed };
+          }
+          if (Object.keys(updates).length)
+            await client.updateDoc(issueClass, issue.space, issue._id, updates);
+          record = {
+            issueId: issue._id,
+            forumId: channel.id,
+            discord: { ...next, title: thread.name },
+          };
+          store.set("discord-todo", thread.id, record, expiry);
+          store.set("huly-todo", issue._id, { threadId: thread.id }, expiry);
+          await syncComments({
+            client,
+            issue,
+            thread,
+            discord,
+            botId,
+            store,
+            identities: people,
+            textExclusions: config.todoPublicTextExclusions,
+          });
+        });
+      const linkedIssues = new Set(
+        store.entries("discord-todo").map(([, record]) => record.issueId),
+      );
+      for (const forum of config.todoForums) {
+        const issues = await trackerDocs(client, issueClass, {
+          space: forum.projectId,
+        });
+        for (const issue of issues)
+          await attempt(async () => {
+            if (
+              store.get("huly-todo", issue._id) ||
+              issue[field.attributeOf]?.[field.name]
+            )
+              return;
+            if (linkedIssues.has(issue._id)) return;
+            const channel = channels.get(forum.channelId);
+            const values = {
+              title: issue.title,
+              status: nameByStatus.get(issue.status),
+              assignee: issue.assignee ?? null,
+            };
+            if (!tagNames[values.status])
+              throw new Error(
+                "Tracker status is not supported by the Discord forum workflow",
+              );
+            const tags = await tagsForValues(
+              {},
+              channel,
+              mappings.get(forum.channelId),
+              values,
+              people,
+            );
+            const post = await discord(`/channels/${forum.channelId}/threads`, {
+              method: "POST",
+              body: {
+                name: publicText(issue.title).slice(0, 100),
+                applied_tags: tags,
+                message: {
+                  embeds: [
+                    {
+                      title: issue.identifier,
+                      description: "Track this task in the staff dashboard.",
+                      url: `${config.staffOrigin}/tracker`,
+                      color: 0x5865f2,
+                      footer: { text: starterMarker(issue._id) },
+                    },
+                  ],
+                  allowed_mentions: { parse: [] },
+                },
+              },
+            });
+            store.set(
+              "discord-todo",
+              post.id,
+              {
+                issueId: issue._id,
+                forumId: channel.id,
+                discord: { ...values, title: post.name },
+              },
+              expiry,
+            );
+            store.set("huly-todo", issue._id, { threadId: post.id }, expiry);
+            await client.createMixin(
+              issue._id,
+              issue._class,
+              issue.space,
+              field.attributeOf,
+              {
+                [field.name]: `https://discord.com/channels/${config.guildId}/${post.id}`,
+              },
+            );
+            await syncComments({
+              client,
+              issue,
+              thread: post,
+              discord,
+              botId,
+              store,
+              identities: people,
+              textExclusions: config.todoPublicTextExclusions,
+            });
+          });
+      }
+      if (failures.length)
+        throw new Error(
+          `${failures.length} Tracker task syncs are pending. ${failures[0].message}`,
+        );
     } finally {
       await client.close();
     }
@@ -212,22 +649,28 @@ export function discordTodoSync(
     if (!active) active = reconcile().finally(() => (active = undefined));
     return active;
   }
-
+  const run = () =>
+    void sync().catch((error) =>
+      console.error("Discord to-do synchronization failed:", error.message),
+    );
+  function changed() {
+    if (closed || wakeTimer) return;
+    wakeTimer = setTimeout(() => {
+      wakeTimer = undefined;
+      run();
+    }, 2000);
+    wakeTimer.unref();
+  }
   function start() {
-    const run = () =>
-      void sync().catch((error) =>
-        console.error("Discord to-do synchronization failed:", error.message),
-      );
     run();
-    timer = setInterval(run, 300000);
+    timer = setInterval(run, 30000);
     timer.unref();
   }
-
   async function close() {
     closed = true;
     clearInterval(timer);
+    clearTimeout(wakeTimer);
     await active?.catch(() => {});
   }
-
-  return { sync, start, close };
+  return { sync, changed, start, close };
 }

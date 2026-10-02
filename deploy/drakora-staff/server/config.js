@@ -127,11 +127,30 @@ export function validateConfig(config) {
   }
   if (config.todoForums !== undefined) {
     if (
+      config.todoPublicTextExclusions !== undefined &&
+      (!Array.isArray(config.todoPublicTextExclusions) ||
+        config.todoPublicTextExclusions.length > 50 ||
+        config.todoPublicTextExclusions.some(
+          (term) =>
+            typeof term !== "string" || !term.trim() || term.length > 80,
+        ))
+    )
+      throw new Error("Configure up to 50 nonempty Tracker text exclusions");
+    if (
       !config.discordBotToken ||
       !Array.isArray(config.todoForums) ||
       !config.todoForums.length ||
       config.todoForums.some(
-        (forum) => !snowflake(forum.channelId) || !forum.projectId,
+        (forum) =>
+          !snowflake(forum.channelId) ||
+          !forum.projectId ||
+          (forum.assigneeTags !== undefined &&
+            (!forum.assigneeTags ||
+              typeof forum.assigneeTags !== "object" ||
+              Array.isArray(forum.assigneeTags) ||
+              Object.entries(forum.assigneeTags).some(
+                ([tag, id]) => !snowflake(tag) || !snowflake(id),
+              ))),
       ) ||
       new Set(config.todoForums.map((forum) => forum.channelId)).size !==
         config.todoForums.length ||

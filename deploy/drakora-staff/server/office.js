@@ -69,6 +69,7 @@ export function discordOffice(config, store, dependencies = {}) {
   let attempts = 0;
   let stopped = false;
   let roleListener = () => {};
+  let todoListener = () => {};
   const voiceLink = (id) =>
     `https://discord.com/channels/${config.guildId}/${id}`;
   async function channel(id, type) {
@@ -268,6 +269,29 @@ export function discordOffice(config, store, dependencies = {}) {
     if (!stopped) activity.observeMessage(message);
   });
   client.on("raw", (packet) => {
+    if (
+      !stopped &&
+      config.todoForums &&
+      [
+        "THREAD_CREATE",
+        "THREAD_UPDATE",
+        "THREAD_DELETE",
+        "MESSAGE_CREATE",
+        "MESSAGE_UPDATE",
+        "MESSAGE_DELETE",
+        "MESSAGE_DELETE_BULK",
+      ].includes(packet.t)
+    ) {
+      const data = packet.d;
+      if (
+        data?.guild_id === config.guildId &&
+        (config.todoForums.some(
+          (forum) => forum.channelId === data.parent_id,
+        ) ||
+          store.get("discord-todo", data.channel_id))
+      )
+        todoListener();
+    }
     if (stopped || !roleSync) return;
     const data = packet.d;
     if (![config.guildId, config.roleSync.guildId].includes(data?.guild_id))
@@ -370,6 +394,9 @@ export function discordOffice(config, store, dependencies = {}) {
     roleAdministration: discordRoleAdministration(config, client),
     onRolesChanged(listener) {
       roleListener = listener;
+    },
+    onTodoChanged(listener) {
+      todoListener = listener;
     },
     close: async () => {
       stopped = true;

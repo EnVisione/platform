@@ -129,6 +129,7 @@ assignmentTimer?.unref();
 const todoSync = config.todoForums
   ? discordTodoSync(config, store, huly)
   : undefined;
+office?.onTodoChanged(() => todoSync?.changed());
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);

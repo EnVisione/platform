@@ -45,7 +45,7 @@ Signed-in staff can open Dashboard Settings to choose a 3 or 6 digit hex accent 
 
 The Drakora Huly frontend hides the Chat and HR applications from workspace navigation. Staff communication stays in Discord. Existing Huly chat channels and meeting minutes remain stored; hiding the applications does not delete their records.
 
-The optional `todoForums` configuration links Discord forum to-do lists to Huly Tracker projects. Give each entry a forum channel ID and its destination project ID. The service imports active and public archived posts, then checks for new posts, title changes, and workflow tags every five minutes. Each issue has a `Discord post` link back to its source. Create that URL property on Huly's Issue type and the workflow statuses listed in [the technical documentation](documentation.md) before enabling the mapping. Huly edits to an imported issue remain in place until the corresponding Discord title or workflow tag changes. The link is one-way; it does not post Huly changes to Discord or copy comments and attachments.
+The optional `todoForums` configuration links Discord forum to-do lists to Huly Tracker projects. Tasks, titles, assignments, workflow statuses, and comments synchronize in both directions. Deleting a linked task or comment removes its counterpart. Archived posts remain linked. Discord events prompt a sync, and Tracker changes are checked every 30 seconds. Each issue has a `Discord post` link. Create that URL property on Huly's Issue type and the workflow statuses listed in [the technical documentation](documentation.md) before enabling the mapping. Staff assignees need a linked Discord identity. The technical documentation covers assignee tags, permissions, conflict handling, and recovery.
 
 ## Staff applications
 
