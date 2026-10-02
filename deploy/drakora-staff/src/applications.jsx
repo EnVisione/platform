@@ -473,8 +473,8 @@ function ApplicationReviews({ csrf, canDecide }) {
               <>
                 <p>
                   Only Managers and Founders can start review or decide
-                  applications. Linked Discord applicants receive status updates
-                  by DM. Discord roles are assigned separately.
+                  applications. Applicants receive updates using their selected
+                  notification method. Discord roles are assigned separately.
                 </p>
                 {data.status === "Received" && (
                   <button
