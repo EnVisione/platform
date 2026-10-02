@@ -37,6 +37,18 @@ async function request(path, options = {}) {
 }
 const formatDate = (value) =>
   value ? new Date(value).toLocaleString() : "Date unavailable";
+function rowDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString())
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+}
 const people = (values = []) =>
   values
     .map(({ name, address }) => (name ? `${name} <${address}>` : address))
@@ -453,7 +465,7 @@ export function Mail({ csrf, capabilities }) {
           setOffset(0);
           return;
         }
-        setList(result);
+        setList({ ...result, folder });
       })
       .catch((failure) => {
         if (!controller.signal.aborted) {
@@ -493,11 +505,10 @@ export function Mail({ csrf, capabilities }) {
     setSelected(null);
     setMessage(null);
   }
-  async function changeFlag(flag, value) {
-    if (!message || flagBusy) return;
+  async function changeFlag(flag, value, current = message) {
+    if (!current || flagBusy) return;
     setFlagBusy(true);
-    setDetailError(null);
-    const current = message;
+    setError(null);
     try {
       await request("/flags", {
         method: "POST",
@@ -511,12 +522,15 @@ export function Mail({ csrf, capabilities }) {
         }),
       });
       setMessage((previous) =>
-        previous?.uid === current.uid && previous?.folder === current.folder
+        previous?.uid === current.uid &&
+        previous?.folder === current.folder &&
+        previous?.validity === current.validity
           ? { ...previous, [flag]: value }
           : previous,
       );
       setList((previous) =>
-        previous
+        previous?.folder === current.folder &&
+        previous?.validity === current.validity
           ? {
               ...previous,
               items: previous.items.map((item) =>
@@ -526,7 +540,7 @@ export function Mail({ csrf, capabilities }) {
           : previous,
       );
     } catch (failure) {
-      setDetailError(errorText(failure));
+      setError(errorText(failure));
     } finally {
       setFlagBusy(false);
     }
@@ -593,20 +607,36 @@ export function Mail({ csrf, capabilities }) {
   return (
     <section className="mail-page" aria-labelledby="mail-title">
       <div className="mail-heading">
-        <div>
-          <span className="mail-eyebrow">SHARED STAFF MAILBOX</span>
-          <h2 id="mail-title">Email</h2>
-          <p>Keep player conversations and staff correspondence together.</p>
+        <div className="mail-brand">
+          <span aria-hidden="true">✉</span>
+          <div>
+            <h2 id="mail-title">Email</h2>
+            <span className="mail-eyebrow">SHARED STAFF MAILBOX</span>
+          </div>
         </div>
-        {capabilities["mail.send"] && (
-          <button
-            className="mail-primary"
-            disabled={!metadata}
-            onClick={() => compose()}
-          >
-            ＋ Compose
-          </button>
-        )}
+        <form
+          className="mail-search"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSearch(searchInput.trim());
+            setOffset(0);
+            setSelected(null);
+            setMessage(null);
+            setDetailError(null);
+          }}
+        >
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            maxLength={120}
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            aria-label="Search email"
+            placeholder="Search this mailbox"
+          />
+          <button className="mail-secondary">Search</button>
+        </form>
       </div>
       {notice && (
         <p className="mail-success" role="status">
@@ -626,7 +656,15 @@ export function Mail({ csrf, capabilities }) {
       )}
       <div className="mail-layout">
         <aside className="mail-folders" aria-label="Email folders">
-          <span className="mail-eyebrow">MAILBOXES</span>
+          {capabilities["mail.send"] && (
+            <button
+              className="mail-primary mail-compose-button"
+              disabled={!metadata}
+              onClick={() => compose()}
+            >
+              <span aria-hidden="true">＋</span> Compose
+            </button>
+          )}
           <label>
             Address
             <select
@@ -656,262 +694,299 @@ export function Mail({ csrf, capabilities }) {
                 <span aria-hidden="true">
                   {entry.specialUse === "\\Sent"
                     ? "↗"
-                    : entry.specialUse === "\\Trash"
-                      ? "♧"
-                      : "▤"}
+                    : entry.specialUse === "\\Flagged"
+                      ? "☆"
+                      : entry.specialUse === "\\Drafts"
+                        ? "▱"
+                        : entry.specialUse === "\\Trash"
+                          ? "🗑"
+                          : "▤"}
                 </span>
                 {folderNames[entry.specialUse] ?? entry.name}
               </button>
             ))}
           </nav>
-          <p>
-            Visible to Admins, Managers and Founders. Remote images are blocked.
-          </p>
+          <p>Shared Drakora mailbox. Remote images are blocked.</p>
         </aside>
-        <div
-          className={`mail-messages${selected ? " mail-has-selection" : ""}`}
-        >
-          <header className="mail-list-header">
-            <div>
-              <h3>{folderTitle}</h3>
-              <button
-                className="mail-icon-button"
-                aria-label="Refresh inbox"
-                disabled={listLoading}
-                onClick={() => setRefresh((value) => value + 1)}
-              >
-                ↻
-              </button>
-            </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                setSearch(searchInput.trim());
-                setOffset(0);
-              }}
-            >
-              <input
-                type="search"
-                maxLength={120}
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                aria-label="Search email"
-                placeholder="Search emails…"
-              />
-              <button className="mail-secondary">Search</button>
-            </form>
-            <label className="mail-checkbox">
-              <input
-                type="checkbox"
-                checked={unread}
-                onChange={(event) => {
-                  setUnread(event.target.checked);
-                  setOffset(0);
-                }}
-              />
-              Unread only
-            </label>
-          </header>
-          <div className="mail-message-list" aria-busy={listLoading}>
-            {listLoading ? (
-              <p className="mail-empty">Loading emails…</p>
-            ) : list?.items.length ? (
-              list.items.map((item) => (
+        {!selected && (
+          <div className="mail-messages">
+            <header className="mail-toolbar">
+              <div className="mail-toolbar-main">
+                <h3>{folderTitle}</h3>
                 <button
-                  key={item.uid}
-                  className={`mail-message-row${item.seen ? "" : " unread"}${selected?.uid === item.uid ? " selected" : ""}`}
-                  onClick={() =>
-                    setSelected({
-                      uid: item.uid,
-                      folder,
-                      validity: list.validity,
-                    })
-                  }
-                  aria-pressed={selected?.uid === item.uid}
+                  className="mail-icon-button"
+                  aria-label="Refresh inbox"
+                  disabled={listLoading}
+                  onClick={() => setRefresh((value) => value + 1)}
                 >
-                  <div>
-                    <span className="mail-sender">
-                      {people(item.from) || "Unknown sender"}
-                    </span>
-                    <span className="mail-row-symbols">
-                      {item.starred && <span aria-label="Starred">★</span>}
-                      {!item.seen && (
-                        <span className="mail-unread-dot" aria-label="Unread" />
-                      )}
-                    </span>
-                  </div>
-                  <strong>{item.subject}</strong>
-                  <time>{formatDate(item.date)}</time>
+                  ↻
                 </button>
-              ))
-            ) : (
-              <p className="mail-empty">
-                {error
-                  ? "Unable to load this mailbox."
-                  : "No emails match this view."}
-              </p>
-            )}
+                <label className="mail-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={unread}
+                    onChange={(event) => {
+                      setUnread(event.target.checked);
+                      setOffset(0);
+                    }}
+                  />
+                  Unread only
+                </label>
+              </div>
+              <div className="mail-pagination" aria-label="Email pages">
+                <span aria-live="polite">
+                  {listLoading
+                    ? "Loading…"
+                    : list?.total
+                      ? `${offset + 1}–${Math.min(offset + 25, list.total)} of ${list.total}`
+                      : "0 emails"}
+                </span>
+                <button
+                  className="mail-icon-button"
+                  aria-label="Previous page"
+                  disabled={listLoading || !offset}
+                  onClick={() => setOffset(Math.max(0, offset - 25))}
+                >
+                  ‹
+                </button>
+                <button
+                  className="mail-icon-button"
+                  aria-label="Next page"
+                  disabled={listLoading || !list || offset + 25 >= list.total}
+                  onClick={() => setOffset(offset + 25)}
+                >
+                  ›
+                </button>
+              </div>
+            </header>
+            <div className="mail-message-list" aria-busy={listLoading}>
+              {listLoading ? (
+                <p className="mail-empty">Loading emails…</p>
+              ) : list?.items.length ? (
+                list.items.map((item) => (
+                  <div
+                    key={item.uid}
+                    className={`mail-message-row${item.seen ? "" : " unread"}`}
+                  >
+                    {capabilities["mail.flags"] ? (
+                      <button
+                        className={`mail-row-star${item.starred ? " starred" : ""}`}
+                        aria-label={`${item.starred ? "Remove star from" : "Star"} ${item.subject}`}
+                        aria-pressed={item.starred}
+                        disabled={flagBusy}
+                        onClick={() =>
+                          changeFlag("starred", !item.starred, {
+                            ...item,
+                            folder,
+                            validity: list.validity,
+                          })
+                        }
+                      >
+                        {item.starred ? "★" : "☆"}
+                      </button>
+                    ) : (
+                      <span
+                        className={`mail-row-star${item.starred ? " starred" : ""}`}
+                        aria-label={item.starred ? "Starred" : undefined}
+                        aria-hidden={!item.starred}
+                      >
+                        {item.starred ? "★" : "☆"}
+                      </span>
+                    )}
+                    <button
+                      className="mail-message-open"
+                      onClick={() =>
+                        setSelected({
+                          uid: item.uid,
+                          folder,
+                          validity: list.validity,
+                        })
+                      }
+                    >
+                      <span
+                        className="mail-sender"
+                        title={people(
+                          currentFolder?.specialUse === "\\Sent"
+                            ? item.to
+                            : item.from,
+                        )}
+                      >
+                        {(currentFolder?.specialUse === "\\Sent"
+                          ? item.to
+                          : item.from
+                        )
+                          .map((entry) => entry.name || entry.address)
+                          .join(", ") || "Unknown sender"}
+                      </span>
+                      <span className="mail-row-subject">
+                        {!item.seen && (
+                          <span
+                            className="mail-unread-dot"
+                            aria-label="Unread"
+                          />
+                        )}
+                        <strong>{item.subject}</strong>
+                      </span>
+                      <time
+                        dateTime={item.date ?? undefined}
+                        title={formatDate(item.date)}
+                      >
+                        {rowDate(item.date)}
+                      </time>
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="mail-empty mail-empty-state" role="status">
+                  <span aria-hidden="true">✉</span>
+                  <h3>
+                    {error
+                      ? "Mailbox unavailable"
+                      : search || unread
+                        ? "No matching emails"
+                        : `${folderTitle} is empty`}
+                  </h3>
+                  <p>
+                    {error
+                      ? "Try refreshing the mailbox."
+                      : search || unread
+                        ? "Try another search or turn off the unread filter."
+                        : "Emails will appear here when they arrive in this view."}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
-          <footer className="mail-pagination">
+        )}
+        {selected && (
+          <article
+            className="mail-reader"
+            aria-label="Email reader"
+            aria-busy={messageLoading}
+          >
             <button
-              className="mail-secondary"
-              disabled={listLoading || !offset}
-              onClick={() => setOffset(Math.max(0, offset - 25))}
-            >
-              Previous
-            </button>
-            <span>
-              {list?.total
-                ? `${offset + 1}–${Math.min(offset + 25, list.total)} of ${list.total}`
-                : "0 emails"}
-            </span>
-            <button
-              className="mail-secondary"
-              disabled={listLoading || !list || offset + 25 >= list.total}
-              onClick={() => setOffset(offset + 25)}
-            >
-              Next
-            </button>
-          </footer>
-        </div>
-        <article
-          className={`mail-reader${selected ? " mail-reader-open" : ""}`}
-          aria-label="Email reader"
-          aria-busy={messageLoading}
-        >
-          {selected && (
-            <button
-              className="mail-reader-back mail-text-button"
+              className="mail-reader-back mail-secondary"
               onClick={() => {
                 setSelected(null);
                 setMessage(null);
+                setDetailError(null);
               }}
             >
-              ← Back to inbox
+              ← Back to {folderTitle.toLowerCase()}
             </button>
-          )}
-          {detailError && (
-            <p className="mail-error" role="alert">
-              {detailError}
-            </p>
-          )}
-          {messageLoading ? (
-            <p className="mail-empty">Opening email…</p>
-          ) : message ? (
-            <>
-              <header className="mail-reader-header">
-                <span className="mail-eyebrow">
-                  {message.seen ? "READ EMAIL" : "UNREAD EMAIL"}
-                </span>
-                <h3>{message.subject}</h3>
-                <dl>
-                  <div>
-                    <dt>From</dt>
-                    <dd>{people(message.from)}</dd>
-                  </div>
-                  <div>
-                    <dt>To</dt>
-                    <dd>{people(message.to)}</dd>
-                  </div>
-                  {message.cc.length > 0 && (
+            {detailError && (
+              <p className="mail-error" role="alert">
+                {detailError}
+              </p>
+            )}
+            {messageLoading ? (
+              <p className="mail-empty">Opening email…</p>
+            ) : message ? (
+              <>
+                <header className="mail-reader-header">
+                  <span className="mail-eyebrow">
+                    {message.seen ? "READ EMAIL" : "UNREAD EMAIL"}
+                  </span>
+                  <h3>{message.subject}</h3>
+                  <dl>
                     <div>
-                      <dt>Cc</dt>
-                      <dd>{people(message.cc)}</dd>
+                      <dt>From</dt>
+                      <dd>{people(message.from)}</dd>
                     </div>
-                  )}
-                  <div>
-                    <dt>Received</dt>
-                    <dd>{formatDate(message.date)}</dd>
+                    <div>
+                      <dt>To</dt>
+                      <dd>{people(message.to)}</dd>
+                    </div>
+                    {message.cc.length > 0 && (
+                      <div>
+                        <dt>Cc</dt>
+                        <dd>{people(message.cc)}</dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt>Received</dt>
+                      <dd>{formatDate(message.date)}</dd>
+                    </div>
+                  </dl>
+                  <div className="mail-reader-actions">
+                    {capabilities["mail.send"] && (
+                      <>
+                        <button
+                          className="mail-primary"
+                          onClick={() => compose("reply")}
+                        >
+                          Reply
+                        </button>
+                        <button
+                          className="mail-secondary"
+                          onClick={() => compose("all")}
+                        >
+                          Reply all
+                        </button>
+                        <button
+                          className="mail-secondary"
+                          onClick={() => compose("forward")}
+                        >
+                          Forward
+                        </button>
+                      </>
+                    )}
+                    {capabilities["mail.flags"] && (
+                      <>
+                        <button
+                          className="mail-secondary"
+                          disabled={flagBusy}
+                          onClick={() => changeFlag("seen", !message.seen)}
+                        >
+                          {message.seen ? "Mark unread" : "Mark read"}
+                        </button>
+                        <button
+                          className="mail-icon-button"
+                          aria-label={
+                            message.starred ? "Remove star" : "Star email"
+                          }
+                          disabled={flagBusy}
+                          onClick={() =>
+                            changeFlag("starred", !message.starred)
+                          }
+                        >
+                          {message.starred ? "★" : "☆"}
+                        </button>
+                      </>
+                    )}
                   </div>
-                </dl>
-                <div className="mail-reader-actions">
-                  {capabilities["mail.send"] && (
-                    <>
-                      <button
-                        className="mail-primary"
-                        onClick={() => compose("reply")}
-                      >
-                        Reply
-                      </button>
-                      <button
-                        className="mail-secondary"
-                        onClick={() => compose("all")}
-                      >
-                        Reply all
-                      </button>
-                      <button
-                        className="mail-secondary"
-                        onClick={() => compose("forward")}
-                      >
-                        Forward
-                      </button>
-                    </>
-                  )}
-                  {capabilities["mail.flags"] && (
-                    <>
-                      <button
-                        className="mail-secondary"
-                        disabled={flagBusy}
-                        onClick={() => changeFlag("seen", !message.seen)}
-                      >
-                        {message.seen ? "Mark unread" : "Mark read"}
-                      </button>
-                      <button
-                        className="mail-icon-button"
-                        aria-label={
-                          message.starred ? "Remove star" : "Star email"
-                        }
-                        disabled={flagBusy}
-                        onClick={() => changeFlag("starred", !message.starred)}
-                      >
-                        {message.starred ? "★" : "☆"}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </header>
-              {message.html ? (
-                <div
-                  className="mail-body mail-html"
-                  dangerouslySetInnerHTML={{ __html: message.html }}
-                />
-              ) : (
-                <pre className="mail-body mail-plain">
-                  {message.text || "This email has no readable message body."}
-                </pre>
-              )}
-              {capabilities["mail.attachments"] &&
-                message.attachments.length > 0 && (
-                  <section className="mail-attachments">
-                    <h4>Attachments</h4>
-                    <p>Download files only when you trust the sender.</p>
-                    {message.attachments.map((file) => (
-                      <a
-                        key={file.part}
-                        href={`/api/mail/messages/${message.uid}/attachments/${file.part}?${new URLSearchParams({ folder: message.folder, validity: message.validity })}`}
-                        download
-                      >
-                        <span>↓ {file.filename}</span>
-                        <small>{sizeLabel(file.size ?? 0)}</small>
-                      </a>
-                    ))}
-                  </section>
+                </header>
+                {message.html ? (
+                  <div
+                    className="mail-body mail-html"
+                    dangerouslySetInnerHTML={{ __html: message.html }}
+                  />
+                ) : (
+                  <pre className="mail-body mail-plain">
+                    {message.text || "This email has no readable message body."}
+                  </pre>
                 )}
-            </>
-          ) : (
-            !detailError && (
-              <div className="mail-reader-placeholder">
-                <span aria-hidden="true">✉</span>
-                <h3>Your inbox, connected</h3>
-                <p>
-                  Select an email to read it.
-                  {capabilities["mail.send"] &&
-                    " You can also compose a message from a Drakora address."}
-                </p>
-              </div>
-            )
-          )}
-        </article>
+                {capabilities["mail.attachments"] &&
+                  message.attachments.length > 0 && (
+                    <section className="mail-attachments">
+                      <h4>Attachments</h4>
+                      <p>Download files only when you trust the sender.</p>
+                      {message.attachments.map((file) => (
+                        <a
+                          key={file.part}
+                          href={`/api/mail/messages/${message.uid}/attachments/${file.part}?${new URLSearchParams({ folder: message.folder, validity: message.validity })}`}
+                          download
+                        >
+                          <span>↓ {file.filename}</span>
+                          <small>{sizeLabel(file.size ?? 0)}</small>
+                        </a>
+                      ))}
+                    </section>
+                  )}
+              </>
+            ) : null}
+          </article>
+        )}
       </div>
       {capabilities["mail.send"] && draft && (
         <Composer
