@@ -1,0 +1,9 @@
+[Unit]
+Description=Private Drakora IMAP relay to Proton Bridge
+Requires=protonmail-bridge.service
+After=protonmail-bridge.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:1143
+NoNewPrivileges=true
+UMask=0077

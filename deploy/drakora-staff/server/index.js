@@ -19,6 +19,7 @@ import {
   managementAccess,
   applicationReviewAccess,
   applicationDecisionAccess,
+  mailAccess,
 } from "./roles.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
@@ -26,6 +27,8 @@ import { contactRanks } from "./contact-ranks.js";
 import { applicationService } from "./applications.js";
 import { applicationRouter } from "./application-routes.js";
 import { applicationFormRouter } from "./application-form-routes.js";
+import { mailboxService } from "./mailbox.js";
+import { mailRouter } from "./mail-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -52,6 +55,7 @@ const applications = applicationDatabase
   ? applicationService(config, applicationDatabase.store, fetch, minecraft.get)
   : undefined;
 const discord = discordClient(config, store);
+const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
 const office = config.office ? discordOffice(config, store) : undefined;
@@ -183,6 +187,7 @@ function safeNext(value) {
       "/accounts",
       "/applications",
       "/applications/editor",
+      "/email",
     ].includes(value)
   )
     return value;
@@ -232,6 +237,7 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     avatar: user.avatar,
+    mail: mailAccess(config, user),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     applications: Boolean(
@@ -622,6 +628,21 @@ app.get("/api/accounts", async (req, res) => {
   accounts.sort((a, b) => a.name.localeCompare(b.name));
   res.json({ accounts });
 });
+async function authorizeMail(req) {
+  let user = await signedIn(req, { syncHuly: false });
+  if (req.method !== "GET") user = await discord.check(user.id, true);
+  if (!mailAccess(config, user)) throw new AuthError("mail_role_required");
+  return user;
+}
+app.use(
+  "/api/mail",
+  mailRouter({
+    service: mail,
+    authorize: authorizeMail,
+    requireMutation,
+    staffHost,
+  }),
+);
 app.post(
   "/api/accounts/:id/minecraft-change",
   rateLimit({ windowMs: 60000, limit: 12, legacyHeaders: false }),
@@ -990,9 +1011,10 @@ app.get(["/applications", "/applications/:id"], async (req, res) => {
     throw error;
   }
 });
-app.get(["/", "/settings", "/accounts"], async (req, res) => {
+app.get(["/", "/settings", "/accounts", "/email"], async (req, res) => {
   try {
-    const user = await signedIn(req);
+    const user =
+      req.path === "/email" ? await authorizeMail(req) : await signedIn(req);
     if (req.path === "/accounts" && !managementAccess(config, user).manager)
       throw new AuthError("management_role_required");
     res.sendFile(`${dist}/index.html`);
@@ -1106,6 +1128,7 @@ async function stop() {
   await todoSync?.close();
   await applications?.close();
   await office?.close();
+  await mail?.close();
   for (const socket of sockets) socket.destroy();
   server.close(() => {
     store.close();

@@ -48,6 +48,10 @@ export function applicationReviewAccess(config, user) {
   );
 }
 
+export function mailAccess(config, user) {
+  return Boolean(config.mail && managementAccess(config, user).manager);
+}
+
 export function applicationDecisionAccess(config, user) {
   return Boolean(
     user.permissions.dashboard &&

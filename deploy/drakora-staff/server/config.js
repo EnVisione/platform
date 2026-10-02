@@ -1,3 +1,5 @@
+import { validMailAddress } from "./mail-address.js";
+
 export function validateConfig(config) {
   for (const key of ["staffOrigin", "todoOrigin"]) {
     const url = new URL(config[key]);
@@ -203,6 +205,34 @@ export function validateConfig(config) {
           "Configure a private application fallback category and reviewer roles in its guild",
         );
     }
+  }
+  if (config.mail !== undefined) {
+    const settings = config.mail;
+    if (
+      !config.applications?.smtp ||
+      !settings ||
+      typeof settings.imapSocketPath !== "string" ||
+      !settings.imapSocketPath.startsWith("/") ||
+      settings.imapSocketPath.includes("\0") ||
+      !Array.isArray(settings.identities) ||
+      !settings.identities.length ||
+      settings.identities.length > 20 ||
+      settings.identities.some(
+        (identity) =>
+          !identity ||
+          !validMailAddress(identity.address) ||
+          typeof identity.name !== "string" ||
+          !identity.name ||
+          identity.name.length > 80 ||
+          /[\r\n\0]/.test(identity.name),
+      ) ||
+      new Set(
+        settings.identities.map((identity) => identity.address.toLowerCase()),
+      ).size !== settings.identities.length
+    )
+      throw new Error(
+        "Configure the private IMAP socket and distinct sender identities with Proton Bridge SMTP enabled",
+      );
   }
   return config;
 }

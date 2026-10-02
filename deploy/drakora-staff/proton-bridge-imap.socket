@@ -1,0 +1,11 @@
+[Unit]
+Description=Private Drakora IMAP connection to Proton Bridge
+
+[Socket]
+ListenStream=%h/.local/share/drakora-mail/imap.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

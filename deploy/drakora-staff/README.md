@@ -6,6 +6,8 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 
 The dashboard places the Drakora logo beside the staff name in its sidebar heading, with the same branding above navigation on mobile. There is no separate Discord server rail.
 
+The optional Email tab opens a shared Drakora inbox inside the dashboard. Only Admins, Managers and Founders with Dashboard access can read or send mail. It supports folders, address and text filters, unread messages, replies, forwarding, stars and attachments, using the existing Discord sign-in. The composer lets staff choose an enabled sender address. Email bodies stay in Proton; the portal does not mirror them into its database. See [shared email setup](#shared-email-inbox).
+
 Last active combines observed presence with message timestamps, including messages sent while invisible. Set `activityGuildIds` to the community guild ID to include its messages; the staff guild is always included. Only current staff guild members contribute activity records. The bot must be present and able to view the relevant channels. Read Message History permits a bounded refresh of the latest 100 messages in each readable channel and active thread after connection. Older and inaccessible history may be missing. Only the latest activity timestamp is retained, never message contents.
 
 Huly Contacts shows the configured Discord staff ranks for linked employees. The rank badges refresh while Contacts is open. The generic Huly Worker badge is hidden in this deployment; its underlying HR data remains intact.
@@ -78,6 +80,30 @@ The notification channel also receives blue review, green acceptance, and red de
 The receipt also lists your current and previous applications with submission dates and colored review statuses. Refresh updates reloads the list. History matches the connected Discord account or applications submitted without Discord in the same browser session. Contact email and Minecraft name alone cannot retrieve another applicant's history. The list uses pages of twenty applications and does not include private staff feedback.
 
 The staff review side panel lists the applicant's other stored applications, with application type, Minecraft name, submission date, colored current status, and a link to each review. It excludes the application being viewed and uses pages of five. Linked submissions match the same Discord account. If either submission has no Discord account, both the contact email and Minecraft name must match. These anonymous matches are claimed identities, not proof of ownership. This staff history remains private to authorized reviewers and does not expand public receipt access.
+
+## Shared email inbox
+
+After configuring Proton Bridge email delivery, install `proton-bridge-imap.socket` and `proton-bridge-imap.service` beside the SMTP units. Enable the socket with `systemctl --user enable --now proton-bridge-imap.socket`. It relays the private Unix socket to Bridge's loopback IMAP port 1143, sharing the same UID, directory and container mount as SMTP. No public mail listener is needed.
+
+Add the optional `mail` block to private configuration:
+
+```json
+{
+  "mail": {
+    "imapSocketPath": "/run/mail/imap.sock",
+    "identities": [
+      { "address": "support@drakora.org", "name": "Drakora Support" },
+      { "address": "no-reply@drakora.org", "name": "Drakora" }
+    ]
+  }
+}
+```
+
+Use only addresses already enabled in the connected Proton account. The inbox reuses `applications.smtp` credentials and its pinned Bridge certificate. Add each address staff should receive and send from to `identities`; unknown sender addresses are rejected. Views search the configured addresses in sender, recipient and delivery headers, including mail filed into custom folders. Incoming mail with no configured address in those headers is outside this view. Remove `mail` to disable the tab.
+
+The mailbox layout uses the dashboard accent and adapts to mobile screens. Replies retain the original email thread. HTML messages are sanitized, scripts and remote images are removed, and attachment downloads require the same staff access checks. Staff can attach up to five files totaling 10 MB; files remain in memory until sent. Drafts stay only in the open page, with a warning before discarding or navigating away. Sending stores a small encrypted receipt for thirty days to prevent duplicate submission of the same draft. If the result is uncertain, check Sent before composing another message. Proton acceptance does not guarantee arrival in the recipient's inbox.
+
+The email client uses [ImapFlow](https://github.com/postalsys/imapflow), [MailParser](https://github.com/nodemailer/mailparser), Nodemailer and sanitize-html with a portal interface. Existing application notification delivery remains independent of interactive mail.
 
 ## Huly frontend image
 

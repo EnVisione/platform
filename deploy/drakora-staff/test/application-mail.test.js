@@ -228,4 +228,31 @@ test("SMTP configuration rejects injected sender headers and incomplete credenti
     invalid.applications.smtp[field] = value;
     assert.throws(() => validateConfig(invalid), /private SMTP socket/);
   }
+  valid.mail = {
+    imapSocketPath: "/private/imap.sock",
+    identities: [{ address: "support@example.com", name: "Drakora Support" }],
+  };
+  assert.equal(validateConfig(valid), valid);
+  for (const patch of [
+    { imapSocketPath: "relative.sock" },
+    { identities: [] },
+    {
+      identities: [
+        { address: "support@example.com", name: "Injected\r\nFrom" },
+      ],
+    },
+    {
+      identities: [
+        { address: "support@example.com", name: "One" },
+        { address: "SUPPORT@example.com", name: "Two" },
+      ],
+    },
+  ]) {
+    const invalid = structuredClone(valid);
+    Object.assign(invalid.mail, patch);
+    assert.throws(() => validateConfig(invalid), /private IMAP socket/);
+  }
+  const missingSmtp = structuredClone(valid);
+  delete missingSmtp.applications.smtp;
+  assert.throws(() => validateConfig(missingSmtp), /private IMAP socket/);
 });

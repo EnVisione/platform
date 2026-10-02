@@ -4,9 +4,11 @@ import "./style.css";
 import { PublicApplication } from "./apply.jsx";
 import { StaffApplications } from "./applications.jsx";
 import { Office } from "./office.jsx";
+import { Mail } from "./mail.jsx";
 import logo from "./assets/drakora-logo.png";
 
 const messages = {
+  mail_role_required: "Email access requires Admin, Manager or Founder rank.",
   invalid_minecraft_name:
     "Use your Java Edition username: 3–16 letters, numbers, or underscores.",
   minecraft_name_taken:
@@ -45,6 +47,7 @@ function safeTarget(value) {
       "/accounts",
       "/applications",
       "/applications/editor",
+      "/email",
     ].includes(value)
   )
     return value;
@@ -516,6 +519,7 @@ function App() {
   const loginPage = location.pathname === "/login";
   const settingsPage = location.pathname === "/settings";
   const accountsPage = location.pathname === "/accounts";
+  const emailPage = location.pathname === "/email";
   const applicationsPage =
     location.pathname === "/applications" ||
     location.pathname.startsWith("/applications/");
@@ -631,10 +635,10 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage ? "" : " active"}`}
             href="/"
             aria-current={
-              settingsPage || accountsPage || applicationsPage
+              settingsPage || accountsPage || applicationsPage || emailPage
                 ? undefined
                 : "page"
             }
@@ -662,6 +666,15 @@ function App() {
               aria-current={accountsPage ? "page" : undefined}
             >
               <span aria-hidden="true">♙</span>Accounts
+            </a>
+          )}
+          {user.mail && (
+            <a
+              className={`nav-item${emailPage ? " active" : ""}`}
+              href="/email"
+              aria-current={emailPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">✉</span>Email
             </a>
           )}
           <a
@@ -699,17 +712,21 @@ function App() {
                 ? "Accounts"
                 : applicationsPage
                   ? "Staff Applications"
-                  : "Overview"}
+                  : emailPage
+                    ? "Email"
+                    : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
-            {(settingsPage || accountsPage || applicationsPage) && (
-              <a href="/">Overview</a>
-            )}
+            {(settingsPage ||
+              accountsPage ||
+              applicationsPage ||
+              emailPage) && <a href="/">Overview</a>}
             {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
             {user.applications && !applicationsPage && (
               <a href="/applications">Applications</a>
             )}
             {!settingsPage && <a href="/settings">Settings</a>}
+            {user.mail && !emailPage && <a href="/email">Email</a>}
           </nav>
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
@@ -717,7 +734,11 @@ function App() {
         </header>
         <main
           className={
-            applicationsPage ? "dashboard dashboard-applications" : "dashboard"
+            applicationsPage
+              ? "dashboard dashboard-applications"
+              : emailPage
+                ? "dashboard dashboard-mail"
+                : "dashboard"
           }
         >
           {error && (
@@ -725,7 +746,15 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {applicationsPage ? (
+          {emailPage ? (
+            user.mail ? (
+              <Mail csrf={state.csrf} />
+            ) : (
+              <p className="notice">
+                Email access requires Admin, Manager or Founder rank.
+              </p>
+            )
+          ) : applicationsPage ? (
             user.applications ? (
               <StaffApplications
                 csrf={state.csrf}
