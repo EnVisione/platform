@@ -40,7 +40,7 @@ test("only workspace shell navigations use HTML decoration, downloads and APIs k
   );
 });
 
-test("workspace destinations retain Todo access and exclude the removed Office", () => {
+test("workspace destinations retain staff permission checks and exclude the removed Office", () => {
   assert.equal(
     workspacePath(config, "tracker"),
     "/workbench/staff%20%2F%20team/tracker",

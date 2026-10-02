@@ -303,8 +303,8 @@ async function signedIn(
     throw new AuthError("minecraft_name_required", 428);
   if (
     syncHuly &&
-    link &&
-    (user.syncedAt !== user.checkedAt ||
+    (!user.hulyAccount ||
+      user.syncedAt !== user.checkedAt ||
       user.syncedPolicyRevision !== user.policyRevision)
   )
     user = await huly.sync(user);
@@ -490,7 +490,8 @@ app.use(async (req, res, next) => {
       throw new AuthError("dashboard_role_required");
     if (!minecraft.get(user.id))
       throw new AuthError("minecraft_name_required", 428);
-    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    if (!user.permissions.todo)
+      throw new AuthError("staff_permission_required");
     await regenerate(req);
     Object.assign(req.session, {
       userId: user.id,
@@ -516,7 +517,7 @@ app.use(async (req, res, next) => {
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     throw error;
   }
-  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  if (!user.permissions.todo) throw new AuthError("staff_permission_required");
   if (!matchingHulyIdentity(req, user))
     throw new AuthError("huly_account_mismatch");
   if (req.method === "GET" && req.path.startsWith("/__staff/open/")) {
@@ -681,7 +682,7 @@ app.get("/auth/discord/callback", async (req, res) => {
   await save(req);
   if (req.query.error || typeof req.query.code !== "string")
     return res.redirect("/login?error=discord_cancelled");
-  const user = await discord.login(req.query.code);
+  const user = await huly.sync(await discord.login(req.query.code));
   await regenerate(req);
   Object.assign(req.session, {
     userId: user.id,
@@ -826,7 +827,8 @@ app.post("/api/logout", express.json({ limit: "1kb" }), async (req, res) => {
 app.get(["/huly", "/todo"], async (req, res) => {
   try {
     const user = await signedIn(req);
-    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    if (!user.permissions.todo)
+      throw new AuthError("staff_permission_required");
     res.redirect("/tracker");
   } catch (error) {
     if (error.status === 401) return res.redirect("/login?next=/huly");
@@ -850,7 +852,7 @@ app.get("/huly/authorize", async (req, res) => {
       return res.redirect("/minecraft?next=/huly");
     throw error;
   }
-  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  if (!user.permissions.todo) throw new AuthError("staff_permission_required");
   const challenge = store.take("challenge", hash(req.query.challenge));
   if (!challenge) throw new AuthError("invalid_handoff");
   const code = newToken();
@@ -965,7 +967,7 @@ app.get("/interaction/:uid", async (req, res) => {
       return res.redirect("/minecraft?next=/huly");
     throw error;
   }
-  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  if (!user.permissions.todo) throw new AuthError("staff_permission_required");
   const details = await provider.interactionDetails(req, res);
   if (details.params.client_id !== "drakora-huly")
     throw new AuthError("invalid_client");
@@ -1001,7 +1003,8 @@ app.use("/oidc", async (req, res, next) => {
   if (req.path === "/auth") {
     try {
       const user = await signedIn(req);
-      if (!user.permissions.todo) throw new AuthError("todo_role_required");
+      if (!user.permissions.todo)
+        throw new AuthError("staff_permission_required");
       const url = new URL(req.url, config.staffOrigin);
       url.searchParams.set("prompt", "login");
       req.url = url.pathname + url.search;
@@ -1199,8 +1202,8 @@ app.use((error, req, res, _next) => {
     if (code === "minecraft_name_required")
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     const message =
-      code === "todo_role_required"
-        ? "You need the Todo role in the Drakora Discord server."
+      code === "staff_permission_required"
+        ? "Your staff permissions do not allow access to this workspace."
         : code === "dashboard_role_required"
           ? "You need the Dashboard role to sign in to Drakora Staff."
           : "Return to the staff portal to sign in or retry.";
@@ -1208,7 +1211,7 @@ app.use((error, req, res, _next) => {
       .status(status)
       .type("html")
       .send(
-        `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#101319;color:#edf0f4;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Huly access unavailable"}</h1><p>${message}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
+        `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#313338;color:#f2f3f5;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Workspace access unavailable"}</h1><p>${message}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
       );
   }
   if (code === "minecraft_name_required")

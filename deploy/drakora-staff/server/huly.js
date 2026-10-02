@@ -41,10 +41,22 @@ export function hulyClient(config, store, fetcher = fetch) {
     return action;
   }
   async function reconcile(user) {
-    const account = await rpc("findPersonBySocialKey", {
-      socialString: `oidc:discord:${user.id}`,
-      requireAccount: true,
-    });
+    let account;
+    if (user.permissions.dashboard) {
+      const created = await rpc("ensureStaffAccount", {
+        discordId: user.id,
+        email: user.email,
+        name: user.name,
+        expectedAccount: user.hulyAccount,
+      });
+      account = created?.account;
+      if (!account) throw new Error("Huly account creation failed");
+    } else {
+      account = await rpc("findPersonBySocialKey", {
+        socialString: `oidc:discord:${user.id}`,
+        requireAccount: true,
+      });
+    }
     if (!account) return user;
     if (user.hulyAccount && user.hulyAccount !== account)
       throw new Error("Huly identity conflict");
@@ -88,6 +100,7 @@ export function hulyClient(config, store, fetcher = fetch) {
     }
     const saved = {
       ...store.get("user", user.id),
+      ...user,
       hulyAccount: account,
       syncedAt: user.checkedAt,
       syncedPolicyRevision: user.policyRevision,

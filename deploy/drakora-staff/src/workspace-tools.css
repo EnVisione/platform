@@ -9,6 +9,8 @@
 }
 .workspace-tools-page .topbar {
   flex-shrink: 0;
+  background: #313338;
+  border-bottom: 1px solid #45474f;
 }
 .dashboard.dashboard-workspace {
   flex: 1;

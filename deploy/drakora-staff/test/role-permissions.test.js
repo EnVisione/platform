@@ -44,7 +44,7 @@ function change(input, rank, key, value) {
   input.roles.find((role) => role.id === rank).permissions[key] = value;
 }
 
-test("defaults preserve independent Discord admission gates and the existing role boundaries", (t) => {
+test("defaults admit dashboard staff to the workspace and preserve role boundaries", (t) => {
   const { policy } = setup(t);
   assert.deepEqual(
     policy.roles.map((role) => role.label),
@@ -62,7 +62,7 @@ test("defaults preserve independent Discord admission gates and the existing rol
     ],
   );
   assert.equal(policy.apply(actor("20", [])).permissions.dashboard, false);
-  assert.equal(policy.apply(actor("20", ["10"])).permissions.todo, false);
+  assert.equal(policy.apply(actor("20", ["10"])).permissions.todo, true);
   for (const rank of [
     "20",
     "28",
@@ -209,4 +209,18 @@ test("disabled permissions block actions even when a Discord access role remains
   assert.equal(member.permissions.dashboard, false);
   assert.equal(member.permissions.todo, false);
   assert.equal(member.capabilities["applications.view"], false);
+});
+
+test("workspace permissions remain enforced after the Todo role is retired", (t) => {
+  const { policy } = setup(t);
+  const staff = actor("29", ["10"]);
+  assert.equal(policy.apply(staff).permissions.todo, true);
+  const edit = input(policy);
+  change(edit, "29", "office.view", false);
+  change(edit, "29", "office.host", false);
+  change(edit, "29", "huly.access", false);
+  policy.save(actor("20"), edit);
+  assert.equal(policy.apply(staff).permissions.dashboard, true);
+  assert.equal(policy.apply(staff).permissions.todo, false);
+  assert.equal(policy.apply(actor("29", ["11"])).permissions.dashboard, false);
 });

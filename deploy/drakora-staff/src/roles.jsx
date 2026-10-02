@@ -319,10 +319,11 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                 </label>
               ))}
             </div>
-            <h5>Staff-server access roles</h5>
+            <h5>Dashboard admission</h5>
             <p className="roles-help">
-              Dashboard and Tracker also require these separate Discord access
-              roles. A rank alone does not grant access.
+              The Dashboard role admits this member to the staff portal and
+              automatically creates their workspace membership. Tracker and
+              Calendar permissions are controlled above.
             </p>
             <div className="role-checks">
               <label>
@@ -338,20 +339,6 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                   }
                 />
                 Dashboard access
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={access.todo}
-                  disabled={rankLocked}
-                  onChange={(event) =>
-                    setAccess((previous) => ({
-                      ...previous,
-                      todo: event.target.checked,
-                    }))
-                  }
-                />
-                Tracker / Calendar access
               </label>
             </div>
           </fieldset>
@@ -374,8 +361,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                         .map((role) => role.label)
                         .join(", ")}`
                     : " with no specialist roles"}
-                  ? Dashboard access: {access.dashboard ? "on" : "off"}. Huly
-                  access: {access.todo ? "on" : "off"}.
+                  ? Dashboard access: {access.dashboard ? "on" : "off"}.
                 </p>
                 <button className="button" disabled={busy} onClick={assign}>
                   {busy ? "Saving…" : "Confirm Discord changes"}

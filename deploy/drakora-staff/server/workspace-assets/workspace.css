@@ -23,6 +23,8 @@ html[data-drakora-embedded].theme-dark * {
   --theme-navpanel-selected: #404249;
   --theme-navpanel-hovered: #383a40;
   --theme-navpanel-icons-color: #b5bac1;
+  --theme-divider-color: #45474f;
+  --theme-navpanel-border: #45474f;
   --theme-caption-color: #f2f3f5;
   --theme-content-color: #dbdee1;
   --theme-dark-color: #b5bac1;
@@ -82,6 +84,20 @@ html[data-drakora-embedded].theme-dark .workbench-container {
 }
 html[data-drakora-embedded].theme-dark .antiPanel-navigator {
   background: #2b2d31;
+}
+[data-drakora-embedded] .workbench-container:not(.inner)::after {
+  border: 0;
+  border-radius: 0;
+}
+[data-drakora-embedded] .workbench-container.inner,
+[data-drakora-embedded] .workbench-container.inner > [data-id="contentPanel"] {
+  border-radius: 0;
+}
+[data-drakora-embedded] .workbench-container.inner > [data-id="contentPanel"] {
+  border-width: 0 1px;
+}
+[data-drakora-embedded] .workbench-container.inner > .antiPanel-navigator {
+  border-left: 0;
 }
 [data-drakora-embedded] .ac-header {
   border-color: #45474f;

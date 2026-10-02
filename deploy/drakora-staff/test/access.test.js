@@ -11,12 +11,12 @@ import { openStore } from "../server/store.js";
 import { discordClient } from "../server/discord.js";
 import { memberActivity } from "../server/activity.js";
 
-test("access roles are independent and ranks never grant access", () => {
+test("Dashboard admission grants workspace access without the legacy Todo role", () => {
   for (const rank of ranks) {
     assert.equal(permissions([rank.id]).dashboard, false);
     assert.equal(permissions([rank.id]).todo, false);
   }
-  assert.equal(permissions([accessRoles.dashboard]).todo, false);
+  assert.equal(permissions([accessRoles.dashboard]).todo, true);
   assert.equal(permissions([accessRoles.todo]).dashboard, false);
   const both = permissions(Object.values(accessRoles));
   assert.equal(both.dashboard && both.todo, true);
@@ -47,7 +47,7 @@ test("Discord sign-in requires Dashboard even for Todo members", async () => {
   roles = [accessRoles.dashboard];
   const admitted = await client.login("code");
   assert.equal(admitted.permissions.dashboard, true);
-  assert.equal(admitted.permissions.todo, false);
+  assert.equal(admitted.permissions.todo, true);
 });
 test("highest rank determines Huly permissions and specialist roles stay in Huly", () => {
   assert.equal(permissions(ranks.map((role) => role.id)).hulyRole, "OWNER");
@@ -114,7 +114,7 @@ test("Discord role removal is applied and API errors never grant access", async 
     checkedAt: 0,
   });
   let status = 200;
-  let body = { roles: [accessRoles.todo] };
+  let body = { roles: [accessRoles.dashboard] };
   const client = discordClient(
     config,
     store,
@@ -123,7 +123,7 @@ test("Discord role removal is applied and API errors never grant access", async 
   assert.equal((await client.check("42", true)).permissions.todo, true);
   body = { roles: [] };
   assert.equal((await client.check("42", true)).permissions.todo, false);
-  body = { roles: [accessRoles.todo], pending: true };
+  body = { roles: [accessRoles.dashboard], pending: true };
   assert.equal((await client.check("42", true)).permissions.todo, false);
   status = 503;
   await assert.rejects(client.check("42", true), {

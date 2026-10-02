@@ -29,8 +29,8 @@ const messages = {
     "Discord sign-in was cancelled. You can try again when you are ready.",
   verified_email_required:
     "Verify your email address in Discord before signing in.",
-  todo_role_required:
-    "You need the Todo role in the Drakora Discord server to open the workspace.",
+  staff_permission_required:
+    "Your staff permissions do not allow this action. Ask a Manager or Founder to check your access.",
   discord_unavailable:
     "Discord is temporarily unavailable. Please try again shortly.",
   service_unavailable:

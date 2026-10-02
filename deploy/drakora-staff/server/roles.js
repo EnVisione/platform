@@ -3,7 +3,7 @@ export function permissions(config, roleIds = []) {
   const assigned = config.ranks.filter((role) => ids.has(role.id));
   return {
     dashboard: ids.has(config.accessRoles.dashboard),
-    todo: ids.has(config.accessRoles.todo),
+    todo: ids.has(config.accessRoles.dashboard),
     dashboardRanks: assigned
       .filter((role) => role.dashboard)
       .map((role) => role.name),
