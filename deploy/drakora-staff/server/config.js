@@ -94,5 +94,26 @@ export function validateConfig(config) {
     )
       throw new Error("Configure distinct Discord forums and Huly projects");
   }
+  if (config.applications) {
+    const settings = config.applications;
+    const origin = new URL(settings.publicOrigin);
+    if (
+      origin.protocol !== "https:" ||
+      origin.origin !== settings.publicOrigin ||
+      [config.staffOrigin, config.todoOrigin].includes(settings.publicOrigin)
+    )
+      throw new Error("Configure a separate HTTPS application origin");
+    if (
+      Buffer.from(settings.databaseKey ?? "", "base64").length !== 32 ||
+      !snowflake(settings.notificationChannelId) ||
+      !config.discordBotToken ||
+      !["builder", "artist", "developer"].every((role) =>
+        snowflake(settings.specialistRoles?.[role]),
+      )
+    )
+      throw new Error(
+        "Configure the application database key, notification channel, and specialist roles",
+      );
+  }
   return config;
 }

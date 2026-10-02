@@ -70,6 +70,31 @@ export function openStore(path, encryptionKey) {
     clean() {
       db.prepare("DELETE FROM records WHERE expires<=?").run(Date.now());
     },
+    transaction(action) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = action();
+        db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    page(kind, limit = 50, offset = 0) {
+      const total = db
+        .prepare(
+          "SELECT count(*) AS total FROM records WHERE kind=? AND expires>?",
+        )
+        .get(kind, Date.now()).total;
+      const items = db
+        .prepare(
+          "SELECT value FROM records WHERE kind=? AND expires>? ORDER BY id DESC LIMIT ? OFFSET ?",
+        )
+        .all(kind, Date.now(), limit, offset)
+        .map((row) => open(row.value));
+      return { items, total };
+    },
     close() {
       db.close();
     },

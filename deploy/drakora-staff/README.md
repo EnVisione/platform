@@ -35,6 +35,18 @@ The Drakora Huly frontend hides the Chat and HR applications from workspace navi
 
 The optional `todoForums` configuration links Discord forum to-do lists to Huly Tracker projects. Give each entry a forum channel ID and its destination project ID. The service imports active and public archived posts, then checks for new posts, title changes, and workflow tags every five minutes. Each issue has a `Discord post` link back to its source. Create that URL property on Huly's Issue type and the workflow statuses listed in [the technical documentation](documentation.md) before enabling the mapping. Huly edits to an imported issue remain in place until the corresponding Discord title or workflow tag changes. The link is one-way; it does not post Huly changes to Discord or copy comments and attachments.
 
+## Staff applications
+
+The optional `applications` configuration serves a public form at the separate `publicOrigin` under `/apply`. Route that hostname to this service while preserving Host and HTTPS forwarding. Its root redirects to `/apply`; staff APIs and Huly are unavailable on the public hostname. Existing staff and Huly hostnames retain their authentication requirements.
+
+Applicants choose Community Staff, Builder, Artist, or Developer, enter a preferred name and Minecraft Java Edition username, and answer questions for their role and selected Drakora communities. Discord sign-in is optional and uses the existing staff OAuth callback. It confirms only identity and does not create a staff account or require membership in the staff guild. Applicants without a verified Discord email must provide a contact email. Discord bios are not collected. Current community staff can apply for specialist roles they do not hold, and specialist staff can apply for Community Staff.
+
+Applicants must confirm that they are 18 or older and consent to private application storage. Community Staff receives one randomly selected question from twenty scenarios; specialist roles receive a scenario relevant to their work. The assigned scenario stays with the draft. Drafts expire after seven days and remain associated with that browser's secure session. Submitted applications are retained until removed by the operator. Minecraft lookup and head previews confirm a public profile only, never account ownership. Server history and in-game verification are not connected yet.
+
+Set `STAFF_APPLICATIONS_DATA_PATH` to a private persistent directory owned by container user 1000. The application SQLite database uses an independent random `applications.databaseKey`. Keep both the database and key backed up privately. Do not commit application data or private configuration. See [the technical documentation](documentation.md) for delivery and access boundaries.
+
+Application notices go to `applications.notificationChannelId` with all mentions disabled. They contain the preferred name, role, optional Discord mention, and a link to the private application. Configure the channel as read-only for members and allow the bot to view, send messages, embed links, and read history. Founder, Admin, and Moderator members with the Dashboard role can read the Staff Applications list and individual submissions. There are no review, approval, rejection, or role-granting controls yet. Applications do not synchronize to Huly.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:

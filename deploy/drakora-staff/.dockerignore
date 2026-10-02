@@ -7,3 +7,5 @@ test
 *.sqlite*
 config.json
 secrets
+
+applications-data/

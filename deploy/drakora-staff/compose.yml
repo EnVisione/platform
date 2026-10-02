@@ -11,6 +11,7 @@ services:
     ports: ["127.0.0.1:8088:3000"]
     volumes:
       - ${STAFF_DATA_PATH:?Set STAFF_DATA_PATH}:/data
+      - ${STAFF_APPLICATIONS_DATA_PATH:-./applications-data}:/applications
       - ${STAFF_CONFIG_PATH:?Set STAFF_CONFIG_PATH}:/run/secrets/config.json:ro
     networks: [huly]
     healthcheck:

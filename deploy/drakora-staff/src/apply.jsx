@@ -1,0 +1,781 @@
+import React, { useEffect, useRef, useState } from "react";
+import {
+  applicationRoles,
+  communityOptions,
+  questionList,
+} from "../shared/application-form.js";
+import logo from "./assets/drakora-logo.png";
+import "./apply.css";
+
+const notices = {
+  application_draft_changed:
+    "Your draft changed while submitting. Please check it and submit again.",
+  discord_cancelled:
+    "Discord sign-in was cancelled. You can continue without it.",
+  invalid_login_state:
+    "Your Discord sign-in link expired. Please connect again.",
+  service_unavailable:
+    "Applications are temporarily unavailable. Your saved draft is still here. Please try again.",
+  application_role_unavailable:
+    "Your Discord roles changed which applications are available. Choose another role.",
+};
+const timezoneOptions = [
+  ...new Set([
+    "UTC",
+    ...(Intl.supportedValuesOf
+      ? Intl.supportedValuesOf("timeZone")
+      : [Intl.DateTimeFormat().resolvedOptions().timeZone]),
+  ]),
+];
+const stepKey = "drakora.application.step";
+function storedStep() {
+  try {
+    return Math.max(0, Number(sessionStorage.getItem(stepKey)) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+export function PublicApplication() {
+  const [draft, setDraft] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [step, setStep] = useState(storedStep);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [errors, setErrors] = useState({});
+  const [saveState, setSaveState] = useState("");
+  const [profile, setProfile] = useState(null);
+  const [receipt, setReceipt] = useState(null);
+  const queue = useRef(Promise.resolve());
+  const changed = useRef(false);
+  const csrf = useRef("");
+  async function request(path, method = "GET", body) {
+    const response = await fetch(`/apply/api/${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrf.current,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok && response.status !== 422)
+      throw new Error(data.error || "service_unavailable");
+    return data;
+  }
+  function save(body) {
+    const action = queue.current
+      .catch(() => {})
+      .then(() => request("draft", "PATCH", body));
+    queue.current = action;
+    return action;
+  }
+  useEffect(() => {
+    let active = true;
+    request("draft")
+      .then((data) => {
+        if (!active) return;
+        csrf.current = data.csrf;
+        setDraft(data);
+        setAnswers(data.answers ?? {});
+        if (data.submitted) setReceipt(data.submitted);
+        if (!data.role) setStep(0);
+        const loginError = new URLSearchParams(location.search).get("error");
+        if (loginError)
+          setError(
+            notices[loginError] ||
+              "Discord could not be connected. Please try again or continue without it.",
+          );
+      })
+      .catch(() => active && setError(notices.service_unavailable));
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!changed.current || !draft || receipt) return;
+    setSaveState("Saving draft…");
+    const timer = setTimeout(() => {
+      save({ answers })
+        .then(() => setSaveState("Draft saved for 7 days in this browser."))
+        .catch(() =>
+          setSaveState(
+            "Draft could not be saved. Check your connection before continuing.",
+          ),
+        );
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [answers]);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(stepKey, String(step));
+    } catch {}
+  }, [step]);
+  useEffect(() => {
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(answers.ign ?? "")) {
+      setProfile(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () =>
+        fetch(`/apply/api/minecraft/${encodeURIComponent(answers.ign)}`, {
+          signal: controller.signal,
+        })
+          .then((response) => (response.ok ? response.json() : null))
+          .then(setProfile)
+          .catch(() => {}),
+      500,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [answers.ign]);
+  function update(key, value) {
+    changed.current = true;
+    setAnswers((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+  }
+  const questions = questionList(draft?.role, answers.communities ?? []);
+  const stages = [
+    "role",
+    "name",
+    "ign",
+    "discord",
+    "details",
+    "communities",
+    ...questions.map(([key]) => key),
+    "review",
+  ];
+  const index = Math.min(step, stages.length - 1);
+  const current = stages[index];
+  const question = questions.find(([key]) => key === current);
+  const percent = Math.round((index / (stages.length - 1)) * 100);
+  async function restart() {
+    setBusy(true);
+    setError("");
+    try {
+      await queue.current.catch(() => {});
+      const data = await request("new", "POST", {});
+      changed.current = false;
+      setDraft((old) => ({ ...data, csrf: old.csrf }));
+      setAnswers({});
+      setReceipt(null);
+      setStep(0);
+      setErrors({});
+      setSaveState("");
+    } catch {
+      setError(notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function choose(role) {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await save({ role });
+      setDraft((old) => ({ ...old, ...data }));
+      setStep(1);
+    } catch (failure) {
+      setError(notices[failure.message] || notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function connect() {
+    if (!answers.displayName?.trim()) {
+      setError(
+        "Please tell us what we should call you before connecting Discord.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await save({ answers });
+      const data = await request("discord/start", "POST", {});
+      location.assign(data.url);
+    } catch (failure) {
+      setError(notices[failure.message] || notices.service_unavailable);
+      setBusy(false);
+    }
+  }
+  async function disconnect() {
+    setBusy(true);
+    try {
+      await queue.current.catch(() => {});
+      const data = await request("discord/disconnect", "POST", {});
+      setDraft((old) => ({ ...old, ...data }));
+      update("discordConfirmed", false);
+    } catch {
+      setError(notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function next(event) {
+    event.preventDefault();
+    setError("");
+    if (current === "communities" && !answers.communities?.length) {
+      setError("Choose at least one community where you are active.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await save({ answers });
+      setDraft((old) => ({ ...old, ...data }));
+      if (current === "review") {
+        const result = await request("submit", "POST", {});
+        if (result.errors) {
+          setErrors(result.errors);
+          setError(
+            "Please correct the answers listed below before submitting.",
+          );
+        } else {
+          setReceipt({
+            id: result.id,
+            role: applicationRoles[draft.role].label,
+          });
+          changed.current = false;
+        }
+      } else setStep(index + 1);
+    } catch (failure) {
+      setError(notices[failure.message] || notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function field(key, label, options = {}) {
+    return (
+      <label className="apply-field" key={key}>
+        <span>{label}</span>
+        <input
+          value={answers[key] ?? ""}
+          onChange={(event) => update(key, event.target.value)}
+          required
+          {...options}
+          aria-invalid={Boolean(errors[key])}
+        />
+        {errors[key] && <small className="apply-error">{errors[key]}</small>}
+      </label>
+    );
+  }
+  function check(key, label, required = true) {
+    return (
+      <label className="apply-check">
+        <input
+          type="checkbox"
+          checked={Boolean(answers[key])}
+          onChange={(event) => update(key, event.target.checked)}
+          required={required}
+        />
+        <span>{label}</span>
+      </label>
+    );
+  }
+  return (
+    <main className="apply-layout">
+      <div className="apply-shell">
+        <a className="apply-brand" href="/apply">
+          <img src={logo} alt="" />
+          <span>
+            Drakora <small>STAFF APPLICATIONS</small>
+          </span>
+        </a>
+        <section className="apply-card" aria-labelledby="apply-title">
+          {!draft ? (
+            <>
+              <h1 id="apply-title">Staff applications</h1>
+              <p>{error || "Opening your application…"}</p>
+              <button type="button" onClick={() => location.reload()}>
+                Retry
+              </button>
+            </>
+          ) : receipt ? (
+            <>
+              <span className="apply-eyebrow">APPLICATION RECEIVED</span>
+              <h1 id="apply-title">
+                Thank you, {answers.displayName || "applicant"}.
+              </h1>
+              <p>
+                Your {receipt.role} application has been saved. The team will
+                use your contact details to follow up.
+              </p>
+              <p className="apply-muted">Reference: {receipt.id}</p>
+              {error && (
+                <p className="apply-notice" role="alert">
+                  {error}
+                </p>
+              )}
+              <button
+                type="button"
+                className="apply-secondary"
+                onClick={restart}
+                disabled={busy}
+              >
+                Start another application
+              </button>
+              <a
+                className="apply-button"
+                href="https://discord.com/channels/1405306768476864562"
+              >
+                Open Drakora Discord
+              </a>
+            </>
+          ) : (
+            <>
+              <div
+                className="apply-progress"
+                aria-label={`Application progress: ${percent}%`}
+              >
+                <progress max="100" value={percent} />
+                <span>
+                  {index + 1} / {stages.length}
+                </span>
+              </div>
+              {draft.discord && (
+                <p className="apply-welcome">
+                  Welcome back, {answers.displayName || draft.discord.name}.
+                  Your Discord roles determine which team applications are
+                  available.
+                </p>
+              )}
+              {error && (
+                <p className="apply-notice" role="alert">
+                  {error}
+                </p>
+              )}
+              <form onSubmit={next}>
+                {current === "role" && (
+                  <>
+                    <span className="apply-eyebrow">JOIN THE TEAM</span>
+                    <h1 id="apply-title">What are you applying for?</h1>
+                    <p>Choose the team you would like to join.</p>
+                    <div className="apply-roles">
+                      {draft.roles.map((role) => (
+                        <button
+                          type="button"
+                          key={role}
+                          onClick={() => choose(role)}
+                          disabled={busy}
+                        >
+                          <strong>{applicationRoles[role].label}</strong>
+                          <span>{applicationRoles[role].description}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {!draft.roles.length && (
+                      <p>
+                        You already hold all of these roles. Speak to a Founder
+                        about your responsibilities.
+                      </p>
+                    )}
+                  </>
+                )}
+                {current === "name" && (
+                  <>
+                    <h1 id="apply-title">What should we call you?</h1>
+                    <p>
+                      Use the name you would like the team to use. Please answer
+                      this even if you connect Discord.
+                    </p>
+                    {field("displayName", "Your preferred name", {
+                      maxLength: 80,
+                      autoComplete: "nickname",
+                    })}
+                    <div className="apply-discord-option">
+                      <p>
+                        Discord sign-in is optional. Connecting lets us confirm
+                        your Discord account.
+                      </p>
+                      {draft.discord ? (
+                        <span>Connected as @{draft.discord.username}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={connect}
+                          disabled={busy || !answers.displayName?.trim()}
+                        >
+                          Connect Discord
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+                {current === "ign" && (
+                  <>
+                    <h1 id="apply-title">Your Minecraft name</h1>
+                    <p>Enter your Minecraft Java Edition username.</p>
+                    {field("ign", "In-game name (IGN)", {
+                      pattern: "[A-Za-z0-9_]{3,16}",
+                      minLength: 3,
+                      maxLength: 16,
+                      spellCheck: false,
+                      autoComplete: "off",
+                    })}
+                    {/^[A-Za-z0-9_]{3,16}$/.test(answers.ign ?? "") && (
+                      <div className="apply-player">
+                        <img
+                          key={answers.ign}
+                          src={`/apply/api/head/${encodeURIComponent(answers.ign)}`}
+                          alt="Minecraft head preview"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                          }}
+                        />
+                        <span>
+                          {profile?.found ? profile.name : answers.ign}
+                          <small>
+                            {profile?.found
+                              ? "Minecraft profile found. Ownership is not verified."
+                              : "A profile preview may be unavailable. You can still apply."}
+                          </small>
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+                {current === "discord" && (
+                  <>
+                    <h1 id="apply-title">
+                      {draft.discord ? "Is this you?" : "Do you use Discord?"}
+                    </h1>
+                    {draft.discord ? (
+                      <>
+                        <div className="apply-profile">
+                          <img src={draft.discord.avatar} alt="" />
+                          <div>
+                            <strong>{draft.discord.name}</strong>
+                            <span>@{draft.discord.username}</span>
+                          </div>
+                        </div>
+                        {check(
+                          "discordConfirmed",
+                          "Yes, this Discord account belongs to me.",
+                        )}
+                        <button
+                          className="apply-link"
+                          type="button"
+                          disabled={busy}
+                          onClick={disconnect}
+                        >
+                          Use another account or continue without Discord
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="apply-radios">
+                          {["yes", "no"].map((value) => (
+                            <label key={value}>
+                              <input
+                                type="radio"
+                                name="discordUses"
+                                value={value}
+                                required
+                                checked={answers.discordUses === value}
+                                onChange={() => update("discordUses", value)}
+                              />
+                              {value === "yes" ? "Yes" : "No"}
+                            </label>
+                          ))}
+                        </div>
+                        {answers.discordUses === "yes" && (
+                          <>
+                            <p>
+                              Connect your account if you would like us to
+                              confirm it. You can also continue with a contact
+                              email.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={connect}
+                              disabled={busy}
+                            >
+                              Connect Discord
+                            </button>
+                          </>
+                        )}
+                        {answers.discordUses === "no" && (
+                          <label className="apply-field">
+                            <span>Why do you not use Discord?</span>
+                            <textarea
+                              required
+                              minLength={10}
+                              maxLength={1000}
+                              value={answers.discordWhy ?? ""}
+                              onChange={(event) =>
+                                update("discordWhy", event.target.value)
+                              }
+                            />
+                          </label>
+                        )}
+                      </>
+                    )}
+                    {(!draft.discord || !draft.discord.emailAvailable) && (
+                      <>
+                        {field("contactEmail", "Contact email", {
+                          type: "email",
+                          maxLength: 254,
+                          autoComplete: "email",
+                        })}
+                        <p className="apply-muted">
+                          Staff will use this to contact you about your
+                          application. It is not shown publicly.
+                        </p>
+                      </>
+                    )}
+                  </>
+                )}
+                {current === "details" && (
+                  <>
+                    <h1 id="apply-title">A few details</h1>
+                    {field("pronouns", "Pronouns", {
+                      list: "pronoun-options",
+                      maxLength: 80,
+                    })}
+                    <datalist id="pronoun-options">
+                      {[
+                        "He/him",
+                        "She/her",
+                        "They/them",
+                        "Prefer not to say",
+                      ].map((value) => (
+                        <option key={value} value={value} />
+                      ))}
+                    </datalist>
+                    {field("age", "Age", {
+                      type: "number",
+                      min: 18,
+                      max: 120,
+                      step: 1,
+                    })}
+                    <p>
+                      Applicants must be 18 or older. Staff work needs mature
+                      judgment, consistency, and responsibility. This age
+                      requirement is not a judgment of younger community
+                      members.
+                    </p>
+                    {check("adultConfirmed", "I am 18 or older.")}
+                    {field("timezone", "Timezone", {
+                      list: "timezone-options",
+                      maxLength: 80,
+                      placeholder: "America/Chicago",
+                    })}
+                    <datalist id="timezone-options">
+                      {timezoneOptions.map((zone) => (
+                        <option key={zone} value={zone} />
+                      ))}
+                    </datalist>
+                    <button
+                      type="button"
+                      className="apply-link"
+                      onClick={() =>
+                        update(
+                          "timezone",
+                          Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        )
+                      }
+                    >
+                      Use my device timezone
+                    </button>
+                  </>
+                )}
+                {current === "communities" && (
+                  <>
+                    <h1 id="apply-title">Where are you usually active?</h1>
+                    <p>
+                      Select all that apply. We will ask about each community
+                      you choose.
+                    </p>
+                    {communityOptions.map(([key, label]) => (
+                      <label className="apply-check" key={key}>
+                        <input
+                          type="checkbox"
+                          checked={answers.communities?.includes(key) ?? false}
+                          onChange={(event) =>
+                            update(
+                              "communities",
+                              event.target.checked
+                                ? [...(answers.communities ?? []), key]
+                                : answers.communities.filter(
+                                    (value) => value !== key,
+                                  ),
+                            )
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </>
+                )}
+                {question && (
+                  <>
+                    <span className="apply-eyebrow">
+                      {applicationRoles[draft.role].label}
+                    </span>
+                    <h1 id="apply-title">{question[1]}</h1>
+                    <p>{question[2]}</p>
+                    {current === "availability" &&
+                      field(
+                        "hoursPerWeek",
+                        "Hours you can realistically offer per week",
+                        { type: "number", min: 1, max: 168, step: "0.5" },
+                      )}
+                    {current === "scenarioAnswer" && (
+                      <blockquote className="apply-scenario">
+                        {draft.scenario}
+                      </blockquote>
+                    )}
+                    <label className="apply-field">
+                      <span className="sr-only">{question[1]}</span>
+                      <textarea
+                        required={
+                          !["experienceProof", "comments"].includes(current)
+                        }
+                        minLength={current === "scenarioAnswer" ? 40 : 20}
+                        maxLength={current === "scenarioAnswer" ? 6000 : 4000}
+                        rows={8}
+                        value={answers[current] ?? ""}
+                        onChange={(event) =>
+                          update(current, event.target.value)
+                        }
+                      />
+                      {errors[current] && (
+                        <small className="apply-error">{errors[current]}</small>
+                      )}
+                    </label>
+                  </>
+                )}
+                {current === "review" && (
+                  <>
+                    <h1 id="apply-title">Check your application</h1>
+                    <p>
+                      You are applying for {applicationRoles[draft.role].label}.
+                      Please check your answers before submitting.
+                    </p>
+                    <div className="apply-review-edits">
+                      {[
+                        ["name", "Name"],
+                        ["ign", "Minecraft name"],
+                        ["discord", "Discord and contact"],
+                        ["details", "Personal details"],
+                        ["communities", "Communities"],
+                      ].map(([stage, label]) => (
+                        <button
+                          className="apply-link"
+                          key={stage}
+                          type="button"
+                          onClick={() => setStep(stages.indexOf(stage))}
+                        >
+                          Edit {label}
+                        </button>
+                      ))}
+                    </div>
+                    <dl className="apply-review">
+                      <dt>Name</dt>
+                      <dd>{answers.displayName}</dd>
+                      <dt>Minecraft</dt>
+                      <dd>{answers.ign}</dd>
+                      <dt>Discord</dt>
+                      <dd>
+                        {draft.discord
+                          ? `@${draft.discord.username}`
+                          : "Not connected"}
+                      </dd>
+                      <dt>Contact</dt>
+                      <dd>
+                        {draft.discord?.emailAvailable
+                          ? "Your verified Discord email"
+                          : answers.contactEmail}
+                      </dd>
+                      <dt>Pronouns / age / timezone</dt>
+                      <dd>
+                        {answers.pronouns} · {answers.age} · {answers.timezone}
+                      </dd>
+                      <dt>Availability</dt>
+                      <dd>{answers.hoursPerWeek} hours per week</dd>
+                    </dl>
+                    {questions.map(([key, label]) => (
+                      <details className="apply-answer" key={key}>
+                        <summary>{label}</summary>
+                        {key === "scenarioAnswer" && (
+                          <blockquote>{draft.scenario}</blockquote>
+                        )}
+                        <p>{answers[key] || "No answer"}</p>
+                        <button
+                          type="button"
+                          className="apply-link"
+                          onClick={() => setStep(stages.indexOf(key))}
+                        >
+                          Edit answer
+                        </button>
+                      </details>
+                    ))}
+                    {Object.entries(errors)
+                      .filter(([, value]) => value)
+                      .map(([key, value]) => (
+                        <p className="apply-error" key={key}>
+                          {key}: {value}
+                        </p>
+                      ))}
+                    <p className="apply-muted">
+                      Your answers, contact details, and linked Discord and
+                      Minecraft identity are stored privately for staff
+                      applications. Authorized Moderators, Admins, and Founders
+                      can read them. Minecraft ownership and network activity
+                      are not verified yet. Please do not include passwords,
+                      home addresses, or private documents.
+                    </p>
+                    {check(
+                      "privacyConsent",
+                      "I agree that Drakora may store these details and let authorized staff read and contact me about my application.",
+                    )}
+                    {check(
+                      "accuracyConfirmed",
+                      "My answers are accurate and the work or evidence I shared is my own, or clearly attributed.",
+                    )}
+                  </>
+                )}
+                {current !== "role" && (
+                  <div className="apply-actions">
+                    <button
+                      type="button"
+                      className="apply-secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        setError("");
+                        setStep(Math.max(0, index - 1));
+                      }}
+                    >
+                      Back
+                    </button>
+                    <button
+                      className="apply-button"
+                      type="submit"
+                      disabled={busy}
+                    >
+                      {busy
+                        ? "Saving…"
+                        : current === "review"
+                          ? "Submit application"
+                          : "Continue"}
+                    </button>
+                  </div>
+                )}
+              </form>
+              <p className="apply-save" role="status">
+                {saveState ||
+                  "Your draft stays in this browser for 7 days. Discord sign-in is optional."}
+              </p>
+            </>
+          )}
+        </section>
+        <footer className="apply-footer">
+          Drakora Network · Staff applications
+        </footer>
+      </div>
+    </main>
+  );
+}

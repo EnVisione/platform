@@ -98,5 +98,27 @@ export function discordClient(config, store, fetcher = fetch) {
       );
     return pending.get(id);
   }
-  return { login, check };
+  async function identity(code) {
+    const tokens = await token({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+    });
+    const profile = await api("/users/@me", tokens.access_token);
+    if (!profile?.id) throw new AuthError("discord_login_required", 401);
+    const member = await api(
+      `/users/@me/guilds/${config.guildId}/member`,
+      tokens.access_token,
+    );
+    return {
+      id: profile.id,
+      name: profile.global_name || profile.username,
+      username: profile.username,
+      avatar: discordAvatar(profile),
+      email:
+        profile.verified && profile.email ? profile.email.toLowerCase() : null,
+      roles: member?.pending ? [] : (member?.roles ?? []),
+    };
+  }
+  return { login, check, identity };
 }

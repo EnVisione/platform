@@ -29,7 +29,18 @@ export function managementAccess(config, user) {
     ),
     manager: Boolean(
       user.permissions.dashboard &&
-        ((founder && ids.has(founder.id)) || (admin && ids.has(admin.id))),
+      ((founder && ids.has(founder.id)) || (admin && ids.has(admin.id))),
     ),
   };
+}
+
+export function applicationReviewAccess(config, user) {
+  return Boolean(
+    user.permissions.dashboard &&
+    config.ranks.some(
+      (rank) =>
+        ["Founder", "Admin", "Moderator"].includes(rank.name) &&
+        user.roles.includes(rank.id),
+    ),
+  );
 }

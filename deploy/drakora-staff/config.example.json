@@ -108,5 +108,15 @@
       "channelId": "REPLACE_DISCORD_TODO_FORUM_ID",
       "projectId": "REPLACE_DISCORD_PROJECT_ID"
     }
-  ]
+  ],
+  "applications": {
+    "publicOrigin": "https://example.com",
+    "databaseKey": "REPLACE_INDEPENDENT_32_RANDOM_BYTES_BASE64",
+    "notificationChannelId": "REPLACE_APPLICATION_CHANNEL_ID",
+    "specialistRoles": {
+      "builder": "REPLACE_BUILDER_ROLE_ID",
+      "artist": "REPLACE_ARTIST_ROLE_ID",
+      "developer": "REPLACE_DEVELOPER_ROLE_ID"
+    }
+  }
 }

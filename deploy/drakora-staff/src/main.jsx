@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { PublicApplication } from "./apply.jsx";
+import { StaffApplications } from "./applications.jsx";
 import { Office } from "./office.jsx";
 import logo from "./assets/drakora-logo.png";
 
@@ -35,10 +37,12 @@ const messages = {
     "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
 };
 function safeTarget(value) {
-  if (["/", "/huly", "/settings", "/accounts"].includes(value)) return value;
+  if (["/", "/huly", "/settings", "/accounts", "/applications"].includes(value))
+    return value;
   if (/^\/interaction\/[A-Za-z0-9_-]+$/.test(value || "")) return value;
   if (/^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value || ""))
     return value;
+  if (/^\/applications\/[a-f0-9-]{36}$/.test(value || "")) return value;
   return "/";
 }
 function timeLabel(value) {
@@ -501,6 +505,9 @@ function App() {
   const loginPage = location.pathname === "/login";
   const settingsPage = location.pathname === "/settings";
   const accountsPage = location.pathname === "/accounts";
+  const applicationsPage =
+    location.pathname === "/applications" ||
+    location.pathname.startsWith("/applications/");
   useEffect(() => {
     let active = true;
     fetch("/api/me")
@@ -623,15 +630,28 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage ? "" : " active"}`}
             href="/"
-            aria-current={settingsPage || accountsPage ? undefined : "page"}
+            aria-current={
+              settingsPage || accountsPage || applicationsPage
+                ? undefined
+                : "page"
+            }
           >
             <span aria-hidden="true">⌂</span>Overview
           </a>
           {user.todo && (
             <a className="nav-item" href="/huly">
               <span aria-hidden="true">✓</span>Huly
+            </a>
+          )}
+          {user.applications && (
+            <a
+              className={`nav-item${applicationsPage ? " active" : ""}`}
+              href="/applications"
+              aria-current={applicationsPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">▤</span>Staff Applications
             </a>
           )}
           {user.manager && (
@@ -668,11 +688,22 @@ function App() {
       <div className="main-area">
         <header className="topbar">
           <h1>
-            {settingsPage ? "Settings" : accountsPage ? "Accounts" : "Overview"}
+            {settingsPage
+              ? "Settings"
+              : accountsPage
+                ? "Accounts"
+                : applicationsPage
+                  ? "Staff Applications"
+                  : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
-            {(settingsPage || accountsPage) && <a href="/">Overview</a>}
+            {(settingsPage || accountsPage || applicationsPage) && (
+              <a href="/">Overview</a>
+            )}
             {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
+            {user.applications && !applicationsPage && (
+              <a href="/applications">Applications</a>
+            )}
             {!settingsPage && <a href="/settings">Settings</a>}
           </nav>
           <button className="signout" onClick={logout} disabled={busy}>
@@ -685,7 +716,15 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {settingsPage ? (
+          {applicationsPage ? (
+            user.applications ? (
+              <StaffApplications />
+            ) : (
+              <p className="notice">
+                Application access requires Moderator, Admin, or Founder rank.
+              </p>
+            )
+          ) : settingsPage ? (
             <>
               <AccentSettings
                 userId={user.id}
@@ -744,7 +783,9 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")).render(
-  location.pathname === "/office" ||
+  location.pathname === "/apply" || location.pathname.startsWith("/apply/") ? (
+    <PublicApplication />
+  ) : location.pathname === "/office" ||
     location.pathname === "/_drakora/office" ? (
     <Office />
   ) : (

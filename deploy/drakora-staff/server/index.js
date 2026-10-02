@@ -15,9 +15,12 @@ import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
 import { minecraftRegistry } from "./minecraft.js";
-import { managementAccess } from "./roles.js";
+import { managementAccess, applicationReviewAccess } from "./roles.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
+
+import { applicationService } from "./applications.js";
+import { applicationRouter } from "./application-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -30,6 +33,18 @@ const { store, sessions, OidcAdapter } = openStore(
   `${dataPath}/staff.sqlite`,
   config.databaseKey,
 );
+const applicationPath = process.env.APPLICATION_DATA_PATH ?? "/applications";
+if (config.applications)
+  mkdirSync(applicationPath, { recursive: true, mode: 0o700 });
+const applicationDatabase = config.applications
+  ? openStore(
+      `${applicationPath}/applications.sqlite`,
+      config.applications.databaseKey,
+    )
+  : undefined;
+const applications = applicationDatabase
+  ? applicationService(config, applicationDatabase.store)
+  : undefined;
 const discord = discordClient(config, store);
 const minecraft = minecraftRegistry(store);
 const activity = memberActivity(store);
@@ -43,6 +58,10 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 const staffHost = new URL(config.staffOrigin).host;
 const todoHost = new URL(config.todoOrigin).host;
+const applicationHost = config.applications
+  ? new URL(config.applications.publicOrigin).host
+  : undefined;
+const dist = resolve("dist");
 const newToken = () => randomBytes(32).toString("base64url");
 const safeEqual = (left, right) =>
   typeof left === "string" &&
@@ -79,6 +98,16 @@ const makeSession = (name) =>
   });
 const staffSession = makeSession("__Host-drakora_staff");
 const todoSession = makeSession("__Host-drakora_todo");
+const applicationSession = applicationDatabase
+  ? session({
+      name: "__Host-drakora_apply",
+      store: applicationDatabase.sessions,
+      secret: config.sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { ...cookieOptions, maxAge: 7 * 86400000 },
+    })
+  : undefined;
 const sockets = new Set();
 
 app.use((req, res, next) => {
@@ -90,17 +119,25 @@ app.use((req, res, next) => {
   });
   if (req.path === "/health" && req.headers.host === "127.0.0.1:3000")
     return res.json({ ok: true });
-  if (![staffHost, todoHost].includes(req.headers.host))
+  if (
+    ![staffHost, todoHost, applicationHost]
+      .filter(Boolean)
+      .includes(req.headers.host)
+  )
     return res.status(421).end();
   if (req.headers["x-forwarded-proto"] !== "https")
     return res.redirect(
       308,
-      `${req.headers.host === staffHost ? config.staffOrigin : config.todoOrigin}${req.url}`,
+      `${req.headers.host === staffHost ? config.staffOrigin : req.headers.host === todoHost ? config.todoOrigin : config.applications.publicOrigin}${req.url}`,
     );
   next();
 });
 app.use((req, res, next) =>
-  (req.headers.host === todoHost ? todoSession : staffSession)(req, res, next),
+  (req.headers.host === todoHost
+    ? todoSession
+    : req.headers.host === applicationHost
+      ? applicationSession
+      : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -112,7 +149,7 @@ app.use(
   }),
 );
 app.use((req, res, next) => {
-  if (req.headers.host === staffHost)
+  if ([staffHost, applicationHost].includes(req.headers.host))
     res.set(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -120,8 +157,18 @@ app.use((req, res, next) => {
   next();
 });
 
+if (applications) {
+  const publicApplications = applicationRouter(config, applications, dist);
+  app.use((req, res, next) =>
+    req.headers.host === applicationHost
+      ? publicApplications(req, res, next)
+      : next(),
+  );
+}
+
 function safeNext(value) {
-  if (["/", "/huly", "/settings", "/accounts"].includes(value)) return value;
+  if (["/", "/huly", "/settings", "/accounts", "/applications"].includes(value))
+    return value;
   if (
     typeof value === "string" &&
     /^\/interaction\/[A-Za-z0-9_-]+$/.test(value)
@@ -132,10 +179,15 @@ function safeNext(value) {
     /^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value)
   )
     return value;
+  if (
+    typeof value === "string" &&
+    /^\/applications\/[a-f0-9-]{36}$/.test(value)
+  )
+    return value;
   return "/";
 }
 
-async function signedIn(req, { allowUnlinked = false } = {}) {
+async function signedIn(req, { allowUnlinked = false, syncHuly = true } = {}) {
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
   if (req.headers.host === todoHost) {
@@ -153,7 +205,8 @@ async function signedIn(req, { allowUnlinked = false } = {}) {
   const link = minecraft.get(user.id);
   if (!allowUnlinked && !link)
     throw new AuthError("minecraft_name_required", 428);
-  if (link && user.syncedAt !== user.checkedAt) user = await huly.sync(user);
+  if (syncHuly && link && user.syncedAt !== user.checkedAt)
+    user = await huly.sync(user);
   return user;
 }
 
@@ -164,6 +217,9 @@ function publicUser(user) {
     avatar: user.avatar,
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
+    applications: Boolean(
+      applications && applicationReviewAccess(config, user),
+    ),
     ...managementAccess(config, user),
     ...user.permissions,
   };
@@ -225,7 +281,9 @@ officeRouter.get("/", async (req, res) => {
 });
 officeRouter.get("/contact-ranks", (req, res) => {
   res.json(
-    contactRanks(office.snapshot(req.officeUser), (id) => store.get("user", id)),
+    contactRanks(office.snapshot(req.officeUser), (id) =>
+      store.get("user", id),
+    ),
   );
 });
 officeRouter.post(
@@ -391,6 +449,38 @@ app.use(async (req, res, next) => {
 app.get("/auth/discord", async (req, res) => {
   const state = newToken();
   const next = safeNext(req.query.next);
+  if (req.query.purpose === "application") {
+    if (!applications?.getChallenge(req.query.challenge))
+      throw new AuthError("invalid_login_state");
+    if (req.session.userId && req.session.until > Date.now()) {
+      const user = await discord.check(req.session.userId, true);
+      return res.redirect(
+        applications.handoff(req.query.challenge, {
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          avatar: user.avatar,
+          email: user.email,
+          roles: user.roles,
+        }),
+      );
+    }
+    req.session.applicationOAuth = {
+      challenge: req.query.challenge,
+      state: hash(state),
+      until: Date.now() + 600000,
+    };
+    await save(req);
+    const authorize = new URL("https://discord.com/oauth2/authorize");
+    authorize.search = new URLSearchParams({
+      client_id: config.discordClientId,
+      redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+      response_type: "code",
+      scope: "identify email guilds.members.read",
+      state,
+    });
+    return res.redirect(authorize.href);
+  }
   await regenerate(req);
   Object.assign(req.session, {
     oauthState: hash(state),
@@ -412,6 +502,28 @@ app.get("/auth/discord", async (req, res) => {
 
 app.get("/auth/discord/callback", async (req, res) => {
   const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (
+    req.session.applicationOAuth &&
+    safeEqual(hash(state), req.session.applicationOAuth.state)
+  ) {
+    const pending = req.session.applicationOAuth;
+    delete req.session.applicationOAuth;
+    await save(req);
+    try {
+      if (pending.until < Date.now())
+        throw new AuthError("invalid_login_state");
+      if (req.query.error || typeof req.query.code !== "string")
+        throw new AuthError("discord_cancelled");
+      const identity = await discord.identity(req.query.code);
+      return res.redirect(applications.handoff(pending.challenge, identity));
+    } catch (error) {
+      const code =
+        error instanceof AuthError ? error.code : "service_unavailable";
+      return res.redirect(
+        `${config.applications.publicOrigin}/apply?error=${encodeURIComponent(code)}`,
+      );
+    }
+  }
   if (
     !safeEqual(hash(state), req.session.oauthState) ||
     req.session.oauthUntil < Date.now()
@@ -703,7 +815,6 @@ app.use("/oidc", async (req, res, next) => {
   provider.callback()(req, res);
 });
 
-const dist = resolve("dist");
 app.use(
   "/__staff/assets",
   express.static(`${dist}/assets`, { immutable: true, maxAge: "1y" }),
@@ -733,6 +844,41 @@ app.get("/office", async (req, res) => {
     else if (error.code === "minecraft_name_required")
       res.redirect("/minecraft?next=/huly");
     else throw error;
+  }
+});
+async function applicationViewer(req) {
+  const user = await signedIn(req, { syncHuly: false });
+  if (!applications || !applicationReviewAccess(config, user))
+    throw new AuthError("application_review_role_required");
+  return user;
+}
+app.get("/api/applications", async (req, res) => {
+  await applicationViewer(req);
+  const offset = Number(req.query.offset ?? 0);
+  if (!Number.isSafeInteger(offset) || offset < 0)
+    throw new AuthError("invalid_request", 400);
+  res.json(applications.list(offset));
+});
+app.get("/api/applications/:id", async (req, res) => {
+  await applicationViewer(req);
+  const record = applications.get(req.params.id);
+  if (!record) throw new AuthError("application_not_found", 404);
+  res.json(record);
+});
+app.get(["/applications", "/applications/:id"], async (req, res) => {
+  try {
+    await applicationViewer(req);
+    res.sendFile(`${dist}/index.html`);
+  } catch (error) {
+    if (error.status === 401)
+      return res.redirect(
+        `/login?next=${encodeURIComponent(safeNext(req.path))}`,
+      );
+    if (error.code === "minecraft_name_required")
+      return res.redirect(
+        `/minecraft?next=${encodeURIComponent(safeNext(req.path))}`,
+      );
+    throw error;
   }
 });
 app.get(["/", "/settings", "/accounts"], async (req, res) => {
@@ -819,6 +965,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 const sweep = setInterval(async () => {
   store.clean();
+  applicationDatabase?.store.clean();
   for (const socket of sockets) {
     try {
       if (
@@ -844,13 +991,16 @@ server.listen(3000, "0.0.0.0", () =>
   console.log("Drakora staff service ready."),
 );
 todoSync?.start();
+applications?.start();
 async function stop() {
   clearInterval(sweep);
   await todoSync?.close();
+  await applications?.close();
   office?.close();
   for (const socket of sockets) socket.destroy();
   server.close(() => {
     store.close();
+    applicationDatabase?.store.close();
     process.exit(0);
   });
 }
