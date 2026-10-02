@@ -12,8 +12,12 @@ import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
 import { discordRoleTransport, staffRoleSync } from "./role-sync.js";
 import { discordRoleAdministration } from "./role-assignment.js";
+import {
+  discordMailTransport,
+  mailNotifications,
+} from "./mail-notifications.js";
 
-export function discordOffice(config, store) {
+export function discordOffice(config, store, dependencies = {}) {
   let guild;
   let activityRefresh;
   const activityGuilds = new Set([
@@ -35,6 +39,24 @@ export function discordOffice(config, store) {
     makeCache: Options.cacheWithLimits({ MessageManager: 0 }),
     allowedMentions: { parse: [] },
   });
+  const emailAlerts =
+    config.mail?.notifications && dependencies.mail
+      ? mailNotifications(
+          config,
+          store,
+          dependencies.mail,
+          discordMailTransport(config, store, dependencies.rolePolicy, client),
+        )
+      : undefined;
+  for (const event of [
+    "guildMemberUpdate",
+    "guildMemberAdd",
+    "guildMemberRemove",
+  ])
+    client.on(event, (member) => {
+      if (member.guild.id === config.guildId)
+        void emailAlerts?.refreshPermissions();
+    });
   let ready = false;
   const roleSync = config.roleSync
     ? staffRoleSync(config, store, discordRoleTransport(config, client))
@@ -202,6 +224,7 @@ export function discordOffice(config, store) {
       await meetings.reconcile();
       attempts = 0;
       console.log("Discord office connected.");
+      emailAlerts?.start();
       if (roleSync) {
         void roleSync.initialize().catch(roleFailure);
         if (!roleTimer)
@@ -343,6 +366,7 @@ export function discordOffice(config, store) {
     snapshot,
     meetings,
     roleSync,
+    emailAlerts,
     roleAdministration: discordRoleAdministration(config, client),
     onRolesChanged(listener) {
       roleListener = listener;
@@ -352,6 +376,7 @@ export function discordOffice(config, store) {
       clearTimeout(reconnectTimer);
       clearInterval(roleTimer);
       ready = false;
+      await emailAlerts?.close();
       await roleSync?.close();
       await client.destroy();
       await activityRefresh;

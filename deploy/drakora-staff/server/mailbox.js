@@ -356,6 +356,37 @@ export function mailboxService(config, store, dependencies = {}) {
   }
   return {
     identities,
+    incoming(cursor) {
+      return connection((client) =>
+        mailbox(client, "INBOX", undefined, true, async (validity) => {
+          const highest = Number(client.mailbox.uidNext) - 1;
+          if (!Number.isInteger(highest) || highest < 0 || highest > 4294967295)
+            throw new AuthError("mail_unavailable", 503);
+          if (!cursor || cursor.validity !== validity)
+            return { validity, through: highest, items: [] };
+          if (!Number.isInteger(cursor.uid) || cursor.uid < 0) throw invalid();
+          if (highest <= cursor.uid)
+            return { validity, through: cursor.uid, items: [] };
+          const end = Math.min(highest, cursor.uid + 500);
+          const matches =
+            (await client.search(
+              { ...identityScope, uid: `${cursor.uid + 1}:${end}` },
+              { uid: true },
+            )) || [];
+          matches.sort((a, b) => a - b);
+          const uids = matches.slice(0, 10);
+          const records = uids.length
+            ? await client.fetchAll(uids, { envelope: true }, { uid: true })
+            : [];
+          records.sort((a, b) => a.uid - b.uid);
+          return {
+            validity,
+            through: matches.length > uids.length ? uids.at(-1) : end,
+            items: records.map(summary),
+          };
+        }),
+      );
+    },
     folders: () =>
       connection(async (client) => {
         const folders = selectableFolders(

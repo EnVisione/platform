@@ -243,6 +243,15 @@ export function validateConfig(config) {
       throw new Error(
         "Configure the private IMAP socket and distinct sender identities with Proton Bridge SMTP enabled",
       );
+    if (
+      settings.notifications !== undefined &&
+      (!config.office ||
+        !config.discordBotToken ||
+        !snowflake(settings.notifications?.categoryId))
+    )
+      throw new Error(
+        "Configure a staff category for private email notifications",
+      );
   }
   return config;
 }

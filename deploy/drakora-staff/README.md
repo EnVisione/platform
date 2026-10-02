@@ -105,6 +105,10 @@ The mailbox layout uses the dashboard accent and adapts to mobile screens. Repli
 
 The email client uses [ImapFlow](https://github.com/postalsys/imapflow), [MailParser](https://github.com/nodemailer/mailparser), Nodemailer and sanitize-html with a portal interface. Existing application notification delivery remains independent of interactive mail.
 
+To enable staff Discord alerts, add `mail.notifications` with `categoryId` set to a category in the staff server. The bot creates a private `email` text channel and checks the shared INBOX every minute. Alerts use a blue accent, identify the shared recipient, and link to the dashboard mailbox. Sender details, subjects, bodies and attachments remain in the dashboard. The initial connection establishes a baseline without posting old mail. Checkpoints survive restarts; failed sends retry with a stable Discord nonce and check recent alerts before resending an uncertain delivery. A mailbox UID validity reset establishes a new baseline.
+
+Channel access follows each member's effective dashboard `mail.view` permission, including the Dashboard access role. Role and policy changes refresh access, with a periodic reconciliation each minute. Members can read alerts; the bot posts them. Discord administrators retain their platform override. The bot needs Manage Channels, View Channel, Read Message History, Send Messages and Embed Links. Up to 98 staff viewers fit Discord's channel overwrite limit; exceeding that limit closes member access and pauses alerts. Progress records contain message UIDs and delivery identifiers, not email content. Removing the notification configuration stops alerts; an existing channel remains for the operator to remove.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:

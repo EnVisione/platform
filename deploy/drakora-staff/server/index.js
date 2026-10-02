@@ -69,7 +69,9 @@ const discord = discordClient(config, store, fetch, rolePolicy.apply);
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
-const office = config.office ? discordOffice(config, store) : undefined;
+const office = config.office
+  ? discordOffice(config, store, { mail, rolePolicy })
+  : undefined;
 const assignments =
   office && config.roleSync
     ? roleAssignments(
@@ -717,6 +719,7 @@ app.use(
     requireMutation,
     staffHost,
     onPolicyChange() {
+      void office?.emailAlerts?.refreshPermissions();
       for (const socket of sockets) {
         const user = store.get("user", socket.userId);
         const current = user && rolePolicy.apply(user);

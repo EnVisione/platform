@@ -255,4 +255,18 @@ test("SMTP configuration rejects injected sender headers and incomplete credenti
   const missingSmtp = structuredClone(valid);
   delete missingSmtp.applications.smtp;
   assert.throws(() => validateConfig(missingSmtp), /private IMAP socket/);
+  valid.mail.notifications = { categoryId: "100" };
+  assert.throws(() => validateConfig(valid), /staff category/);
+  valid.office = {
+    categoryId: "101",
+    inviteChannelId: "102",
+    hostRoles: ["20"],
+    rooms: [{ id: "103", name: "Meeting", kind: "meeting" }],
+  };
+  assert.equal(validateConfig(valid), valid);
+  for (const categoryId of ["", "abc", null]) {
+    const invalid = structuredClone(valid);
+    invalid.mail.notifications.categoryId = categoryId;
+    assert.throws(() => validateConfig(invalid), /staff category/);
+  }
 });

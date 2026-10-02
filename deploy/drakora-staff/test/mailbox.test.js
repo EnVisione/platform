@@ -89,7 +89,10 @@ function harness(t, overrides = {}) {
     constructor(options) {
       super();
       this.options = options;
-      this.mailbox = { uidValidity: 51n };
+      this.mailbox = {
+        uidValidity: state.validity ?? 51n,
+        uidNext: Math.max(0, ...state.records.map((entry) => entry.uid)) + 1,
+      };
       this.released = 0;
       this.loggedOut = 0;
       this.closed = 0;
@@ -119,11 +122,22 @@ function harness(t, overrides = {}) {
     }
     async search(query) {
       state.searches.push(query);
+      if (query.uid?.includes(":")) {
+        const [start, end] = query.uid.split(":").map(Number);
+        return state.records
+          .filter(
+            (record) =>
+              record.uid >= start && record.uid <= end && !record.personal,
+          )
+          .map((record) => record.uid);
+      }
       if (query.uid) return state.allowed ? [Number(query.uid)] : [];
       return state.records.map((record) => record.uid);
     }
-    async fetchAll(uids) {
+    async fetchAll(uids, query) {
       state.fetches.push(uids);
+      state.fetchQueries ??= [];
+      state.fetchQueries.push(query);
       return state.records.filter((record) => uids.includes(record.uid));
     }
     async fetchOne(uid) {
@@ -175,6 +189,58 @@ function harness(t, overrides = {}) {
   });
   return { service, store, state };
 }
+
+test("new mail baseline, UID reset and empty polling never replay old mail", async (t) => {
+  const { service, state } = harness(t);
+  assert.deepEqual(await service.incoming(), {
+    validity: "51",
+    through: 37,
+    items: [],
+  });
+  assert.deepEqual(await service.incoming({ validity: "51", uid: 37 }), {
+    validity: "51",
+    through: 37,
+    items: [],
+  });
+  state.validity = 52n;
+  assert.deepEqual(await service.incoming({ validity: "51", uid: 0 }), {
+    validity: "52",
+    through: 37,
+    items: [],
+  });
+  assert.deepEqual(state.searches, []);
+  assert.ok(
+    state.clients.every(
+      (client) =>
+        client.readOnly && client.released === 1 && client.loggedOut === 1,
+    ),
+  );
+});
+
+test("new mail scans bounded UID ranges and fetches only shared headers without marking read", async (t) => {
+  const { service, state } = harness(t);
+  state.records[1].personal = true;
+  const batch = await service.incoming({ validity: "51", uid: 0 });
+  assert.deepEqual(
+    batch.items.map((item) => item.uid),
+    [1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  );
+  assert.equal(batch.through, 11);
+  assert.deepEqual(state.fetchQueries, [{ envelope: true }]);
+  assert.ok(
+    state.searches[0].or.some(
+      (query) => query.header?.["Delivered-To"] === "support@drakora.org",
+    ),
+  );
+  assert.deepEqual(state.flags, []);
+  state.records.push({ ...state.records[0], uid: 2000 });
+  assert.deepEqual(await service.incoming({ validity: "51", uid: 1000 }), {
+    validity: "51",
+    through: 1500,
+    items: [],
+  });
+  assert.equal(state.searches.at(-1).uid, "1001:1500");
+});
 
 test("mail permission requires Dashboard and Admin, Manager or Founder", () => {
   for (const rank of fixture.ranks) {
