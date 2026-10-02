@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   applicationRoles,
+  applicationBaseFields,
   communityOptions,
-  questionList,
-  requiredApplicationQuestion,
+  activeFormQuestions,
+  questionAnswerError,
   parseEvidenceLinks,
 } from "../shared/application-form.js";
 import { RequiredMark, EvidenceLinks } from "./application-evidence.jsx";
@@ -69,6 +70,22 @@ export function PublicApplication() {
     return data;
   }
   function save(body) {
+    if (body.answers) {
+      const allowed = new Set([
+        ...applicationBaseFields,
+        ...(draft?.role
+          ? draft.questionnaire.forms[draft.role].questions.map(
+              (question) => question.key,
+            )
+          : []),
+      ]);
+      body = {
+        ...body,
+        answers: Object.fromEntries(
+          Object.entries(body.answers).filter(([key]) => allowed.has(key)),
+        ),
+      };
+    }
     const action = queue.current
       .catch(() => {})
       .then(() => request("draft", "PATCH", body));
@@ -149,7 +166,18 @@ export function PublicApplication() {
     setAnswers((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: undefined }));
   }
-  const questions = questionList(draft?.role, answers.communities ?? []);
+  const questions =
+    draft?.role && draft.questionnaire
+      ? activeFormQuestions(
+          draft.questionnaire.forms[draft.role],
+          answers.communities ?? [],
+        ).map((question) => [
+          question.key,
+          question.title,
+          question.help,
+          question,
+        ])
+      : [];
   const needsDiscordQuestion = !draft?.discord && answers.discordUses === "no";
   const stages = [
     "name",
@@ -226,6 +254,13 @@ export function PublicApplication() {
   async function next(event) {
     event.preventDefault();
     setError("");
+    if (question) {
+      const error = questionAnswerError(question[3], answers[current]);
+      if (error) {
+        setErrors((old) => ({ ...old, [current]: error }));
+        return;
+      }
+    }
     if (current === "name" && !answers.displayName?.trim()) {
       setError("Please tell us what we should call you before continuing.");
       return;
@@ -454,7 +489,9 @@ export function PublicApplication() {
                           }
                         >
                           <strong>{applicationRoles[role].label}</strong>
-                          <span>{applicationRoles[role].description}</span>
+                          <span>
+                            {draft.questionnaire.forms[role].description}
+                          </span>
                           {draft.reapplicationWaits?.[role] > Date.now() && (
                             <span>
                               Available again from{" "}
@@ -722,6 +759,11 @@ export function PublicApplication() {
                       max: 120,
                       step: 1,
                     })}
+                    {field(
+                      "hoursPerWeek",
+                      "Hours you can realistically offer per week",
+                      { type: "number", min: 1, max: 168, step: "0.5" },
+                    )}
                     <p>
                       Applicants must be 18 or older. Staff work needs mature
                       judgment, consistency, and responsibility. This age
@@ -791,7 +833,7 @@ export function PublicApplication() {
                     </span>
                     <h1 id="apply-title">
                       {question[1]}
-                      {requiredApplicationQuestion(current) && <RequiredMark />}
+                      {question[3].required && <RequiredMark />}
                     </h1>
                     <p>{question[2]}</p>
                     {["portfolio", "experienceProof"].includes(current) && (
@@ -810,12 +852,6 @@ export function PublicApplication() {
                         </p>
                       </>
                     )}
-                    {current === "availability" &&
-                      field(
-                        "hoursPerWeek",
-                        "Hours you can realistically offer per week",
-                        { type: "number", min: 1, max: 168, step: "0.5" },
-                      )}
                     {current === "scenarioAnswer" && (
                       <blockquote className="apply-scenario">
                         {draft.scenario}
@@ -823,22 +859,43 @@ export function PublicApplication() {
                     )}
                     <label className="apply-field">
                       <span className="sr-only">{question[1]}</span>
-                      <textarea
-                        required={requiredApplicationQuestion(current)}
-                        minLength={
-                          requiredApplicationQuestion(current)
-                            ? current === "scenarioAnswer"
-                              ? 40
-                              : 20
-                            : undefined
-                        }
-                        maxLength={current === "scenarioAnswer" ? 6000 : 4000}
-                        rows={8}
-                        value={answers[current] ?? ""}
-                        onChange={(event) =>
-                          update(current, event.target.value)
-                        }
-                      />
+                      {question[3].kind === "choice" ? (
+                        <select
+                          required={question[3].required}
+                          value={answers[current] ?? ""}
+                          onChange={(event) =>
+                            update(current, event.target.value)
+                          }
+                        >
+                          <option value="">Choose an answer</option>
+                          {question[3].options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      ) : question[3].kind === "short" ? (
+                        <input
+                          required={question[3].required}
+                          minLength={question[3].minLength}
+                          maxLength={300}
+                          value={answers[current] ?? ""}
+                          onChange={(event) =>
+                            update(current, event.target.value)
+                          }
+                        />
+                      ) : (
+                        <textarea
+                          required={question[3].required}
+                          minLength={question[3].minLength}
+                          maxLength={current === "scenarioAnswer" ? 6000 : 4000}
+                          rows={8}
+                          value={answers[current] ?? ""}
+                          onChange={(event) =>
+                            update(current, event.target.value)
+                          }
+                        />
+                      )}
                       {errors[current] && (
                         <small className="apply-error">{errors[current]}</small>
                       )}

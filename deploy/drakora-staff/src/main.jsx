@@ -37,7 +37,16 @@ const messages = {
     "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
 };
 function safeTarget(value) {
-  if (["/", "/huly", "/settings", "/accounts", "/applications"].includes(value))
+  if (
+    [
+      "/",
+      "/huly",
+      "/settings",
+      "/accounts",
+      "/applications",
+      "/applications/editor",
+    ].includes(value)
+  )
     return value;
   if (/^\/interaction\/[A-Za-z0-9_-]+$/.test(value || "")) return value;
   if (/^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value || ""))

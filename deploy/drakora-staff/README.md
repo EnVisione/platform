@@ -127,3 +127,7 @@ docker compose --env-file /private/huly.conf \
 ```
 
 The tunnel override assumes a private Cloudflare Tunnel token file. Configure both public hostnames to target the staff service. If using a different TLS proxy, omit the cloudflared service and configure that proxy instead.
+
+The Staff Applications list filters by Community Staff, Builder, Artist, or Developer and by Received, In review, Approved, or Denied. Filters combine and remain in the page URL when opening an application and returning to the list. Denied applications remain stored and available to authorized reviewers.
+
+Managers and Founders can open **Edit application questions** from Staff Applications. Each of the four forms has its own description, questions, order, required answers, community conditions, and scenario prompts. Questions support paragraphs, short answers, and single choice answers. Save each form before switching teams. Identity fields, the 18+ requirement, weekly hours, consent, and the required scenario response remain protected. Saved changes apply to new drafts; existing drafts and submitted applications retain their original questions and answers.

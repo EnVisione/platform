@@ -81,7 +81,21 @@ export function openStore(path, encryptionKey) {
         throw error;
       }
     },
-    page(kind, limit = 50, offset = 0) {
+    page(kind, limit = 50, offset = 0, matches) {
+      if (matches) {
+        let total = 0;
+        const items = [];
+        const rows = db.prepare(
+          "SELECT value FROM records WHERE kind=? AND expires>? ORDER BY id DESC",
+        );
+        for (const row of rows.iterate(kind, Date.now())) {
+          const value = open(row.value);
+          if (!matches(value)) continue;
+          if (total >= offset && items.length < limit) items.push(value);
+          total++;
+        }
+        return { items, total };
+      }
       const total = db
         .prepare(
           "SELECT count(*) AS total FROM records WHERE kind=? AND expires>?",

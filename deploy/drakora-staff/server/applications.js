@@ -3,12 +3,14 @@ import { AuthError } from "./discord.js";
 import { hash } from "./store.js";
 import {
   applicationRoles,
+  applicationBaseFields,
+  applicationStatuses,
   communityOptions,
-  questionList,
-  requiredApplicationQuestion,
+  activeFormQuestions,
+  questionAnswerError,
   parseEvidenceLinks,
 } from "../shared/application-form.js";
-import { applicationScenarios } from "./application-scenarios.js";
+import { applicationForms } from "./application-forms.js";
 import { applicationNotifications } from "./application-notifications.js";
 import {
   communityRankNames,
@@ -19,35 +21,7 @@ import {
 const week = 7 * 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
 const token = () => randomBytes(32).toString("base64url");
-const baseFields = [
-  "displayName",
-  "ign",
-  "minecraftConfirmed",
-  "minecraftConfirmedName",
-  "discordUses",
-  "discordWhy",
-  "discordWilling",
-  "contactEmail",
-  "pronouns",
-  "age",
-  "timezone",
-  "communities",
-  "hoursPerWeek",
-  "adultConfirmed",
-  "discordConfirmed",
-  "privacyConsent",
-  "accuracyConfirmed",
-  "experienceLinks",
-];
-const fields = new Set([
-  ...baseFields,
-  ...Object.keys(applicationRoles).flatMap((role) =>
-    questionList(
-      role,
-      communityOptions.map(([key]) => key),
-    ).map(([key]) => key),
-  ),
-]);
+
 const booleans = new Set([
   "adultConfirmed",
   "minecraftConfirmed",
@@ -79,6 +53,13 @@ export function applicationService(
   getMinecraftLink = () => undefined,
 ) {
   const notifications = applicationNotifications(config, store, fetcher);
+  const forms = applicationForms(config, store);
+  const draftForm = (draft) =>
+    forms.revision(draft.questionnaireVersion).forms[draft.role];
+  const draftQuestions = (draft) =>
+    draft.role
+      ? activeFormQuestions(draftForm(draft), draft.answers.communities)
+      : [];
   function linkedMinecraft(draft) {
     const identity = draft.identity;
     if (!identity) return null;
@@ -101,8 +82,13 @@ export function applicationService(
         createdAt: Date.now(),
         answers: {},
         scenarios: {},
+        questionnaireVersion: forms.current().version,
       };
       store.set("application-draft", sessionId, draft, Date.now() + week);
+    }
+    if (!draft.questionnaireVersion) {
+      draft.questionnaireVersion = forms.baselineVersion;
+      write(sessionId, draft);
     }
     return draft;
   }
@@ -122,6 +108,17 @@ export function applicationService(
     const linked = linkedMinecraft(draft);
     return {
       id: draft.id,
+      questionnaire: {
+        version: draft.questionnaireVersion,
+        forms: Object.fromEntries(
+          Object.entries(forms.revision(draft.questionnaireVersion).forms).map(
+            ([role, form]) => [
+              role,
+              { description: form.description, questions: form.questions },
+            ],
+          ),
+        ),
+      },
       role: draft.role ?? null,
       answers: linked
         ? {
@@ -169,10 +166,8 @@ export function applicationService(
       )
         throw new AuthError("application_role_unavailable", 400);
       draft.role = input.role;
-      draft.scenarios[input.role] ??=
-        applicationScenarios[input.role][
-          randomInt(applicationScenarios[input.role].length)
-        ];
+      const scenarios = draftForm(draft).scenarios;
+      draft.scenarios[input.role] ??= scenarios[randomInt(scenarios.length)];
     }
     if (input.answers !== undefined) {
       if (
@@ -182,6 +177,12 @@ export function applicationService(
       )
         throw new AuthError("invalid_request", 400);
       const linked = linkedMinecraft(draft);
+      const fields = new Set([
+        ...applicationBaseFields,
+        ...Object.values(
+          forms.revision(draft.questionnaireVersion).forms,
+        ).flatMap((form) => form.questions.map((question) => question.key)),
+      ]);
       if (
         linked &&
         input.answers.ign !== undefined &&
@@ -375,16 +376,9 @@ export function applicationService(
       Number(a.hoursPerWeek) > 168
     )
       errors.hoursPerWeek = "Enter between 1 and 168 hours per week.";
-    for (const [key] of questionList(draft.role, a.communities)) {
-      const length = text(a[key]).length;
-      if (
-        requiredApplicationQuestion(key) &&
-        length < (key === "scenarioAnswer" ? 40 : 20)
-      )
-        errors[key] =
-          `Please give a little more detail, at least ${key === "scenarioAnswer" ? 40 : 20} characters.`;
-      if (length > (key === "scenarioAnswer" ? 6000 : 4000))
-        errors[key] = "Your answer is too long.";
+    for (const question of draftQuestions(draft)) {
+      const error = questionAnswerError(question, a[question.key]);
+      if (error) errors[question.key] = error;
     }
     const links = parseEvidenceLinks(a.experienceLinks);
     if (links.error) errors.experienceLinks = links.error;
@@ -439,10 +433,8 @@ export function applicationService(
       if (Object.keys(currentErrors).length) return { errors: currentErrors };
       const createdAt = Date.now();
       const allowed = new Set([
-        ...baseFields,
-        ...questionList(draft.role, draft.answers.communities).map(
-          ([key]) => key,
-        ),
+        ...applicationBaseFields,
+        ...draftQuestions(draft).map((question) => question.key),
       ]);
       const answers = Object.fromEntries(
         Object.entries(draft.answers).filter(([key]) => allowed.has(key)),
@@ -454,7 +446,8 @@ export function applicationService(
         id: draft.id,
         createdAt,
         role: draft.role,
-        questionnaireVersion: 5,
+        questionnaireVersion: draft.questionnaireVersion,
+        questions: draftQuestions(draft),
         status: "Received",
         answers,
         scenario: draft.scenarios[draft.role],
@@ -607,7 +600,28 @@ export function applicationService(
       return saveStatus(record, decision === "approve" ? "approved" : "denied");
     });
   }
+  function list(offset = 0, { role = "", status = "" } = {}) {
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      typeof role !== "string" ||
+      (role && !Object.hasOwn(applicationRoles, role)) ||
+      typeof status !== "string" ||
+      (status && !Object.hasOwn(applicationStatuses, status))
+    )
+      throw new AuthError("invalid_request", 400);
+    return store.page(
+      "application-summary",
+      50,
+      offset,
+      role || status
+        ? (item) =>
+            (!role || item.role === role) && (!status || item.status === status)
+        : undefined,
+    );
+  }
   return {
+    forms,
     view,
     patch,
     connect,
@@ -622,7 +636,7 @@ export function applicationService(
     startReview,
     decide,
     minecraftProfile,
-    list: (offset = 0) => store.page("application-summary", 50, offset),
+    list,
     get: (id) => applicationView(store.get("application", id)),
     delivery: notifications.delivery,
     start: notifications.start,

@@ -25,6 +25,7 @@ import { contactRanks } from "./contact-ranks.js";
 
 import { applicationService } from "./applications.js";
 import { applicationRouter } from "./application-routes.js";
+import { applicationFormRouter } from "./application-form-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -171,7 +172,16 @@ if (applications) {
 }
 
 function safeNext(value) {
-  if (["/", "/huly", "/settings", "/accounts", "/applications"].includes(value))
+  if (
+    [
+      "/",
+      "/huly",
+      "/settings",
+      "/accounts",
+      "/applications",
+      "/applications/editor",
+    ].includes(value)
+  )
     return value;
   if (
     typeof value === "string" &&
@@ -863,12 +873,44 @@ async function applicationViewer(req) {
     throw new AuthError("application_review_role_required");
   return user;
 }
+async function applicationEditor(req) {
+  const user = await signedIn(req, { syncHuly: false });
+  const current = await discord.check(user.id, true);
+  if (!applications || !applicationDecisionAccess(config, current))
+    throw new AuthError("application_decision_role_required");
+  return current;
+}
+if (applications)
+  app.use(
+    applicationFormRouter(
+      applications.forms,
+      applicationEditor,
+      requireMutation,
+    ),
+  );
+app.get("/applications/editor", async (req, res) => {
+  try {
+    await applicationEditor(req);
+    res.sendFile(`${dist}/index.html`);
+  } catch (error) {
+    if (error.status === 401)
+      return res.redirect("/login?next=%2Fapplications%2Feditor");
+    if (error.code === "minecraft_name_required")
+      return res.redirect("/minecraft?next=%2Fapplications%2Feditor");
+    throw error;
+  }
+});
 app.get("/api/applications", async (req, res) => {
   await applicationViewer(req);
   const offset = Number(req.query.offset ?? 0);
   if (!Number.isSafeInteger(offset) || offset < 0)
     throw new AuthError("invalid_request", 400);
-  res.json(applications.list(offset));
+  res.json(
+    applications.list(offset, {
+      role: req.query.role,
+      status: req.query.status,
+    }),
+  );
 });
 app.get("/api/applications/:id", async (req, res) => {
   await applicationViewer(req);

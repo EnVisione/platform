@@ -1,3 +1,10 @@
+export const applicationStatuses = {
+  Received: "Received",
+  Reviewing: "In review",
+  Approved: "Approved",
+  Denied: "Denied",
+};
+
 export const applicationRoles = {
   community: {
     label: "Community Staff",
@@ -219,3 +226,83 @@ export function questionList(role, communities = []) {
     ],
   ];
 }
+
+export const formLimits = { questions: 40, scenarios: 40, options: 12 };
+
+export function defaultApplicationForm(role, scenarios) {
+  return {
+    description: applicationRoles[role].description,
+    questions: questionList(
+      role,
+      communityOptions.map(([key]) => key),
+    ).map(([key, title, help]) => ({
+      key,
+      title,
+      help,
+      kind: "paragraph",
+      required: requiredApplicationQuestion(key),
+      minLength:
+        key === "scenarioAnswer"
+          ? 40
+          : requiredApplicationQuestion(key)
+            ? 20
+            : 1,
+      condition:
+        Object.entries(experienceQuestions).find(
+          ([, question]) => question[0] === key,
+        )?.[0] ?? "always",
+      options: [],
+    })),
+    scenarios: [...scenarios],
+  };
+}
+
+export function activeFormQuestions(form, communities = []) {
+  return form.questions.filter(
+    (question) =>
+      question.condition === "always" ||
+      communities.includes(question.condition),
+  );
+}
+
+export function questionAnswerError(question, value) {
+  const answer = typeof value === "string" ? value.trim() : "";
+  if (!answer && !question.required) return null;
+  if (question.kind === "choice")
+    return question.options.includes(answer)
+      ? null
+      : "Choose one of the available answers.";
+  if (answer.length < question.minLength)
+    return `Please give at least ${question.minLength} characters.`;
+  if (
+    answer.length >
+    (question.key === "scenarioAnswer"
+      ? 6000
+      : question.kind === "short"
+        ? 300
+        : 4000)
+  )
+    return "Your answer is too long.";
+  return null;
+}
+
+export const applicationBaseFields = [
+  "displayName",
+  "ign",
+  "minecraftConfirmed",
+  "minecraftConfirmedName",
+  "discordUses",
+  "discordWhy",
+  "discordWilling",
+  "contactEmail",
+  "pronouns",
+  "age",
+  "timezone",
+  "communities",
+  "hoursPerWeek",
+  "adultConfirmed",
+  "discordConfirmed",
+  "privacyConsent",
+  "accuracyConfirmed",
+  "experienceLinks",
+];

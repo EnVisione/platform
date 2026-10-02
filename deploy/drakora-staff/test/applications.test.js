@@ -270,7 +270,7 @@ test("only applicants without Discord must answer the final communication questi
   const declined = service.get((await service.submit("without-discord")).id);
   assert.equal(declined.answers.discordWilling, "no");
   assert.equal(declined.status, "Received");
-  assert.equal(declined.questionnaireVersion, 5);
+  assert.equal(declined.questionnaireVersion, 6);
 
   service.patch("uses-discord", {
     role: "community",
@@ -752,6 +752,163 @@ test("review starts once, requires decision access, and queues ordered applicant
     assert.equal(message.enforce_nonce, true);
   }
   assert.equal(store.page("application-notification").total, 0);
+});
+
+test("application filters combine type and status and retain denied records after cleanup and restart", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const { service, store } = setup(t);
+  const roles = ["community", "developer", "artist", "builder"];
+  const statuses = ["Received", "Reviewing", "Approved", "Denied"];
+  const ids = [];
+  for (const role of roles) {
+    for (const [index, status] of statuses.entries()) {
+      const session = `${role}-${index}`;
+      service.patch(session, {
+        role,
+        answers: {
+          ...answers(role),
+          ign: `${role}_${index}`,
+          contactEmail: `${session}@example.com`,
+        },
+      });
+      const { id } = await service.submit(session);
+      ids.push(id);
+      if (status === "Reviewing") service.startReview(id, reviewer());
+      if (status === "Approved") service.decide(id, reviewer(), "approve");
+      if (status === "Denied")
+        service.decide(id, reviewer(), "deny", "More role experience needed.");
+    }
+  }
+  assert.equal(service.list().total, 16);
+  for (const role of roles) {
+    const page = service.list(0, { role });
+    assert.equal(page.total, 4);
+    assert.ok(page.items.every((item) => item.role === role));
+    for (const status of statuses) {
+      const combined = service.list(0, { role, status });
+      assert.equal(combined.total, 1);
+      assert.equal(combined.items[0].role, role);
+      assert.equal(combined.items[0].status, status);
+    }
+  }
+  for (const status of statuses) {
+    const page = service.list(0, { status });
+    assert.equal(page.total, 4);
+    assert.ok(page.items.every((item) => item.status === status));
+  }
+  const deniedId = service.list(0, { role: "builder", status: "Denied" })
+    .items[0].id;
+  t.mock.timers.setTime(Date.now() + 8 * 86400000);
+  store.clean();
+  await service.close();
+  const restarted = applicationService(
+    config,
+    store,
+    async () => new Response(null, { status: 404 }),
+  );
+  t.after(() => restarted.close());
+  assert.equal(restarted.list(0, { status: "Denied" }).total, 4);
+  assert.equal(
+    restarted.get(deniedId).decision.reason,
+    "More role experience needed.",
+  );
+  assert.equal(restarted.get(deniedId).answers.ign, "builder_3");
+  assert.equal(restarted.list().total, 16);
+  assert.ok(ids.every((id) => restarted.get(id)));
+});
+
+test("application filters search beyond the first page and paginate matching results only", (t) => {
+  const { service, store } = setup(t);
+  const createdAt = Date.now();
+  for (let index = 0; index < 110; index++) {
+    const row = {
+      id: `summary-${index}`,
+      createdAt: createdAt + index,
+      role: index < 30 ? "artist" : "community",
+      status: index === 29 ? "Reviewing" : "Received",
+    };
+    store.set(
+      "application-summary",
+      `${row.createdAt}.${row.id}`,
+      row,
+      Number.MAX_SAFE_INTEGER,
+    );
+  }
+  store.set(
+    "application-summary",
+    "expired",
+    { role: "artist", status: "Reviewing" },
+    Date.now() - 1,
+  );
+  store.set(
+    "unrelated",
+    "other",
+    { role: "artist", status: "Reviewing" },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(service.list().total, 110);
+  assert.equal(service.list().items.length, 50);
+  const first = service.list(0, { role: "community", status: "Received" });
+  const second = service.list(50, { role: "community", status: "Received" });
+  assert.equal(first.total, 80);
+  assert.equal(second.total, 80);
+  assert.equal(first.items.length, 50);
+  assert.equal(second.items.length, 30);
+  assert.equal(first.items[0].id, "summary-109");
+  assert.equal(second.items[0].id, "summary-59");
+  assert.equal(second.items.at(-1).id, "summary-30");
+  assert.equal(
+    new Set([...first.items, ...second.items].map((item) => item.id)).size,
+    80,
+  );
+  const older = service.list(0, { role: "artist", status: "Reviewing" });
+  assert.equal(older.total, 1);
+  assert.equal(older.items[0].id, "summary-29");
+  assert.deepEqual(service.list(0, { role: "community", status: "Denied" }), {
+    items: [],
+    total: 0,
+  });
+  assert.deepEqual(service.list(100, { role: "community" }), {
+    items: [],
+    total: 80,
+  });
+});
+
+test("application filters reject invalid types, statuses, and offsets", (t) => {
+  const { service } = setup(t);
+  for (const role of [
+    "worker",
+    "constructor",
+    "toString",
+    ["community"],
+    null,
+    {},
+  ])
+    assert.throws(
+      () => service.list(0, { role }),
+      (error) => error.code === "invalid_request" && error.status === 400,
+    );
+  for (const status of [
+    "Pending",
+    "approved",
+    "constructor",
+    ["Denied"],
+    null,
+    {},
+  ])
+    assert.throws(
+      () => service.list(0, { status }),
+      (error) => error.code === "invalid_request" && error.status === 400,
+    );
+  for (const offset of [-1, 0.5, NaN, Infinity, "0", []])
+    assert.throws(
+      () => service.list(offset),
+      (error) => error.code === "invalid_request" && error.status === 400,
+    );
+  assert.deepEqual(service.list(0, { role: "", status: "" }), {
+    items: [],
+    total: 0,
+  });
 });
 
 test("denial needs a message and at least seven days, persists cooldown across drafts and service restart", async (t) => {

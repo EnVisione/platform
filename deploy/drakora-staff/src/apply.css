@@ -141,6 +141,7 @@
   font-weight: 600;
 }
 .apply-field input,
+.apply-field select,
 .apply-field textarea {
   background: #1e1f22;
   color: #f2f3f5;
@@ -158,6 +159,7 @@
   min-height: 180px;
 }
 .apply-field input:focus,
+.apply-field select:focus,
 .apply-field textarea:focus {
   outline: 2px solid #8790ff;
   outline-offset: 2px;
@@ -402,6 +404,41 @@
   gap: 12px;
   margin: 28px 0;
 }
+.application-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+  margin: 24px 0 12px;
+  padding: 20px;
+  min-width: 0;
+  border: 1px solid #41434a;
+  border-radius: 10px;
+  background: #2b2d31;
+}
+.application-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.application-filters select {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #50535c;
+  border-radius: 6px;
+  color: #f2f3f5;
+  background: #1e1f22;
+  font: inherit;
+  color-scheme: dark;
+}
+.staff-applications > .application-retention {
+  margin: 0 0 24px;
+  font-size: 13px;
+}
 .application-row {
   display: flex;
   justify-content: space-between;
@@ -558,6 +595,7 @@
   background: #a62d3d;
 }
 .staff-applications button:focus-visible,
+.application-filters select:focus-visible,
 .staff-applications a:focus-visible {
   outline: 2px solid #a8b0ff;
   outline-offset: 3px;
@@ -651,6 +689,10 @@
   white-space: nowrap;
 }
 @media (max-width: 560px) {
+  .application-filters {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
   .apply-receipt-actions {
     flex-direction: column;
   }
@@ -674,4 +716,105 @@
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.application-editor-link {
+  margin: 0 0 1rem;
+}
+.form-editor-tabs,
+.form-editor-toolbar,
+.form-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+.form-editor-tabs button[aria-pressed="true"] {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: white;
+}
+.form-editor-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.form-editor-question {
+  background: #25262c;
+  border: 1px solid #454650;
+  border-radius: 12px;
+  margin: 0.8rem 0;
+}
+.form-editor-question summary {
+  cursor: pointer;
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+.form-editor-question summary span {
+  color: #b7b8c5;
+  font-size: 0.85em;
+  margin-left: 0.7rem;
+}
+.form-editor-question-fields {
+  padding: 0 1rem 1rem;
+}
+.form-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.form-editor-question .apply-field {
+  margin: 1rem 0;
+}
+.form-editor-scenario {
+  padding: 0.5rem 0 1rem;
+  border-bottom: 1px solid #454650;
+}
+.staff-applications button.form-editor-remove {
+  color: #ffb4b4;
+  border-color: #8d4149;
+}
+.form-editor-saved {
+  background: #173e32;
+  color: #a3e7c9;
+  border: 1px solid #377e63;
+  border-radius: 10px;
+  padding: 1rem;
+}
+.form-editor-save {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  margin-top: 1.5rem;
+  border: 1px solid #454650;
+  border-radius: 12px;
+  background: #24252b;
+  z-index: 2;
+}
+.form-editor-preview {
+  padding: 1rem;
+  background: #25262c;
+  border-radius: 12px;
+}
+.form-editor-question:focus-visible {
+  outline: 2px solid #a1a6ff;
+  outline-offset: 3px;
+}
+@media (max-width: 650px) {
+  .form-editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .form-editor-save {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .form-editor-tabs button {
+    flex: 1 1 40%;
+  }
 }

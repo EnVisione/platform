@@ -24,7 +24,7 @@ export function applicationRouter(config, applications, dist) {
   router.use(
     "/apply/api",
     rateLimit({ windowMs: 60000, limit: 60, legacyHeaders: false }),
-    express.json({ limit: "64kb" }),
+    express.json({ limit: "1mb" }),
   );
   router.get("/", (_req, res) => res.redirect("/apply"));
   router.get(["/apply", "/apply/"], (_req, res) =>

@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import {
   applicationRoles,
+  applicationStatuses,
   communityOptions,
   questionList,
 } from "../shared/application-form.js";
 import "./apply.css";
 import { EvidenceLinks } from "./application-evidence.jsx";
 import { ApplicationPlayer } from "./application-player.jsx";
+import { ApplicationFormEditor } from "./application-form-editor.jsx";
 
 function ApplicationStatus({ status }) {
   const tone =
@@ -18,15 +20,59 @@ function ApplicationStatus({ status }) {
     }[status] || "received";
   return (
     <span className={`application-status application-status-${tone}`}>
-      {status}
+      {applicationStatuses[status] || status}
     </span>
   );
 }
 
+function applicationListSearch(offset, { role, status }) {
+  const query = new URLSearchParams({ offset: String(offset) });
+  if (role) query.set("role", role);
+  if (status) query.set("status", status);
+  return `?${query}`;
+}
+
 export function StaffApplications({ csrf, canDecide }) {
+  if (location.pathname === "/applications/editor")
+    return canDecide ? (
+      <ApplicationFormEditor csrf={csrf} />
+    ) : (
+      <p className="notice">
+        Only Managers and Founders can edit application questions.
+      </p>
+    );
+  return <ApplicationReviews csrf={csrf} canDecide={canDecide} />;
+}
+
+function ApplicationReviews({ csrf, canDecide }) {
   const id = location.pathname.split("/")[2];
   const [data, setData] = useState(null);
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(() => {
+    const value = Number(
+      new URLSearchParams(location.search).get("offset") ?? 0,
+    );
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  });
+  const [filters, setFilters] = useState(() => {
+    const query = new URLSearchParams(location.search);
+    const role = query.get("role") ?? "";
+    const status = query.get("status") ?? "";
+    return {
+      role: Object.hasOwn(applicationRoles, role) ? role : "",
+      status: Object.hasOwn(applicationStatuses, status) ? status : "",
+    };
+  });
+  const listSearch = applicationListSearch(offset, filters);
+  const filtered = Boolean(filters.role || filters.status);
+  function updateList(nextFilters, nextOffset = 0) {
+    setFilters(nextFilters);
+    setOffset(nextOffset);
+    history.replaceState(
+      history.state,
+      "",
+      `/applications${applicationListSearch(nextOffset, nextFilters)}`,
+    );
+  }
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
   const [reason, setReason] = useState("");
@@ -86,7 +132,7 @@ export function StaffApplications({ csrf, canDecide }) {
     fetch(
       id
         ? `/api/applications/${encodeURIComponent(id)}`
-        : `/api/applications?offset=${offset}`,
+        : `/api/applications${listSearch}`,
       { signal: controller.signal },
     )
       .then(async (response) => {
@@ -98,36 +144,96 @@ export function StaffApplications({ csrf, canDecide }) {
                 ? "Application not found."
                 : "Could not load applications.",
           );
-        setData(await response.json());
+        const result = await response.json();
+        if (!controller.signal.aborted) setData(result);
       })
       .catch((failure) => {
         if (!controller.signal.aborted) setError(failure.message);
       });
     return () => controller.abort();
-  }, [id, offset]);
-  if (error)
+  }, [id, listSearch]);
+  if (id && error)
     return (
       <p className="notice" role="alert">
         {error}
       </p>
     );
-  if (!data) return <p>Loading applications…</p>;
+  if (id && !data) return <p>Loading application…</p>;
   if (!id)
     return (
       <section className="staff-applications">
         <h2>Staff Applications</h2>
+        {canDecide && (
+          <a
+            className="apply-button apply-primary application-editor-link"
+            href="/applications/editor"
+          >
+            Edit application questions
+          </a>
+        )}
         <p>
           Private submissions for Jr Moderator rank and higher. Share what you
           know about the applicant. Managers and Founders make the final
           decision.
         </p>
-        {data.items.length ? (
+        <fieldset className="application-filters">
+          <legend className="sr-only">Filter staff applications</legend>
+          <label>
+            Application type
+            <select
+              value={filters.role}
+              onChange={(event) =>
+                updateList({ ...filters, role: event.target.value })
+              }
+            >
+              <option value="">All types</option>
+              {Object.entries(applicationRoles).map(([value, role]) => (
+                <option key={value} value={value}>
+                  {role.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status
+            <select
+              value={filters.status}
+              onChange={(event) =>
+                updateList({ ...filters, status: event.target.value })
+              }
+            >
+              <option value="">All statuses</option>
+              {Object.entries(applicationStatuses).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={!filtered}
+            onClick={() => updateList({ role: "", status: "" })}
+          >
+            Reset filters
+          </button>
+        </fieldset>
+        <p className="application-retention">
+          Denied applications are kept for reference.
+        </p>
+        {error ? (
+          <p className="notice" role="alert">
+            {error}
+          </p>
+        ) : !data ? (
+          <p role="status">Loading applications…</p>
+        ) : data.items.length ? (
           <div className="application-list">
             {data.items.map((item) => (
               <a
                 key={item.id}
                 className="application-row"
-                href={`/applications/${item.id}`}
+                href={`/applications/${item.id}${listSearch}`}
               >
                 <div>
                   <strong>{item.name}</strong>
@@ -143,31 +249,40 @@ export function StaffApplications({ csrf, canDecide }) {
             ))}
           </div>
         ) : (
-          <p>No applications yet.</p>
+          <p>
+            {filtered
+              ? "No applications match these filters."
+              : "No applications yet."}
+          </p>
         )}
-        <div className="apply-actions">
-          <button
-            disabled={!offset}
-            onClick={() => setOffset(Math.max(0, offset - 50))}
-          >
-            Previous
-          </button>
-          <span>{data.total} applications</span>
-          <button
-            disabled={offset + 50 >= data.total}
-            onClick={() => setOffset(offset + 50)}
-          >
-            Next
-          </button>
-        </div>
+        {data && (
+          <div className="apply-actions">
+            <button
+              disabled={!offset}
+              onClick={() => updateList(filters, Math.max(0, offset - 50))}
+            >
+              Previous
+            </button>
+            <span role="status">
+              {data.total} {filtered ? "matching " : ""}
+              {data.total === 1 ? "application" : "applications"}
+            </span>
+            <button
+              disabled={offset + 50 >= data.total}
+              onClick={() => updateList(filters, offset + 50)}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </section>
     );
   const a = data.answers;
   return (
     <article className="staff-applications application-detail">
       <header className="application-header">
-        <a className="application-back" href="/applications">
-          ← All applications
+        <a className="application-back" href={`/applications${listSearch}`}>
+          ← {filtered ? "Back to filtered applications" : "All applications"}
         </a>
         <h2>{a.displayName}</h2>
         <div className="application-meta">
@@ -253,7 +368,10 @@ export function StaffApplications({ csrf, canDecide }) {
               )}
             </dl>
           </section>
-          {questionList(data.role, a.communities).map(([key, label]) => (
+          {(data.questions
+            ? data.questions.map((question) => [question.key, question.title])
+            : questionList(data.role, a.communities)
+          ).map(([key, label]) => (
             <section className="application-response" key={key}>
               <h3>{label}</h3>
               {key === "scenarioAnswer" && (
