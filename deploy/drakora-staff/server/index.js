@@ -240,7 +240,10 @@ function safeNext(value) {
   return "/";
 }
 
-async function signedIn(req, { allowUnlinked = false, syncHuly = true } = {}) {
+async function signedIn(
+  req,
+  { allowUnlinked = false, syncHuly = true, forceDiscord = false } = {},
+) {
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
   if (req.headers.host === todoHost) {
@@ -252,7 +255,7 @@ async function signedIn(req, { allowUnlinked = false, syncHuly = true } = {}) {
     )
       throw new AuthError("login_required", 401);
   }
-  let user = await discord.check(req.session.userId);
+  let user = await discord.check(req.session.userId, forceDiscord);
   if (!user.permissions.dashboard)
     throw new AuthError("dashboard_role_required");
   const link = minecraft.get(user.id);
@@ -675,8 +678,10 @@ app.get("/api/accounts", async (req, res) => {
   res.json({ accounts });
 });
 async function authorizeMail(req, capability = "mail.view") {
-  let user = await signedIn(req, { syncHuly: false });
-  if (req.method !== "GET") user = await discord.check(user.id, true);
+  const user = await signedIn(req, {
+    syncHuly: false,
+    forceDiscord: req.method !== "GET",
+  });
   if (!config.mail || !user.capabilities[capability])
     throw new AuthError("mail_role_required");
   return user;
@@ -691,8 +696,11 @@ app.use(
   }),
 );
 async function authorizeRoles(req) {
-  const user = await signedIn(req, { syncHuly: false });
-  return rolePolicy.authorize(await discord.check(user.id, true), "roles.view");
+  const user = await signedIn(req, {
+    syncHuly: false,
+    forceDiscord: req.method !== "GET",
+  });
+  return rolePolicy.authorize(user, "roles.view");
 }
 app.use(
   "/api/roles",
@@ -717,9 +725,8 @@ app.post(
   rateLimit({ windowMs: 60000, limit: 12, legacyHeaders: false }),
   express.json({ limit: "1kb" }),
   async (req, res) => {
-    const user = await signedIn(req);
+    const current = await signedIn(req, { forceDiscord: true });
     requireMutation(req);
-    const current = await discord.check(user.id, true);
     if (!managementAccess(config, current).approveMinecraftChange)
       throw new AuthError("minecraft_approver_role_required");
     if (!["approve", "reject"].includes(req.body?.decision))
@@ -962,14 +969,19 @@ app.get("/office", async (req, res) => {
   }
 });
 async function applicationViewer(req) {
-  const user = await signedIn(req, { syncHuly: false });
+  const user = await signedIn(req, {
+    syncHuly: false,
+    forceDiscord: req.method !== "GET",
+  });
   if (!applications || !applicationReviewAccess(config, user))
     throw new AuthError("application_review_role_required");
   return user;
 }
 async function applicationEditor(req) {
-  const user = await signedIn(req, { syncHuly: false });
-  const current = await discord.check(user.id, true);
+  const current = await signedIn(req, {
+    syncHuly: false,
+    forceDiscord: req.method !== "GET",
+  });
   if (!applications || !staffCapability(config, current, "applications.edit"))
     throw new AuthError("application_decision_role_required");
   return current;
@@ -1028,9 +1040,8 @@ app.post(
   rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
   express.json({ limit: "8kb" }),
   async (req, res) => {
-    const user = await applicationViewer(req);
+    const current = await applicationViewer(req);
     requireMutation(req);
-    const current = await discord.check(user.id, true);
     res.json(
       applications.addComment(req.params.id, current, req.body?.comment),
     );
@@ -1040,9 +1051,8 @@ app.post(
   "/api/applications/:id/review",
   rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
   async (req, res) => {
-    const user = await applicationViewer(req);
+    const current = await applicationViewer(req);
     requireMutation(req);
-    const current = await discord.check(user.id, true);
     res.json(applications.startReview(req.params.id, current));
   },
 );
@@ -1051,9 +1061,8 @@ app.post(
   rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
   express.json({ limit: "8kb" }),
   async (req, res) => {
-    const user = await applicationViewer(req);
+    const current = await applicationViewer(req);
     requireMutation(req);
-    const current = await discord.check(user.id, true);
     res.json(
       applications.decide(
         req.params.id,

@@ -44,7 +44,7 @@ function SyncStatus({ member }) {
       </p>
       {Object.entries(member.discord ?? {}).map(([guild, delivery]) => (
         <p key={guild}>
-          Rank sync · {delivery.guildId || guild}:{" "}
+          Rank sync · {guild}:{" "}
           <strong>{delivery.status.replaceAll("_", " ")}</strong>
           {delivery.error && " · Waiting for Discord permissions or a retry"}
         </p>
@@ -552,7 +552,11 @@ export function Roles({ csrf, userId }) {
         </p>
       )}
       {!data ? (
-        <p role="status">Loading roles…</p>
+        <p role="status">
+          {error
+            ? "Use Reload saved permissions to try again."
+            : "Loading roles…"}
+        </p>
       ) : (
         <>
           <div
