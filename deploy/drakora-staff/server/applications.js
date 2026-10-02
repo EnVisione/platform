@@ -5,7 +5,11 @@ import {
   applicationRoles,
   communityOptions,
   questionList,
+  requiredApplicationQuestion,
+  evidenceLimits,
+  parseEvidenceLinks,
 } from "../shared/application-form.js";
+import { validateEvidenceImage } from "./application-evidence.js";
 import { applicationScenarios } from "./application-scenarios.js";
 import { applicationNotifications } from "./application-notifications.js";
 import {
@@ -17,7 +21,6 @@ import {
 const week = 7 * 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
 const token = () => randomBytes(32).toString("base64url");
-const optional = new Set(["experienceProof", "comments"]);
 const baseFields = [
   "displayName",
   "ign",
@@ -36,6 +39,7 @@ const baseFields = [
   "discordConfirmed",
   "privacyConsent",
   "accuracyConfirmed",
+  "experienceLinks",
 ];
 const fields = new Set([
   ...baseFields,
@@ -105,7 +109,12 @@ export function applicationService(
     return draft;
   }
   function write(sessionId, draft) {
-    store.set("application-draft", sessionId, draft, Date.now() + week);
+    const expires = Date.now() + week;
+    for (const image of draft.evidenceImages ?? []) {
+      if (!store.extendExpiration("application-image", image.id, expires))
+        throw new AuthError("evidence_image_expired", 409);
+    }
+    store.set("application-draft", sessionId, draft, expires);
   }
   function view(sessionId) {
     const draft = load(sessionId);
@@ -121,6 +130,7 @@ export function applicationService(
     return {
       id: draft.id,
       role: draft.role ?? null,
+      evidenceImages: draft.evidenceImages ?? [],
       answers: linked
         ? {
             ...draft.answers,
@@ -209,6 +219,59 @@ export function applicationService(
     }
     write(sessionId, draft);
     return view(sessionId);
+  }
+  function addImage(sessionId, bytes, contentType, filename) {
+    const metadata = validateEvidenceImage(bytes, contentType, filename);
+    return store.transaction(() => {
+      const draft = load(sessionId);
+      if (draft.submittedId)
+        throw new AuthError("application_already_submitted", 409);
+      draft.evidenceImages ??= [];
+      if (draft.evidenceImages.length >= evidenceLimits.maxImages)
+        throw new AuthError("evidence_images_full", 409);
+      const image = { id: randomUUID(), ...metadata };
+      store.set(
+        "application-image",
+        image.id,
+        {
+          ...image,
+          applicationId: draft.id,
+          data: bytes.toString("base64"),
+        },
+        Date.now() + week,
+      );
+      draft.evidenceImages.push(image);
+      write(sessionId, draft);
+      return view(sessionId);
+    });
+  }
+  function removeImage(sessionId, id) {
+    return store.transaction(() => {
+      const draft = load(sessionId);
+      if (draft.submittedId)
+        throw new AuthError("application_already_submitted", 409);
+      if (!draft.evidenceImages?.some((image) => image.id === id))
+        throw new AuthError("evidence_image_not_found", 404);
+      draft.evidenceImages = draft.evidenceImages.filter(
+        (image) => image.id !== id,
+      );
+      store.delete("application-image", id);
+      write(sessionId, draft);
+      return view(sessionId);
+    });
+  }
+  function imageFor(record, id) {
+    if (!record?.evidenceImages?.some((image) => image.id === id))
+      throw new AuthError("evidence_image_not_found", 404);
+    const image = store.get("application-image", id);
+    if (!image || image.applicationId !== record.id)
+      throw new AuthError("evidence_image_not_found", 404);
+    return image;
+  }
+  function applicationImage(applicationId, id, user) {
+    if (!applicationReviewAccess(config, user))
+      throw new AuthError("application_review_role_required");
+    return imageFor(store.get("application", applicationId), id);
   }
   function connect(sessionId, identity) {
     const draft = load(sessionId);
@@ -375,12 +438,17 @@ export function applicationService(
       errors.hoursPerWeek = "Enter between 1 and 168 hours per week.";
     for (const [key] of questionList(draft.role, a.communities)) {
       const length = text(a[key]).length;
-      if (!optional.has(key) && length < (key === "scenarioAnswer" ? 40 : 20))
+      if (
+        requiredApplicationQuestion(key) &&
+        length < (key === "scenarioAnswer" ? 40 : 20)
+      )
         errors[key] =
           `Please give a little more detail, at least ${key === "scenarioAnswer" ? 40 : 20} characters.`;
       if (length > (key === "scenarioAnswer" ? 6000 : 4000))
         errors[key] = "Your answer is too long.";
     }
+    const links = parseEvidenceLinks(a.experienceLinks);
+    if (links.error) errors.experienceLinks = links.error;
     if (!draft.scenarios[draft.role])
       errors.scenarioAnswer = "Choose a role to receive your scenario.";
     if (a.privacyConsent !== true)
@@ -447,9 +515,10 @@ export function applicationService(
         id: draft.id,
         createdAt,
         role: draft.role,
-        questionnaireVersion: 3,
+        questionnaireVersion: 4,
         status: "Received",
         answers,
+        evidenceImages: draft.evidenceImages ?? [],
         scenario: draft.scenarios[draft.role],
         discord: identity
           ? {
@@ -470,6 +539,10 @@ export function applicationService(
           lastLoginAt: null,
         },
       };
+      for (const image of record.evidenceImages) {
+        if (!store.extendExpiration("application-image", image.id, permanent))
+          throw new AuthError("evidence_image_expired", 409);
+      }
       store.set("application", record.id, record, permanent);
       store.set(
         "application-summary",
@@ -602,6 +675,10 @@ export function applicationService(
   return {
     view,
     patch,
+    addImage,
+    removeImage,
+    draftImage: (sessionId, id) => imageFor(load(sessionId), id),
+    applicationImage,
     connect,
     disconnect,
     restart,

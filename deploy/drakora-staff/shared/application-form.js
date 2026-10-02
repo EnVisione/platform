@@ -141,7 +141,7 @@ export const commonQuestions = [
   [
     "experienceProof",
     "Evidence or references",
-    "Optional. Share public links or explain how we could confirm your previous role or identity. Do not include passwords, private messages, or personal documents.",
+    "Optional. Upload screenshots, add public links, or explain how we could confirm your previous role or identity. Do not include passwords, private messages, or personal documents.",
   ],
   [
     "motivation",
@@ -159,6 +159,45 @@ export const commonQuestions = [
     "Describe your typical days and times in your selected timezone, commitments that affect availability, and how you would communicate an absence.",
   ],
 ];
+
+const optionalQuestions = new Set(["experienceProof", "comments"]);
+export const requiredApplicationQuestion = (key) => !optionalQuestions.has(key);
+
+export const evidenceLimits = {
+  maxImages: 3,
+  maxImageBytes: 5 * 1024 * 1024,
+  maxLinks: 5,
+};
+
+export function parseEvidenceLinks(value = "") {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length > evidenceLimits.maxLinks)
+    return { links: [], error: "Add up to 5 public links, one per line." };
+  const links = [];
+  for (const line of lines) {
+    try {
+      const url = new URL(line);
+      if (
+        line.length > 2048 ||
+        !["https:", "http:"].includes(url.protocol) ||
+        url.username ||
+        url.password
+      )
+        throw new Error();
+      links.push(url.href);
+    } catch {
+      return {
+        links: [],
+        error:
+          "Use a complete http or https link on each line, without login details.",
+      };
+    }
+  }
+  return { links, error: null };
+}
 
 export function questionList(role, communities = []) {
   return [

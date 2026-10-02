@@ -25,6 +25,7 @@ import { contactRanks } from "./contact-ranks.js";
 
 import { applicationService } from "./applications.js";
 import { applicationRouter } from "./application-routes.js";
+import { sendEvidenceImage } from "./application-evidence.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -875,6 +876,13 @@ app.get("/api/applications/:id", async (req, res) => {
   const record = applications.get(req.params.id);
   if (!record) throw new AuthError("application_not_found", 404);
   res.json(record);
+});
+app.get("/api/applications/:id/evidence/images/:imageId", async (req, res) => {
+  const user = await applicationViewer(req);
+  sendEvidenceImage(
+    res,
+    applications.applicationImage(req.params.id, req.params.imageId, user),
+  );
 });
 app.post(
   "/api/applications/:id/comments",

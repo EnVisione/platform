@@ -3,7 +3,15 @@ import {
   applicationRoles,
   communityOptions,
   questionList,
+  requiredApplicationQuestion,
+  evidenceLimits,
+  parseEvidenceLinks,
 } from "../shared/application-form.js";
+import {
+  RequiredMark,
+  EvidenceImages,
+  EvidenceLinks,
+} from "./application-evidence.jsx";
 import logo from "./assets/drakora-logo.png";
 import "./apply.css";
 
@@ -20,6 +28,15 @@ const notices = {
     "Your Discord roles changed which applications are available. Choose another role.",
   application_minecraft_link_changed:
     "Your linked Minecraft name changed. Refresh this page and confirm the current name.",
+  invalid_evidence_image:
+    "Choose a PNG, JPEG, or WebP image. Other files are not supported.",
+  evidence_image_too_large: "Each image must be 5 MB or smaller.",
+  evidence_images_full:
+    "You can upload up to 3 images. Remove one before adding another.",
+  evidence_image_expired:
+    "An evidence image expired. Refresh the page and upload it again.",
+  evidence_upload_rate_limited:
+    "Too many image uploads. Please try again in an hour.",
 };
 const timezoneOptions = [
   ...new Set([
@@ -52,13 +69,19 @@ export function PublicApplication() {
   const changed = useRef(false);
   const csrf = useRef("");
   async function request(path, method = "GET", body) {
+    const image = body instanceof File;
     const response = await fetch(`/apply/api/${path}`, {
       method,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": image ? body.type : "application/json",
+        ...(image ? { "X-File-Name": encodeURIComponent(body.name) } : {}),
         "X-CSRF-Token": csrf.current,
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: image
+        ? body
+        : body === undefined
+          ? undefined
+          : JSON.stringify(body),
     });
     const data = await response.json();
     if (!response.ok && response.status !== 422)
@@ -220,6 +243,68 @@ export function PublicApplication() {
       setBusy(false);
     }
   }
+  async function uploadImages(event) {
+    const files = [...event.target.files];
+    event.target.value = "";
+    if (!files.length) return;
+    setError("");
+    if (
+      files.length + (draft.evidenceImages?.length ?? 0) >
+      evidenceLimits.maxImages
+    ) {
+      setError(notices.evidence_images_full);
+      return;
+    }
+    if (files.some((file) => file.size > evidenceLimits.maxImageBytes)) {
+      setError(notices.evidence_image_too_large);
+      return;
+    }
+    if (
+      files.some(
+        (file) =>
+          !["image/png", "image/jpeg", "image/webp"].includes(file.type),
+      )
+    ) {
+      setError(notices.invalid_evidence_image);
+      return;
+    }
+    setBusy(true);
+    setSaveState("Uploading evidence images…");
+    const action = queue.current
+      .catch(() => {})
+      .then(async () => {
+        for (const file of files) {
+          const data = await request("evidence/images", "POST", file);
+          setDraft((old) => ({ ...old, evidenceImages: data.evidenceImages }));
+        }
+      });
+    queue.current = action;
+    try {
+      await action;
+      setSaveState("Evidence images saved with your draft.");
+    } catch (failure) {
+      setSaveState("");
+      setError(notices[failure.message] || notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeImage(id) {
+    setBusy(true);
+    setError("");
+    const action = queue.current
+      .catch(() => {})
+      .then(() => request(`evidence/images/${id}`, "DELETE"));
+    queue.current = action;
+    try {
+      const data = await action;
+      setDraft((old) => ({ ...old, evidenceImages: data.evidenceImages }));
+    } catch (failure) {
+      setError(notices[failure.message] || notices.service_unavailable);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function next(event) {
     event.preventDefault();
     setError("");
@@ -252,6 +337,13 @@ export function PublicApplication() {
       setError("Choose at least one community where you are active.");
       return;
     }
+    if (current === "experienceProof") {
+      const links = parseEvidenceLinks(answers.experienceLinks);
+      if (links.error) {
+        setError(links.error);
+        return;
+      }
+    }
     setBusy(true);
     try {
       const data = await save({ answers });
@@ -280,7 +372,10 @@ export function PublicApplication() {
   function field(key, label, options = {}) {
     return (
       <label className="apply-field" key={key}>
-        <span>{label}</span>
+        <span>
+          {label}
+          {options.required !== false && <RequiredMark />}
+        </span>
         <input
           value={answers[key] ?? ""}
           onChange={(event) => update(key, event.target.value)}
@@ -301,7 +396,10 @@ export function PublicApplication() {
           onChange={(event) => update(key, event.target.checked)}
           required={required}
         />
-        <span>{label}</span>
+        <span>
+          {label}
+          {required && <RequiredMark />}
+        </span>
       </label>
     );
   }
@@ -382,10 +480,19 @@ export function PublicApplication() {
                 </p>
               )}
               <form onSubmit={next}>
+                <p className="apply-muted">
+                  <span className="apply-required" aria-hidden="true">
+                    *
+                  </span>{" "}
+                  Required fields
+                </p>
                 {current === "role" && (
                   <>
                     <span className="apply-eyebrow">JOIN THE TEAM</span>
-                    <h1 id="apply-title">What are you applying for?</h1>
+                    <h1 id="apply-title">
+                      What are you applying for?
+                      <RequiredMark />
+                    </h1>
                     <p>Choose the team you would like to join.</p>
                     <div className="apply-roles">
                       {draft.roles.map((role) => (
@@ -462,6 +569,7 @@ export function PublicApplication() {
                       {draft.linkedMinecraft
                         ? "Is this your Minecraft name?"
                         : "Your Minecraft name"}
+                      {draft.linkedMinecraft && <RequiredMark />}
                     </h1>
                     {draft.linkedMinecraft ? (
                       <>
@@ -552,6 +660,7 @@ export function PublicApplication() {
                   <>
                     <h1 id="apply-title">
                       {draft.discord ? "Is this you?" : "Do you use Discord?"}
+                      {!draft.discord && <RequiredMark />}
                     </h1>
                     {draft.discord ? (
                       <>
@@ -610,7 +719,10 @@ export function PublicApplication() {
                         )}
                         {answers.discordUses === "no" && (
                           <label className="apply-field">
-                            <span>Why do you not use Discord?</span>
+                            <span>
+                              Why do you not use Discord?
+                              <RequiredMark />
+                            </span>
                             <textarea
                               required
                               minLength={10}
@@ -695,7 +807,10 @@ export function PublicApplication() {
                 )}
                 {current === "communities" && (
                   <>
-                    <h1 id="apply-title">Where are you usually active?</h1>
+                    <h1 id="apply-title">
+                      Where are you usually active?
+                      <RequiredMark />
+                    </h1>
                     <p>
                       Select all that apply. We will ask about each community
                       you choose.
@@ -726,7 +841,10 @@ export function PublicApplication() {
                     <span className="apply-eyebrow">
                       {applicationRoles[draft.role].label}
                     </span>
-                    <h1 id="apply-title">{question[1]}</h1>
+                    <h1 id="apply-title">
+                      {question[1]}
+                      {requiredApplicationQuestion(current) && <RequiredMark />}
+                    </h1>
                     <p>{question[2]}</p>
                     {current === "availability" &&
                       field(
@@ -742,10 +860,14 @@ export function PublicApplication() {
                     <label className="apply-field">
                       <span className="sr-only">{question[1]}</span>
                       <textarea
-                        required={
-                          !["experienceProof", "comments"].includes(current)
+                        required={requiredApplicationQuestion(current)}
+                        minLength={
+                          requiredApplicationQuestion(current)
+                            ? current === "scenarioAnswer"
+                              ? 40
+                              : 20
+                            : undefined
                         }
-                        minLength={current === "scenarioAnswer" ? 40 : 20}
                         maxLength={current === "scenarioAnswer" ? 6000 : 4000}
                         rows={8}
                         value={answers[current] ?? ""}
@@ -757,6 +879,54 @@ export function PublicApplication() {
                         <small className="apply-error">{errors[current]}</small>
                       )}
                     </label>
+                    {current === "experienceProof" && (
+                      <>
+                        <label className="apply-field">
+                          <span>Public links (optional)</span>
+                          <textarea
+                            rows={3}
+                            className="apply-evidence-link-input"
+                            maxLength={6000}
+                            value={answers.experienceLinks ?? ""}
+                            onChange={(event) =>
+                              update("experienceLinks", event.target.value)
+                            }
+                            placeholder="https://example.com/your-work&#10;One link per line, up to 5 links."
+                            aria-invalid={Boolean(errors.experienceLinks)}
+                          />
+                          {errors.experienceLinks && (
+                            <small className="apply-error">
+                              {errors.experienceLinks}
+                            </small>
+                          )}
+                        </label>
+                        <label className="apply-field">
+                          <span>Upload images (optional)</span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            multiple
+                            onChange={uploadImages}
+                            disabled={
+                              busy ||
+                              (draft.evidenceImages?.length ?? 0) >=
+                                evidenceLimits.maxImages
+                            }
+                            aria-describedby="evidence-image-help"
+                          />
+                        </label>
+                        <p id="evidence-image-help" className="apply-muted">
+                          Up to 3 PNG, JPEG, or WebP images, 5 MB each. Images
+                          are saved privately with your application.
+                        </p>
+                        <EvidenceImages
+                          images={draft.evidenceImages}
+                          basePath="/apply/api/evidence/images"
+                          onRemove={removeImage}
+                          disabled={busy}
+                        />
+                      </>
+                    )}
                   </>
                 )}
                 {current === "discordWilling" && (
@@ -765,6 +935,7 @@ export function PublicApplication() {
                     <p id="discord-willing-question">
                       If your application is approved, are you willing to
                       download Discord for staff communication?
+                      <RequiredMark />
                     </p>
                     <div
                       className="apply-radios"
@@ -861,6 +1032,15 @@ export function PublicApplication() {
                           <blockquote>{draft.scenario}</blockquote>
                         )}
                         <p>{answers[key] || "No answer"}</p>
+                        {key === "experienceProof" && (
+                          <>
+                            <EvidenceLinks value={answers.experienceLinks} />
+                            <EvidenceImages
+                              images={draft.evidenceImages}
+                              basePath="/apply/api/evidence/images"
+                            />
+                          </>
+                        )}
                         <button
                           type="button"
                           className="apply-link"
@@ -878,12 +1058,12 @@ export function PublicApplication() {
                         </p>
                       ))}
                     <p className="apply-muted">
-                      Your answers, contact details, and linked Discord and
-                      Minecraft identity are stored privately for staff
-                      applications. Authorized staff with Jr Moderator rank or
-                      higher can read them. Minecraft ownership and network
-                      activity are not verified yet. Please do not include
-                      passwords, home addresses, or private documents.
+                      Your answers, evidence images, contact details, and linked
+                      Discord and Minecraft identity are stored privately for
+                      staff applications. Authorized staff with Jr Moderator
+                      rank or higher can read them. Minecraft ownership and
+                      network activity are not verified yet. Please do not
+                      include passwords, home addresses, or private documents.
                     </p>
                     <p className="apply-muted">
                       If you linked Discord, the Drakora bot will DM your

@@ -96,6 +96,64 @@ test("public form mutations require its browser session, CSRF token, and origin"
     (await accepted.json()).answers.displayName,
     "Synthetic applicant",
   );
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/YQAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const upload = (body = png, overrides = {}) =>
+    fetch(`${origin}/apply/api/evidence/images`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "image/png",
+        "X-File-Name": "Evidence.png",
+        ...overrides,
+      },
+      body,
+    });
+  assert.equal(
+    (await upload(png, { "X-CSRF-Token": "wrong-token" })).status,
+    403,
+  );
+  assert.equal(
+    (await upload(png, { Origin: "https://other.example.com" })).status,
+    403,
+  );
+  assert.equal(
+    (await upload(Buffer.from("<html>Not an image</html>"))).status,
+    400,
+  );
+  assert.equal((await upload(Buffer.alloc(5 * 1024 * 1024 + 1))).status, 413);
+  const uploaded = await upload();
+  assert.equal(uploaded.status, 201);
+  const { evidenceImages } = await uploaded.json();
+  const imageUrl = `${origin}/apply/api/evidence/images/${evidenceImages[0].id}`;
+  assert.equal(
+    (await fetch(imageUrl, { headers: { "X-Forwarded-Proto": "https" } }))
+      .status,
+    404,
+  );
+  const image = await fetch(imageUrl, { headers });
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("Content-Type"), "image/png");
+  assert.equal(image.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(image.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.match(image.headers.get("Content-Security-Policy"), /sandbox/);
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
+  assert.equal(
+    (
+      await fetch(imageUrl, {
+        method: "DELETE",
+        headers: { ...headers, "X-CSRF-Token": "wrong-token" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await fetch(imageUrl, { method: "DELETE", headers })).status,
+    200,
+  );
+  assert.equal((await fetch(imageUrl, { headers })).status, 404);
   assert.equal(
     (await fetch(`${origin}/api/applications`, { headers })).status,
     404,
