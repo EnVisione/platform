@@ -7,6 +7,7 @@ import {
   questionList,
 } from "../shared/application-form.js";
 import { applicationScenarios } from "./application-scenarios.js";
+import { applicationNotifications } from "./application-notifications.js";
 import {
   communityRankNames,
   applicationReviewAccess,
@@ -75,10 +76,7 @@ export function applicationService(
   fetcher = fetch,
   getMinecraftLink = () => undefined,
 ) {
-  let timer;
-  let running;
-  let closed = false;
-  let deliveryOffset = 0;
+  const notifications = applicationNotifications(config, store, fetcher);
   function linkedMinecraft(draft) {
     const identity = draft.identity;
     if (!identity) return null;
@@ -136,6 +134,11 @@ export function applicationService(
       linkedMinecraft: linked,
       scenario: draft.scenarios[draft.role] ?? null,
       roles: availableApplicationRoles(config, identity),
+      reapplicationWaits: Object.fromEntries(
+        availableApplicationRoles(config, identity)
+          .map((role) => [role, cooldown({ ...draft, role })])
+          .filter(([, until]) => until > Date.now()),
+      ),
       discord: identity
         ? {
             id: identity.id,
@@ -283,9 +286,30 @@ export function applicationService(
     store.delete("application-handoff", hash(code));
     connect(sessionId, pending.identity);
   }
+  function cooldownKeys(role, discordId, email, ign) {
+    const identities = [
+      `contact:${text(email).toLowerCase()}\0${text(ign).toLowerCase()}`,
+    ];
+    if (discordId) identities.push(`discord:${discordId}`);
+    return identities.map((identity) => `${role}.${hash(identity)}`);
+  }
+  function cooldown(draft) {
+    return Math.max(
+      0,
+      ...cooldownKeys(
+        draft.role,
+        draft.identity?.id,
+        draft.identity?.email || draft.answers.contactEmail,
+        draft.answers.ign,
+      ).map((key) => store.get("application-cooldown", key)?.until ?? 0),
+    );
+  }
   function validate(draft) {
     const a = draft.answers;
     const errors = {};
+    const until = cooldown(draft);
+    if (until > Date.now())
+      errors.reapplication = `You can apply for this role again from ${new Date(until).toISOString().replace("T", " ").replace(".000Z", " UTC")}.`;
     if (!availableApplicationRoles(config, draft.identity).includes(draft.role))
       errors.role = "Choose an available role.";
     if (!text(a.displayName) || a.displayName.length > 80)
@@ -459,105 +483,12 @@ export function applicationService(
         },
         permanent,
       );
-      store.set(
-        "application-notification",
-        record.id,
-        { id: record.id, attempts: 0, nextAt: createdAt },
-        permanent,
-      );
+      notifications.queueStaff(record);
+      notifications.queueApplicant(record, "received");
       current.submittedId = record.id;
       write(sessionId, current);
       return { id: record.id };
     });
-  }
-  async function deliver() {
-    const page = store.page("application-notification", 20, deliveryOffset);
-    deliveryOffset = deliveryOffset + 20 < page.total ? deliveryOffset + 20 : 0;
-    for (const pending of page.items) {
-      if (closed || pending.nextAt > Date.now()) continue;
-      const record = store.get("application", pending.id);
-      if (!record) {
-        store.delete("application-notification", pending.id);
-        continue;
-      }
-      try {
-        const name = record.answers.displayName
-          .replace(/([\\*_~`|<>@])/g, "\\$1")
-          .replace(/[\r\n]/g, " ");
-        const response = await fetcher(
-          `https://discord.com/api/v10/channels/${config.applications.notificationChannelId}/messages`,
-          {
-            method: "POST",
-            signal: AbortSignal.timeout(10000),
-            headers: {
-              Authorization: `Bot ${config.discordBotToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              content: `${name}${record.discord ? ` (<@${record.discord.id}>)` : ""} just filled out a ${applicationRoles[record.role].label} application.`,
-              allowed_mentions: {
-                parse: [],
-                users: [],
-                roles: [],
-                replied_user: false,
-              },
-              nonce: hash(record.id).slice(0, 24),
-              enforce_nonce: true,
-              components: [
-                {
-                  type: 1,
-                  components: [
-                    {
-                      type: 2,
-                      style: 5,
-                      label: "Click to view",
-                      url: `${config.staffOrigin}/applications/${record.id}`,
-                    },
-                  ],
-                },
-              ],
-            }),
-          },
-        );
-        if (!response.ok) throw new Error(`Discord HTTP ${response.status}`);
-        const message = await response.json();
-        store.transaction(() => {
-          store.set(
-            "application-delivery",
-            record.id,
-            { messageId: message.id, sentAt: Date.now() },
-            permanent,
-          );
-          store.delete("application-notification", record.id);
-        });
-      } catch {
-        pending.attempts++;
-        if (pending.attempts >= 8) {
-          store.set(
-            "application-delivery",
-            pending.id,
-            { failedAt: Date.now() },
-            permanent,
-          );
-          store.delete("application-notification", pending.id);
-          console.error(
-            "Application notification could not be delivered:",
-            pending.id,
-          );
-        } else {
-          pending.nextAt =
-            Date.now() + Math.min(3600000, 30000 * 2 ** pending.attempts);
-          store.set("application-notification", pending.id, pending, permanent);
-        }
-      }
-    }
-  }
-  function tick() {
-    if (!running && !closed)
-      running = deliver().finally(() => {
-        running = undefined;
-      });
-    return running;
   }
   function addComment(id, user, value) {
     if (!applicationReviewAccess(config, user))
@@ -578,10 +509,45 @@ export function applicationService(
         createdAt: Date.now(),
       });
       store.set("application", id, record, permanent);
-      return record;
+      return applicationView(record);
     });
   }
-  function decide(id, user, decision, reason = "") {
+  function applicationView(record) {
+    return record
+      ? { ...record, notifications: notifications.status(record.id) }
+      : undefined;
+  }
+  function saveStatus(record, event) {
+    store.set("application", record.id, record, permanent);
+    const key = `${record.createdAt}.${record.id}`;
+    const summary = store.get("application-summary", key);
+    store.set(
+      "application-summary",
+      key,
+      { ...summary, status: record.status },
+      permanent,
+    );
+    notifications.queueApplicant(record, event);
+    return applicationView(record);
+  }
+  function startReview(id, user) {
+    if (!applicationDecisionAccess(config, user))
+      throw new AuthError("application_decision_role_required");
+    return store.transaction(() => {
+      const record = store.get("application", id);
+      if (!record) throw new AuthError("application_not_found", 404);
+      if (record.status === "Reviewing") return applicationView(record);
+      if (record.status !== "Received")
+        throw new AuthError("application_already_decided", 409);
+      record.status = "Reviewing";
+      record.review = {
+        author: { id: user.id, name: user.name },
+        startedAt: Date.now(),
+      };
+      return saveStatus(record, "reviewing");
+    });
+  }
+  function decide(id, user, decision, reason = "", reapplyDays = 7) {
     if (!applicationDecisionAccess(config, user))
       throw new AuthError("application_decision_role_required");
     if (
@@ -590,10 +556,19 @@ export function applicationService(
       reason.length > 2000
     )
       throw new AuthError("invalid_request", 400);
+    if (decision === "deny" && !reason.trim())
+      throw new AuthError("application_denial_reason_required", 400);
+    if (
+      decision === "deny" &&
+      (!Number.isSafeInteger(reapplyDays) ||
+        reapplyDays < 7 ||
+        reapplyDays > 365)
+    )
+      throw new AuthError("invalid_reapplication_wait", 400);
     return store.transaction(() => {
       const record = store.get("application", id);
       if (!record) throw new AuthError("application_not_found", 404);
-      if (record.status !== "Received")
+      if (!["Received", "Reviewing"].includes(record.status))
         throw new AuthError("application_already_decided", 409);
       record.status = decision === "approve" ? "Approved" : "Denied";
       record.decision = {
@@ -601,16 +576,25 @@ export function applicationService(
         reason: reason.trim(),
         decidedAt: Date.now(),
       };
-      store.set("application", id, record, permanent);
-      const key = `${record.createdAt}.${record.id}`;
-      const summary = store.get("application-summary", key);
-      store.set(
-        "application-summary",
-        key,
-        { ...summary, status: record.status },
-        permanent,
-      );
-      return record;
+      if (decision === "deny") {
+        const keys = cooldownKeys(
+          record.role,
+          record.discord?.id,
+          record.contactEmail,
+          record.answers.ign,
+        );
+        const until = Math.max(
+          record.decision.decidedAt + reapplyDays * 86400000,
+          ...keys.map(
+            (key) => store.get("application-cooldown", key)?.until ?? 0,
+          ),
+        );
+        record.decision.reapplyDays = reapplyDays;
+        record.decision.reapplyAfter = until;
+        for (const key of keys)
+          store.set("application-cooldown", key, { until }, until);
+      }
+      return saveStatus(record, decision === "approve" ? "approved" : "denied");
     });
   }
   return {
@@ -625,20 +609,13 @@ export function applicationService(
     complete,
     submit,
     addComment,
+    startReview,
     decide,
     minecraftProfile,
     list: (offset = 0) => store.page("application-summary", 50, offset),
-    get: (id) => store.get("application", id),
-    delivery: tick,
-    start() {
-      timer = setInterval(tick, 15000);
-      timer.unref();
-      tick();
-    },
-    async close() {
-      closed = true;
-      clearInterval(timer);
-      await running;
-    },
+    get: (id) => applicationView(store.get("application", id)),
+    delivery: notifications.delivery,
+    start: notifications.start,
+    close: notifications.close,
   };
 }

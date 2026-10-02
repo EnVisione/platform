@@ -886,6 +886,16 @@ app.post(
   },
 );
 app.post(
+  "/api/applications/:id/review",
+  rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+  async (req, res) => {
+    const user = await applicationViewer(req);
+    requireMutation(req);
+    const current = await discord.check(user.id, true);
+    res.json(applications.startReview(req.params.id, current));
+  },
+);
+app.post(
   "/api/applications/:id/decision",
   rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
   express.json({ limit: "8kb" }),
@@ -899,6 +909,7 @@ app.post(
         current,
         req.body?.decision,
         req.body?.reason,
+        req.body?.reapplyDays,
       ),
     );
   },

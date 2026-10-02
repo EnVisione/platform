@@ -71,6 +71,34 @@ function answers(role = "community", communities = ["prom2"]) {
     ),
   };
 }
+function reviewer(rank = "28", dashboard = true) {
+  const roles = [rank, ...(dashboard ? ["10"] : [])];
+  return {
+    id: rank,
+    name: `Reviewer ${rank}`,
+    roles,
+    permissions: permissions(config, roles),
+  };
+}
+function connectedDraft(
+  service,
+  sessionId = "session",
+  role = "community",
+  id = "123",
+) {
+  service.connect(sessionId, {
+    id,
+    username: "fixture",
+    name: "Fixture",
+    email: "verified@example.com",
+    roles: [],
+    avatar: null,
+  });
+  service.patch(sessionId, {
+    role,
+    answers: { ...answers(role), discordConfirmed: true },
+  });
+}
 test("application roles follow verified Discord rank IDs", () => {
   assert.deepEqual(availableApplicationRoles(config), [
     "community",
@@ -391,12 +419,16 @@ test("Jr Moderator and higher can leave feedback but only Manager and Founder ca
   assert.equal(approved.decision.author.id, "28");
   assert.equal(service.list().items[0].status, "Approved");
   assert.throws(
-    () => service.decide(id, user("20"), "deny"),
+    () => service.decide(id, user("20"), "deny", "Not approved."),
     /application_already_decided/,
   );
   service.patch("another", { role: "artist", answers: answers("artist") });
   const another = await service.submit("another");
-  assert.equal(service.decide(another.id, user("20"), "deny").status, "Denied");
+  assert.equal(
+    service.decide(another.id, user("20"), "deny", "More experience is needed.")
+      .status,
+    "Denied",
+  );
 });
 test("anonymous applicants need email and adult confirmation; conditional community answers are enforced", async (t) => {
   const { service } = setup(t);
@@ -453,7 +485,11 @@ test("submission is idempotent and notifications never ping users or roles", asy
   const { service, store } = setup(t, async (url, options) => {
     if (url.includes("api.mojang.com"))
       return Response.json({ id: "a".repeat(32), name: "Test_Player" });
-    sent.push(JSON.parse(options.body));
+    if (url.endsWith("/users/@me/channels")) {
+      assert.deepEqual(JSON.parse(options.body), { recipient_id: "123" });
+      return Response.json({ id: "999" });
+    }
+    sent.push({ url, ...JSON.parse(options.body) });
     return Response.json({ id: "notification-id" });
   });
   service.patch("session", {
@@ -480,16 +516,21 @@ test("submission is idempotent and notifications never ping users or roles", asy
   assert.equal(service.view("session").answers, undefined);
   await service.delivery();
   await service.delivery();
-  assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].allowed_mentions, {
+  assert.equal(sent.length, 2);
+  const notice = sent.find((message) => message.url.includes("/channels/50/"));
+  const dm = sent.find((message) => message.url.includes("/channels/999/"));
+  assert.match(dm.embeds[0].description, /submitted and will be reviewed/);
+  assert.ok(service.get(first.id).notifications[0].sentAt);
+  assert.notEqual(notice.nonce, dm.nonce);
+  assert.deepEqual(notice.allowed_mentions, {
     parse: [],
     users: [],
     roles: [],
     replied_user: false,
   });
-  assert.match(sent[0].content, /<@123>/);
+  assert.match(notice.content, /<@123>/);
   assert.equal(
-    sent[0].components[0].components[0].url,
+    notice.components[0].components[0].url,
     `${config.staffOrigin}/applications/${first.id}`,
   );
   assert.equal(store.page("application-notification").total, 0);
@@ -571,4 +612,227 @@ test("starting another application keeps the submitted record and creates a new 
   assert.deepEqual(next.answers, {});
   assert.equal(service.list().total, 1);
   assert.ok(service.get(submitted.id));
+});
+
+test("review starts once, requires decision access, and queues ordered applicant updates", async (t) => {
+  const dms = [];
+  const { service, store } = setup(t, async (url, options) => {
+    if (url.includes("mojang")) return new Response(null, { status: 404 });
+    if (url.endsWith("/users/@me/channels"))
+      return Response.json({ id: "999" });
+    const payload = JSON.parse(options.body);
+    if (url.includes("/channels/999/")) dms.push(payload);
+    return Response.json({ id: `message-${dms.length}` });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  for (const rank of ["21", "30", "22", "29", "23"])
+    assert.throws(
+      () => service.startReview(id, reviewer(rank)),
+      /application_decision_role_required/,
+    );
+  assert.throws(
+    () => service.startReview(id, reviewer("20", false)),
+    /application_decision_role_required/,
+  );
+  const reviewing = service.startReview(id, reviewer());
+  assert.equal(reviewing.status, "Reviewing");
+  assert.equal(reviewing.review.author.id, "28");
+  assert.equal(service.list().items[0].status, "Reviewing");
+  assert.deepEqual(
+    service.startReview(id, reviewer("20")).review,
+    reviewing.review,
+  );
+  assert.equal(store.page("application-notification").total, 3);
+  service.decide(id, reviewer("20"), "approve", "Welcome to the team.");
+  assert.throws(
+    () => service.startReview(id, reviewer()),
+    /application_already_decided/,
+  );
+  for (let i = 0; i < 4; i++) await service.delivery();
+  assert.deepEqual(
+    dms.map((message) => message.embeds[0].title),
+    [
+      "Application received",
+      "Application under review",
+      "Application approved",
+    ],
+  );
+  assert.equal(new Set(dms.map((message) => message.nonce)).size, 3);
+  for (const message of dms)
+    assert.deepEqual(message.allowed_mentions.parse, []);
+  assert.equal(store.page("application-notification").total, 0);
+});
+
+test("denial needs a message and at least seven days, persists cooldown across drafts and service restart", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const { service, store } = setup(t);
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  assert.throws(
+    () => service.decide(id, reviewer(), "deny", "  "),
+    /application_denial_reason_required/,
+  );
+  for (const days of [6, 0, 7.5, "7", null, 366])
+    assert.throws(
+      () =>
+        service.decide(id, reviewer(), "deny", "More experience needed.", days),
+      /invalid_reapplication_wait/,
+    );
+  assert.equal(service.get(id).status, "Received");
+  const denied = service.decide(
+    id,
+    reviewer(),
+    "deny",
+    "Please gain more community experience.",
+    10,
+  );
+  const until = denied.decision.reapplyAfter;
+  assert.equal(until, Date.now() + 10 * 86400000);
+  assert.equal(service.list().items[0].status, "Denied");
+  const dm = store.get("application-notification", `${id}:denied`);
+  assert.equal(dm.payload.embeds[0].description, denied.decision.reason);
+  assert.match(
+    dm.payload.embeds[0].fields[1].value,
+    new RegExp(String(until / 1000)),
+  );
+  await service.close();
+  const restarted = applicationService(
+    config,
+    store,
+    async () => new Response(null, { status: 404 }),
+  );
+  t.after(() => restarted.close());
+  connectedDraft(restarted, "new-browser");
+  restarted.patch("new-browser", {
+    answers: { ign: "Another_Name", contactEmail: "changed@example.com" },
+  });
+  assert.equal(
+    restarted.view("new-browser").reapplicationWaits.community,
+    until,
+  );
+  assert.ok((await restarted.submit("new-browser")).errors.reapplication);
+  restarted.patch("anonymous", {
+    role: "community",
+    answers: {
+      ...answers(),
+      ign: "test_player",
+      contactEmail: "VERIFIED@example.com",
+    },
+  });
+  assert.ok((await restarted.submit("anonymous")).errors.reapplication);
+  connectedDraft(restarted, "other-role", "artist");
+  assert.ok((await restarted.submit("other-role")).id);
+  t.mock.timers.setTime(until - 1);
+  connectedDraft(restarted, "deadline");
+  assert.ok((await restarted.submit("deadline")).errors.reapplication);
+  t.mock.timers.setTime(until);
+  assert.equal(
+    restarted.view("deadline").reapplicationWaits.community,
+    undefined,
+  );
+  assert.ok((await restarted.submit("deadline")).id);
+});
+
+test("denial during a new submission blocks it after profile lookup", async (t) => {
+  let release;
+  let pause = false;
+  const { service } = setup(t, async () => {
+    if (pause)
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    return new Response(null, { status: 404 });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  connectedDraft(service, "in-flight");
+  service.patch("in-flight", { answers: { ign: "Other_Player" } });
+  pause = true;
+  const pending = service.submit("in-flight");
+  service.decide(id, reviewer(), "deny", "Please wait before reapplying.");
+  release();
+  assert.ok((await pending).errors.reapplication);
+  assert.equal(service.list().total, 1);
+});
+
+test("closed Discord DMs do not undo submission or staff delivery", async (t) => {
+  const { service, store } = setup(t, async (url) => {
+    if (url.includes("mojang")) return new Response(null, { status: 404 });
+    if (url.endsWith("/users/@me/channels"))
+      return Response.json({ id: "999" });
+    if (url.includes("/channels/999/"))
+      return new Response(null, { status: 403 });
+    return Response.json({ id: "notice" });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await service.delivery();
+  await service.delivery();
+  assert.equal(service.get(id).status, "Received");
+  assert.equal(service.get(id).notifications[0].blocked, true);
+  assert.ok(service.get(id).notifications[0].failedAt);
+  assert.ok(store.get("application-delivery", id).sentAt);
+  assert.equal(store.page("application-notification").total, 0);
+});
+
+test("Discord rate limits retain messages and delay retries for the specified time", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  let limited = true;
+  let calls = 0;
+  const { service, store } = setup(t, async (url) => {
+    if (url.includes("mojang")) return new Response(null, { status: 404 });
+    calls++;
+    if (limited) return Response.json({ retry_after: 125.5 }, { status: 429 });
+    if (url.endsWith("/users/@me/channels"))
+      return Response.json({ id: "999" });
+    return Response.json({ id: "delivered" });
+  });
+  connectedDraft(service);
+  const { id } = await service.submit("session");
+  await service.delivery();
+  const pending = store.get("application-notification", `${id}:received`);
+  assert.equal(pending.nextAt, Date.now() + 125500);
+  assert.equal(calls, 1);
+  await service.delivery();
+  assert.equal(calls, 1);
+  limited = false;
+  t.mock.timers.setTime(pending.nextAt);
+  await service.delivery();
+  assert.ok(service.get(id).notifications[0].sentAt);
+  assert.equal(store.page("application-notification").total, 0);
+});
+
+test("notification queue failures roll back submission and decisions together", async (t) => {
+  const { service, store } = setup(t);
+  connectedDraft(service);
+  const original = store.set.bind(store);
+  let rejectQueue = true;
+  t.mock.method(store, "set", (kind, key, value, expires) => {
+    if (
+      rejectQueue &&
+      kind === "application-notification" &&
+      key.endsWith(":received")
+    )
+      throw new Error("queue write failed");
+    return original(kind, key, value, expires);
+  });
+  await assert.rejects(service.submit("session"), /queue write failed/);
+  assert.equal(service.list().total, 0);
+  assert.equal(store.page("application-notification").total, 0);
+  assert.equal(service.view("session").submitted, undefined);
+  rejectQueue = false;
+  const { id } = await service.submit("session");
+  t.mock.method(store, "set", (kind, key, value, expires) => {
+    if (kind === "application-notification" && key.endsWith(":denied"))
+      throw new Error("queue write failed");
+    return original(kind, key, value, expires);
+  });
+  assert.throws(
+    () => service.decide(id, reviewer(), "deny", "Please gain experience."),
+    /queue write failed/,
+  );
+  assert.equal(service.get(id).status, "Received");
+  assert.equal(service.list().items[0].status, "Received");
+  assert.equal(store.page("application-cooldown").total, 0);
 });

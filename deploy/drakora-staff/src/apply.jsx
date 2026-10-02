@@ -228,6 +228,15 @@ export function PublicApplication() {
       return;
     }
     if (
+      current === "role" &&
+      draft.reapplicationWaits?.[draft.role] > Date.now()
+    ) {
+      setError(
+        `You can apply for this role again from ${new Date(draft.reapplicationWaits[draft.role]).toLocaleString()}.`,
+      );
+      return;
+    }
+    if (
       current === "ign" &&
       draft.linkedMinecraft &&
       (draft.linkedMinecraft.changePending ||
@@ -324,6 +333,10 @@ export function PublicApplication() {
                 Your {receipt.role} application has been saved. The team will
                 use your contact details to follow up.
               </p>
+              <p className="apply-muted">
+                If you linked Discord, we will send a confirmation and review
+                updates by DM. Keep messages from the Drakora bot enabled.
+              </p>
               <p className="apply-muted">Reference: {receipt.id}</p>
               {error && (
                 <p className="apply-notice" role="alert">
@@ -380,10 +393,22 @@ export function PublicApplication() {
                           type="button"
                           key={role}
                           onClick={() => choose(role)}
-                          disabled={busy}
+                          disabled={
+                            busy ||
+                            draft.reapplicationWaits?.[role] > Date.now()
+                          }
                         >
                           <strong>{applicationRoles[role].label}</strong>
                           <span>{applicationRoles[role].description}</span>
+                          {draft.reapplicationWaits?.[role] > Date.now() && (
+                            <span>
+                              Available again from{" "}
+                              {new Date(
+                                draft.reapplicationWaits[role],
+                              ).toLocaleString()}
+                              .
+                            </span>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -849,6 +874,13 @@ export function PublicApplication() {
                       higher can read them. Minecraft ownership and network
                       activity are not verified yet. Please do not include
                       passwords, home addresses, or private documents.
+                    </p>
+                    <p className="apply-muted">
+                      If you linked Discord, the Drakora bot will DM your
+                      submission confirmation and review updates, including the
+                      decision. If denied, you must wait at least 7 days before
+                      applying for the same role again. The decision will
+                      include your reapplication date.
                     </p>
                     {check(
                       "privacyConsent",

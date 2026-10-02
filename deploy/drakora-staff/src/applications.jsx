@@ -9,6 +9,7 @@ export function StaffApplications({ csrf, canDecide }) {
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
   const [reason, setReason] = useState("");
+  const [reapplyDays, setReapplyDays] = useState("7");
   const [reviewError, setReviewError] = useState("");
   const [busy, setBusy] = useState(false);
   async function review(action, body) {
@@ -29,13 +30,17 @@ export function StaffApplications({ csrf, canDecide }) {
           application_review_role_required:
             "Feedback requires Jr Moderator rank or higher and Dashboard access.",
           application_decision_role_required:
-            "Only Managers and Founders with Dashboard access can approve or deny applications.",
+            "Only Managers and Founders with Dashboard access can start review, approve, or deny applications.",
           application_already_decided:
             "Another Manager or Founder already decided this application. Refresh to see the decision.",
           application_comments_full:
             "This application has reached its feedback limit.",
           invalid_application_comment:
             "Write between 3 and 4,000 characters of feedback.",
+          application_denial_reason_required:
+            "Write a denial message so the applicant understands the decision.",
+          invalid_reapplication_wait:
+            "Choose a whole number of days between 7 and 365.",
         };
         throw new Error(
           messages[result.error] ||
@@ -44,7 +49,7 @@ export function StaffApplications({ csrf, canDecide }) {
       }
       setData(result);
       if (action === "comments") setComment("");
-      else setReason("");
+      else if (action === "decision") setReason("");
     } catch (failure) {
       setReviewError(
         failure.message || "Could not save your review. Please try again.",
@@ -253,6 +258,12 @@ export function StaffApplications({ csrf, canDecide }) {
         aria-labelledby="application-decision-title"
       >
         <h3 id="application-decision-title">Application decision</h3>
+        {data.review && (
+          <p>
+            Review started by {data.review.author.name} on{" "}
+            {new Date(data.review.startedAt).toLocaleString()}.
+          </p>
+        )}
         {data.decision ? (
           <>
             <p>
@@ -260,21 +271,55 @@ export function StaffApplications({ csrf, canDecide }) {
               {new Date(data.decision.decidedAt).toLocaleString()}.
             </p>
             {data.decision.reason && <p>{data.decision.reason}</p>}
+            {data.decision.reapplyAfter && (
+              <p>
+                The applicant may apply for this role again from{" "}
+                {new Date(data.decision.reapplyAfter).toLocaleString()}. Minimum
+                wait: {data.decision.reapplyDays} days after denial.
+              </p>
+            )}
           </>
         ) : canDecide ? (
           <>
             <p>
-              Only Managers and Founders can decide applications. This records
-              the decision; Discord roles are assigned separately.
+              Only Managers and Founders can start review or decide
+              applications. Linked Discord applicants receive status updates by
+              DM. Discord roles are assigned separately.
             </p>
+            {data.status === "Received" && (
+              <button
+                className="apply-button"
+                disabled={busy}
+                onClick={() => review("review", {})}
+              >
+                Start reviewing
+              </button>
+            )}
             <label className="apply-field">
-              <span>Decision reason (optional)</span>
+              <span>Message to applicant (required for denial)</span>
               <textarea
                 maxLength={2000}
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 disabled={busy}
               />
+            </label>
+            <label className="apply-field">
+              <span>
+                Wait before reapplying for this role (days, if denied)
+              </span>
+              <input
+                type="number"
+                min={7}
+                max={365}
+                step={1}
+                value={reapplyDays}
+                onChange={(event) => setReapplyDays(event.target.value)}
+                disabled={busy}
+              />
+              <small>
+                The minimum wait is 7 days, counted from the denial.
+              </small>
             </label>
             <div className="apply-actions">
               <button
@@ -289,7 +334,13 @@ export function StaffApplications({ csrf, canDecide }) {
               <button
                 className="apply-secondary"
                 disabled={busy}
-                onClick={() => review("decision", { decision: "deny", reason })}
+                onClick={() =>
+                  review("decision", {
+                    decision: "deny",
+                    reason,
+                    reapplyDays: Number(reapplyDays),
+                  })
+                }
               >
                 Deny application
               </button>
@@ -307,6 +358,50 @@ export function StaffApplications({ csrf, canDecide }) {
           </p>
         )}
       </section>
+      {data.discord ? (
+        <section
+          className="application-response"
+          aria-labelledby="application-dm-title"
+        >
+          <h3 id="application-dm-title">Applicant Discord updates</h3>
+          <p>
+            Messages go to the Discord account linked when this application was
+            submitted. Refresh to see delivery updates.
+          </p>
+          {data.notifications?.length ? (
+            <ul>
+              {data.notifications.map((notification) => (
+                <li key={notification.event}>
+                  {
+                    {
+                      received: "Submission confirmation",
+                      reviewing: "Review started",
+                      approved: "Approval",
+                      denied: "Denial",
+                    }[notification.event]
+                  }
+                  :{" "}
+                  {notification.pending
+                    ? "Queued"
+                    : notification.sentAt
+                      ? `Sent ${new Date(notification.sentAt).toLocaleString()}`
+                      : "Could not deliver. Use the contact email to follow up."}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>
+              No updates scheduled for this older submission. Starting review or
+              making a decision will send an update.
+            </p>
+          )}
+        </section>
+      ) : (
+        <p className="apply-muted">
+          Discord is not linked. Use the contact email to communicate review
+          updates and decisions.
+        </p>
+      )}
       <p className="apply-muted">
         Reference {data.id} · Questionnaire version {data.questionnaireVersion}
       </p>
