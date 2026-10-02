@@ -434,6 +434,214 @@
 .application-response p {
   line-height: 1.75;
 }
+.dashboard.dashboard-applications {
+  width: min(100%, 1540px);
+  padding: clamp(24px, 3vw, 48px) clamp(18px, 3vw, 40px);
+}
+.staff-applications.application-detail {
+  max-width: none;
+}
+.application-header {
+  margin-bottom: 28px;
+}
+.application-back {
+  color: #a8b0ff;
+}
+.application-header h2 {
+  margin: 14px 0 10px;
+  overflow-wrap: anywhere;
+}
+.application-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: #b5bac1;
+  font-size: 14px;
+}
+.staff-applications .application-status {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.staff-applications .application-status-received {
+  color: #f9d88b;
+  background: #4d3f22;
+}
+.staff-applications .application-status-reviewing {
+  color: #b0cbff;
+  background: #283b60;
+}
+.staff-applications .application-status-approved {
+  color: #a0eabd;
+  background: #244936;
+}
+.staff-applications .application-status-denied {
+  color: #ffb3b9;
+  background: #562a30;
+}
+.application-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);
+  align-items: start;
+  gap: 28px;
+}
+.application-review {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.application-review > .apply-muted {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.application-review-card,
+.application-detail .application-response {
+  background: #2b2d31;
+  border: 1px solid #41434a;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 0;
+  min-width: 0;
+}
+.application-detail .application-response > h3 {
+  margin-bottom: 12px;
+}
+.application-detail .apply-profile {
+  margin: 20px 0;
+  overflow-wrap: anywhere;
+}
+.application-detail .apply-profile > div {
+  min-width: 0;
+}
+.application-detail .apply-profile img {
+  flex-shrink: 0;
+}
+.application-detail .application-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 18px 0 0;
+}
+.application-detail .application-facts dt {
+  margin: 0;
+}
+.application-detail .application-feedback {
+  background: #313338;
+}
+.staff-applications button.apply-button {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: white;
+}
+.staff-applications button.application-review-start {
+  background: #4a57cc;
+  border-color: #4a57cc;
+}
+.staff-applications button.application-approve {
+  background: #237d50;
+  border-color: #237d50;
+}
+.staff-applications button.application-deny {
+  background: #bb3647;
+  border-color: #bb3647;
+  color: white;
+}
+.staff-applications button.apply-button:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+.staff-applications button.application-deny:not(:disabled):hover {
+  background: #a62d3d;
+}
+.staff-applications button:focus-visible,
+.staff-applications a:focus-visible {
+  outline: 2px solid #a8b0ff;
+  outline-offset: 3px;
+}
+.application-player {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  align-items: start;
+}
+.application-player-card {
+  background: #232428;
+  border: 1px solid #41434a;
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+}
+.application-player-card h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.application-player-card h3 {
+  font-size: 13px;
+  color: #b5bac1;
+  margin: 18px 0 8px;
+}
+.application-player-card p {
+  line-height: 1.6;
+}
+.application-player-name {
+  display: block;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.application-player-stats {
+  margin: 16px 0 0;
+}
+.application-player-card h3 + .application-player-stats {
+  margin-top: 0;
+}
+.application-player-stats > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px 12px;
+  padding: 10px 0;
+}
+.application-player-stats > div + div {
+  border-top: 1px solid #35373e;
+}
+.application-player-stats dt {
+  font-size: 13px;
+  color: #c8ccd1;
+}
+.application-player-stats dd {
+  margin: 0;
+  font-size: 12px;
+}
+.application-stat-pending {
+  color: #949ba4;
+}
+.application-player-uuid {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  color: #b5bac1;
+}
+@media (max-width: 1180px) {
+  .application-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .application-player {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .application-player,
+  .application-detail .application-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .application-review-card,
+  .application-detail .application-response {
+    padding: 18px;
+  }
+}
 .sr-only {
   position: absolute;
   width: 1px;

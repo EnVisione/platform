@@ -706,7 +706,11 @@ function App() {
             {busy ? "Signing out…" : "Sign out"}
           </button>
         </header>
-        <main className="dashboard">
+        <main
+          className={
+            applicationsPage ? "dashboard dashboard-applications" : "dashboard"
+          }
+        >
           {error && (
             <p role="alert" className="notice">
               {messages[error] || messages.service_unavailable}

@@ -1,7 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { applicationRoles, questionList } from "../shared/application-form.js";
+import {
+  applicationRoles,
+  communityOptions,
+  questionList,
+} from "../shared/application-form.js";
 import "./apply.css";
 import { EvidenceLinks } from "./application-evidence.jsx";
+import { ApplicationPlayer } from "./application-player.jsx";
+
+function ApplicationStatus({ status }) {
+  const tone =
+    {
+      Received: "received",
+      Reviewing: "reviewing",
+      Approved: "approved",
+      Denied: "denied",
+    }[status] || "received";
+  return (
+    <span className={`application-status application-status-${tone}`}>
+      {status}
+    </span>
+  );
+}
 
 export function StaffApplications({ csrf, canDecide }) {
   const id = location.pathname.split("/")[2];
@@ -116,7 +136,7 @@ export function StaffApplications({ csrf, canDecide }) {
                   </span>
                 </div>
                 <div>
-                  <span>{item.status}</span>
+                  <ApplicationStatus status={item.status} />
                   <time>{new Date(item.createdAt).toLocaleString()}</time>
                 </div>
               </a>
@@ -144,271 +164,303 @@ export function StaffApplications({ csrf, canDecide }) {
     );
   const a = data.answers;
   return (
-    <article className="staff-applications">
-      <a href="/applications">← All applications</a>
-      <h2>{a.displayName}</h2>
-      <p>
-        {applicationRoles[data.role].label} · {data.status} ·{" "}
-        {new Date(data.createdAt).toLocaleString()}
-      </p>
-      {data.discord && (
-        <div className="apply-profile">
-          <img src={data.discord.avatar} alt="" />
-          <div>
-            <strong>{data.discord.name}</strong>
-            <span>
-              @{data.discord.username} · Discord ID {data.discord.id}
-            </span>
-          </div>
+    <article className="staff-applications application-detail">
+      <header className="application-header">
+        <a className="application-back" href="/applications">
+          ← All applications
+        </a>
+        <h2>{a.displayName}</h2>
+        <div className="application-meta">
+          <span>{applicationRoles[data.role].label}</span>
+          <ApplicationStatus status={data.status} />
+          <time>{new Date(data.createdAt).toLocaleString()}</time>
         </div>
-      )}
-      <dl className="application-facts">
-        <dt>Minecraft name</dt>
-        <dd>
-          {a.ign} · {data.minecraft.verification}
-        </dd>
-        <dt>Profile UUID</dt>
-        <dd>{data.minecraft.uuid || "Not resolved"}</dd>
-        <dt>Contact email</dt>
-        <dd>{data.contactEmail}</dd>
-        <dt>Pronouns</dt>
-        <dd>{a.pronouns}</dd>
-        <dt>Age</dt>
-        <dd>{a.age}</dd>
-        <dt>Timezone</dt>
-        <dd>{a.timezone}</dd>
-        <dt>Available hours / week</dt>
-        <dd>{a.hoursPerWeek}</dd>
-        <dt>Active communities</dt>
-        <dd>{a.communities.join(", ")}</dd>
-        {!data.discord && (
-          <>
-            <dt>Uses Discord</dt>
-            <dd>
-              {a.discordUses}
-              {a.discordWhy && ` — ${a.discordWhy}`}
-            </dd>
-            {a.discordUses === "no" && (
-              <>
-                <dt>Willing to download Discord if approved</dt>
-                <dd>
-                  {a.discordWilling === "yes"
-                    ? "Yes"
-                    : a.discordWilling === "no"
-                      ? "No"
-                      : "Not asked on this application"}
-                </dd>
-              </>
+      </header>
+      <div className="application-layout">
+        <div className="application-review">
+          <section
+            className="application-review-card"
+            aria-labelledby="application-details-title"
+          >
+            <h3 id="application-details-title">Applicant details</h3>
+            {data.discord && (
+              <div className="apply-profile">
+                <img src={data.discord.avatar} alt="" />
+                <div>
+                  <strong>{data.discord.name}</strong>
+                  <span>
+                    @{data.discord.username} · Discord ID {data.discord.id}
+                  </span>
+                </div>
+              </div>
             )}
-          </>
-        )}
-      </dl>
-      <p className="apply-muted">
-        Minecraft network history, playtime, and in-game verification will
-        appear after server integration.
-      </p>
-      {questionList(data.role, a.communities).map(([key, label]) => (
-        <section className="application-response" key={key}>
-          <h3>{label}</h3>
-          {key === "scenarioAnswer" && <blockquote>{data.scenario}</blockquote>}
-          <p>{a[key] || "Not provided"}</p>
-          {key === "experienceProof" && (
-            <EvidenceLinks value={a.experienceLinks} />
-          )}
-        </section>
-      ))}
-      <section
-        className="application-response"
-        aria-labelledby="application-feedback-title"
-      >
-        <h3 id="application-feedback-title">Staff feedback</h3>
-        <p>
-          Do you know this player? Share relevant experience, concerns, or
-          support for their application.
-        </p>
-        {(data.comments ?? []).map((entry) => (
-          <article className="application-feedback" key={entry.id}>
-            <strong>{entry.author.name}</strong>
-            {" · "}
-            <time>{new Date(entry.createdAt).toLocaleString()}</time>
-            <p>{entry.text}</p>
-          </article>
-        ))}
-        {!data.comments?.length && <p>No staff feedback yet.</p>}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            review("comments", { comment });
-          }}
-        >
-          <label className="apply-field">
-            <span>Your feedback</span>
-            <textarea
-              required
-              minLength={3}
-              maxLength={4000}
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <button className="apply-button" disabled={busy}>
-            Post feedback
-          </button>
-        </form>
-      </section>
-      <section
-        className="application-response"
-        aria-labelledby="application-decision-title"
-      >
-        <h3 id="application-decision-title">Application decision</h3>
-        {data.review && (
-          <p>
-            Review started by {data.review.author.name} on{" "}
-            {new Date(data.review.startedAt).toLocaleString()}.
-          </p>
-        )}
-        {data.decision ? (
-          <>
+            <dl className="application-facts">
+              <div>
+                <dt>Contact email</dt>
+                <dd>{data.contactEmail}</dd>
+              </div>
+              <div>
+                <dt>Pronouns</dt>
+                <dd>{a.pronouns}</dd>
+              </div>
+              <div>
+                <dt>Age</dt>
+                <dd>{a.age}</dd>
+              </div>
+              <div>
+                <dt>Timezone</dt>
+                <dd>{a.timezone}</dd>
+              </div>
+              <div>
+                <dt>Available hours / week</dt>
+                <dd>{a.hoursPerWeek}</dd>
+              </div>
+              <div>
+                <dt>Active communities</dt>
+                <dd>
+                  {a.communities
+                    .map(
+                      (key) =>
+                        communityOptions.find(
+                          ([value]) => value === key,
+                        )?.[1] || key,
+                    )
+                    .join(", ")}
+                </dd>
+              </div>
+              {!data.discord && (
+                <>
+                  <div>
+                    <dt>Uses Discord</dt>
+                    <dd>
+                      {a.discordUses}
+                      {a.discordWhy && ` — ${a.discordWhy}`}
+                    </dd>
+                  </div>
+                  {a.discordUses === "no" && (
+                    <div>
+                      <dt>Willing to download Discord if approved</dt>
+                      <dd>
+                        {a.discordWilling === "yes"
+                          ? "Yes"
+                          : a.discordWilling === "no"
+                            ? "No"
+                            : "Not asked on this application"}
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
+            </dl>
+          </section>
+          {questionList(data.role, a.communities).map(([key, label]) => (
+            <section className="application-response" key={key}>
+              <h3>{label}</h3>
+              {key === "scenarioAnswer" && (
+                <blockquote>{data.scenario}</blockquote>
+              )}
+              <p>{a[key] || "Not provided"}</p>
+              {key === "experienceProof" && (
+                <EvidenceLinks value={a.experienceLinks} />
+              )}
+            </section>
+          ))}
+          <section
+            className="application-response"
+            aria-labelledby="application-feedback-title"
+          >
+            <h3 id="application-feedback-title">Staff feedback</h3>
             <p>
-              {data.status} by {data.decision.author.name} on{" "}
-              {new Date(data.decision.decidedAt).toLocaleString()}.
+              Do you know this player? Share relevant experience, concerns, or
+              support for their application.
             </p>
-            {data.decision.reason && <p>{data.decision.reason}</p>}
-            {data.decision.reapplyAfter && (
+            {(data.comments ?? []).map((entry) => (
+              <article className="application-feedback" key={entry.id}>
+                <strong>{entry.author.name}</strong>
+                {" · "}
+                <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                <p>{entry.text}</p>
+              </article>
+            ))}
+            {!data.comments?.length && <p>No staff feedback yet.</p>}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                review("comments", { comment });
+              }}
+            >
+              <label className="apply-field">
+                <span>Your feedback</span>
+                <textarea
+                  required
+                  minLength={3}
+                  maxLength={4000}
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  disabled={busy}
+                />
+              </label>
+              <button className="apply-button" disabled={busy}>
+                Post feedback
+              </button>
+            </form>
+          </section>
+          <section
+            className="application-response"
+            aria-labelledby="application-decision-title"
+          >
+            <h3 id="application-decision-title">Application decision</h3>
+            {data.review && (
               <p>
-                The applicant may apply for this role again from{" "}
-                {new Date(data.decision.reapplyAfter).toLocaleString()}. Minimum
-                wait: {data.decision.reapplyDays} days after denial.
+                Review started by {data.review.author.name} on{" "}
+                {new Date(data.review.startedAt).toLocaleString()}.
               </p>
             )}
-          </>
-        ) : canDecide ? (
-          <>
-            <p>
-              Only Managers and Founders can start review or decide
-              applications. Linked Discord applicants receive status updates by
-              DM. Discord roles are assigned separately.
-            </p>
-            {data.status === "Received" && (
-              <button
-                className="apply-button"
-                disabled={busy}
-                onClick={() => review("review", {})}
-              >
-                Start reviewing
-              </button>
+            {data.decision ? (
+              <>
+                <p>
+                  {data.status} by {data.decision.author.name} on{" "}
+                  {new Date(data.decision.decidedAt).toLocaleString()}.
+                </p>
+                {data.decision.reason && <p>{data.decision.reason}</p>}
+                {data.decision.reapplyAfter && (
+                  <p>
+                    The applicant may apply for this role again from{" "}
+                    {new Date(data.decision.reapplyAfter).toLocaleString()}.
+                    Minimum wait: {data.decision.reapplyDays} days after denial.
+                  </p>
+                )}
+              </>
+            ) : canDecide ? (
+              <>
+                <p>
+                  Only Managers and Founders can start review or decide
+                  applications. Linked Discord applicants receive status updates
+                  by DM. Discord roles are assigned separately.
+                </p>
+                {data.status === "Received" && (
+                  <button
+                    className="apply-button application-review-start"
+                    disabled={busy}
+                    onClick={() => review("review", {})}
+                  >
+                    Start reviewing
+                  </button>
+                )}
+                <label className="apply-field">
+                  <span>Message to applicant (required for denial)</span>
+                  <textarea
+                    maxLength={2000}
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <label className="apply-field">
+                  <span>
+                    Wait before reapplying for this role (days, if denied)
+                  </span>
+                  <input
+                    type="number"
+                    min={7}
+                    max={365}
+                    step={1}
+                    value={reapplyDays}
+                    onChange={(event) => setReapplyDays(event.target.value)}
+                    disabled={busy}
+                  />
+                  <small>
+                    The minimum wait is 7 days, counted from the denial.
+                  </small>
+                </label>
+                <div className="apply-actions">
+                  <button
+                    className="apply-button application-approve"
+                    disabled={busy}
+                    onClick={() =>
+                      review("decision", { decision: "approve", reason })
+                    }
+                  >
+                    Approve application
+                  </button>
+                  <button
+                    className="apply-secondary application-deny"
+                    disabled={busy}
+                    onClick={() =>
+                      review("decision", {
+                        decision: "deny",
+                        reason,
+                        reapplyDays: Number(reapplyDays),
+                      })
+                    }
+                  >
+                    Deny application
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p>
+                Awaiting a Manager or Founder decision. You can add staff
+                feedback above.
+              </p>
             )}
-            <label className="apply-field">
-              <span>Message to applicant (required for denial)</span>
-              <textarea
-                maxLength={2000}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                disabled={busy}
-              />
-            </label>
-            <label className="apply-field">
-              <span>
-                Wait before reapplying for this role (days, if denied)
-              </span>
-              <input
-                type="number"
-                min={7}
-                max={365}
-                step={1}
-                value={reapplyDays}
-                onChange={(event) => setReapplyDays(event.target.value)}
-                disabled={busy}
-              />
-              <small>
-                The minimum wait is 7 days, counted from the denial.
-              </small>
-            </label>
-            <div className="apply-actions">
-              <button
-                className="apply-button"
-                disabled={busy}
-                onClick={() =>
-                  review("decision", { decision: "approve", reason })
-                }
-              >
-                Approve application
-              </button>
-              <button
-                className="apply-secondary"
-                disabled={busy}
-                onClick={() =>
-                  review("decision", {
-                    decision: "deny",
-                    reason,
-                    reapplyDays: Number(reapplyDays),
-                  })
-                }
-              >
-                Deny application
-              </button>
-            </div>
-          </>
-        ) : (
-          <p>
-            Awaiting a Manager or Founder decision. You can add staff feedback
-            above.
-          </p>
-        )}
-        {reviewError && (
-          <p className="apply-error" role="alert">
-            {reviewError}
-          </p>
-        )}
-      </section>
-      {data.discord ? (
-        <section
-          className="application-response"
-          aria-labelledby="application-dm-title"
-        >
-          <h3 id="application-dm-title">Applicant Discord updates</h3>
-          <p>
-            Messages go to the Discord account linked when this application was
-            submitted. Refresh to see delivery updates.
-          </p>
-          {data.notifications?.length ? (
-            <ul>
-              {data.notifications.map((notification) => (
-                <li key={notification.event}>
-                  {
-                    {
-                      received: "Submission confirmation",
-                      reviewing: "Review started",
-                      approved: "Approval",
-                      denied: "Denial",
-                    }[notification.event]
-                  }
-                  :{" "}
-                  {notification.pending
-                    ? "Queued"
-                    : notification.sentAt
-                      ? `Sent ${new Date(notification.sentAt).toLocaleString()}`
-                      : "Could not deliver. Use the contact email to follow up."}
-                </li>
-              ))}
-            </ul>
+            {reviewError && (
+              <p className="apply-error" role="alert">
+                {reviewError}
+              </p>
+            )}
+          </section>
+          {data.discord ? (
+            <section
+              className="application-response"
+              aria-labelledby="application-dm-title"
+            >
+              <h3 id="application-dm-title">Applicant Discord updates</h3>
+              <p>
+                Messages go to the Discord account linked when this application
+                was submitted. Refresh to see delivery updates.
+              </p>
+              {data.notifications?.length ? (
+                <ul>
+                  {data.notifications.map((notification) => (
+                    <li key={notification.event}>
+                      {
+                        {
+                          received: "Submission confirmation",
+                          reviewing: "Review started",
+                          approved: "Approval",
+                          denied: "Denial",
+                        }[notification.event]
+                      }
+                      :{" "}
+                      {notification.pending
+                        ? "Queued"
+                        : notification.sentAt
+                          ? `Sent ${new Date(notification.sentAt).toLocaleString()}`
+                          : "Could not deliver. Use the contact email to follow up."}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>
+                  No updates scheduled for this older submission. Starting
+                  review or making a decision will send an update.
+                </p>
+              )}
+            </section>
           ) : (
-            <p>
-              No updates scheduled for this older submission. Starting review or
-              making a decision will send an update.
+            <p className="apply-muted">
+              Discord is not linked. Use the contact email to communicate review
+              updates and decisions.
             </p>
           )}
-        </section>
-      ) : (
-        <p className="apply-muted">
-          Discord is not linked. Use the contact email to communicate review
-          updates and decisions.
-        </p>
-      )}
-      <p className="apply-muted">
-        Reference {data.id} · Questionnaire version {data.questionnaireVersion}
-      </p>
+          <p className="apply-muted">
+            Reference {data.id} · Questionnaire version{" "}
+            {data.questionnaireVersion}
+          </p>
+        </div>
+        <ApplicationPlayer application={data} />
+      </div>
     </article>
   );
 }
