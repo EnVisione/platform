@@ -389,7 +389,8 @@ function Accounts({ csrf, approveMinecraftChange }) {
       <div className="welcome">
         <h2 id="accounts-title">Registered staff</h2>
         <p>
-          Minecraft links and observed Discord activity in the staff server.
+          Minecraft links and observed Discord activity across Drakora and
+          Drakora Staff.
         </p>
       </div>
       {error && (
@@ -467,9 +468,10 @@ function Accounts({ csrf, approveMinecraftChange }) {
         </div>
       )}
       <p className="activity-note">
-        Discord activity is shown only when observed by the staff bot. Invisible
-        members may appear offline. Minecraft server activity will be added
-        after server integration.
+        Last active includes observed presence and messages in Drakora or
+        Drakora Staff. Invisible members may appear offline, but their messages
+        still update activity. Minecraft server activity will be added after
+        server integration.
       </p>
     </section>
   );

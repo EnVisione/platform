@@ -3,6 +3,7 @@ import {
   GatewayIntentBits,
   ChannelType,
   PermissionFlagsBits,
+  Options,
 } from "discord.js";
 import { meetingService } from "./meetings.js";
 import { AuthError } from "./discord.js";
@@ -11,18 +12,28 @@ import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
 
 export function discordOffice(config, store) {
-  const activity = memberActivity(store);
+  let guild;
+  let activityRefresh;
+  const activityGuilds = new Set([
+    config.guildId,
+    ...(config.activityGuildIds ?? []),
+  ]);
+  const activity = memberActivity(store, {
+    guildIds: activityGuilds,
+    isMember: (id) => guild?.members.cache.has(id) ?? false,
+  });
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildPresences,
       GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.GuildMessages,
     ],
+    makeCache: Options.cacheWithLimits({ MessageManager: 0 }),
     allowedMentions: { parse: [] },
   });
   let ready = false;
-  let guild;
   let reconnectTimer;
   let connecting = false;
   let attempts = 0;
@@ -116,6 +127,57 @@ export function discordOffice(config, store) {
       deafened: ready && guild?.available && Boolean(member.voice.deaf),
     };
   };
+  async function refreshActivity() {
+    let scanned = 0;
+    let unavailable = 0;
+    for (const id of activityGuilds) {
+      if (stopped) return;
+      const source = client.guilds.cache.get(id);
+      if (!source?.available) {
+        unavailable++;
+        continue;
+      }
+      let channels;
+      try {
+        channels = await source.channels.fetch();
+        const active = await source.channels.fetchActiveThreads();
+        for (const [id, thread] of active.threads) channels.set(id, thread);
+      } catch {
+        unavailable++;
+        if (!channels) continue;
+      }
+      for (const target of channels.values()) {
+        if (stopped) return;
+        if (
+          !target?.isTextBased() ||
+          !target.messages ||
+          !target
+            .permissionsFor(client.user)
+            ?.has([
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.ReadMessageHistory,
+            ])
+        )
+          continue;
+        try {
+          const messages = await target.messages.fetch({
+            limit: 100,
+            cache: false,
+          });
+          if (stopped) return;
+          for (const message of messages.values())
+            activity.observeMessage(message);
+          scanned++;
+        } catch {
+          unavailable++;
+        }
+      }
+    }
+    if (!stopped)
+      console.log(
+        `Discord message activity refreshed. ${scanned} channels, ${unavailable} unavailable.`,
+      );
+  }
   async function connect() {
     if (connecting || stopped || !client.isReady()) return;
     connecting = true;
@@ -123,6 +185,7 @@ export function discordOffice(config, store) {
     try {
       guild = await client.guilds.fetch(config.guildId);
       await guild.members.fetch({ withPresences: true });
+      if (stopped) return;
       for (const member of guild.members.cache.values())
         if (!member.user.bot)
           activity.observe(member.id, member.presence?.status);
@@ -130,6 +193,10 @@ export function discordOffice(config, store) {
       await meetings.reconcile();
       attempts = 0;
       console.log("Discord office connected.");
+      if (!activityRefresh)
+        activityRefresh = refreshActivity().finally(() => {
+          activityRefresh = undefined;
+        });
     } catch {
       ready = false;
       console.error("Discord office initialization failed.");
@@ -154,8 +221,11 @@ export function discordOffice(config, store) {
     void connect();
   });
   client.on("presenceUpdate", (_before, after) => {
-    if (after.guild.id === config.guildId)
+    if (!stopped && after.guild.id === config.guildId)
       activity.observe(after.userId, after.status);
+  });
+  client.on("messageCreate", (message) => {
+    if (!stopped) activity.observeMessage(message);
   });
   client.on("error", () => {
     ready = false;
@@ -196,8 +266,8 @@ export function discordOffice(config, store) {
           joinUrl: voiceLink(room.id),
           joinable: Boolean(
             available &&
-              allowed &&
-              (room.kind === "voice" || state.status === "live"),
+            allowed &&
+            (room.kind === "voice" || state.status === "live"),
           ),
           startedAt: state.status === "live" ? state.startedAt : undefined,
           hostId: state.status === "live" ? state.hostId : undefined,
@@ -213,11 +283,12 @@ export function discordOffice(config, store) {
   return {
     snapshot,
     meetings,
-    close: () => {
+    close: async () => {
       stopped = true;
       clearTimeout(reconnectTimer);
       ready = false;
-      client.destroy();
+      await client.destroy();
+      await activityRefresh;
     },
   };
 }

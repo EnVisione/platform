@@ -5,6 +5,7 @@
   "discordClientSecret": "REPLACE_OAUTH_SECRET",
   "discordBotToken": "REPLACE_BOT_TOKEN",
   "guildId": "REPLACE_GUILD_ID",
+  "activityGuildIds": ["REPLACE_COMMUNITY_GUILD_ID"],
   "sessionSecret": "REPLACE_RANDOM_SECRET",
   "databaseKey": "REPLACE_32_RANDOM_BYTES_BASE64",
   "oidcClientSecret": "REPLACE_RANDOM_SECRET",

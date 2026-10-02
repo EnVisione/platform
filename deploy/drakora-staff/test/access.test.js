@@ -132,20 +132,110 @@ test("Discord role removal is applied and API errors never grant access", async 
   status = 404;
   assert.equal((await client.check("42", true)).permissions.todo, false);
 });
-test("last active records observed presence and survives a restart", (t) => {
+test("last active records presence and invisible messages and survives a restart", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "drakora-activity-"));
   const path = join(dir, "test.sqlite");
   const key = randomBytes(32).toString("base64");
   t.after(() => rmSync(dir, { recursive: true }));
   const first = openStore(path, key);
-  const activity = memberActivity(first.store);
-  assert.equal(activity.lastActiveAt("42"), undefined);
   const observed = Date.now();
-  activity.observe("42", "online", observed);
-  activity.observe("42", "offline", observed + 1000);
-  assert.equal(activity.lastActiveAt("42"), observed);
-  first.store.close();
+  try {
+    const activity = memberActivity(first.store, {
+      guildIds: ["1", "2"],
+      isMember: (id) => id === "42",
+    });
+    assert.equal(activity.lastActiveAt("42"), undefined);
+    activity.observe("42", "online", observed);
+    activity.observe("42", "offline", observed + 1000);
+    assert.equal(activity.lastActiveAt("42"), observed);
+    activity.observeMessage({
+      guildId: "2",
+      author: { id: "42", bot: false },
+      createdTimestamp: observed + 1000,
+    });
+    assert.equal(activity.lastActiveAt("42"), observed + 1000);
+    assert.deepEqual(first.store.get("member-activity", "42"), {
+      lastActiveAt: observed + 1000,
+    });
+  } finally {
+    first.store.close();
+  }
   const second = openStore(path, key);
-  assert.equal(memberActivity(second.store).lastActiveAt("42"), observed);
-  second.store.close();
+  try {
+    assert.equal(
+      memberActivity(second.store).lastActiveAt("42"),
+      observed + 1000,
+    );
+  } finally {
+    second.store.close();
+  }
+});
+
+test("message activity accepts only staff members in the configured guilds", (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  const members = new Set(["42"]);
+  const activity = memberActivity(store, {
+    guildIds: ["1", "2"],
+    isMember: (id) => members.has(id),
+  });
+  const at = Date.now() - 5000;
+  const message = {
+    guildId: "2",
+    author: { id: "42", bot: false },
+    createdTimestamp: at,
+  };
+  for (const ignored of [
+    { ...message, guildId: "3" },
+    { ...message, guildId: null },
+    { ...message, author: { id: "43", bot: false } },
+    { ...message, author: { id: "42", bot: true } },
+    { ...message, webhookId: "99" },
+    { ...message, system: true },
+    { ...message, createdTimestamp: NaN },
+    { ...message, createdTimestamp: Date.now() + 3600000 },
+  ])
+    activity.observeMessage(ignored);
+  assert.deepEqual(store.entries("member-activity"), []);
+  Object.defineProperty(message, "content", {
+    get() {
+      throw new Error("Message contents must not be read");
+    },
+  });
+  activity.observeMessage(message);
+  assert.equal(activity.lastActiveAt("42"), at);
+  activity.observeMessage({
+    ...message,
+    guildId: "1",
+    createdTimestamp: at + 1000,
+  });
+  assert.equal(activity.lastActiveAt("42"), at + 1000);
+  members.delete("42");
+  activity.observeMessage({ ...message, createdTimestamp: at + 2000 });
+  assert.equal(activity.lastActiveAt("42"), at + 1000);
+});
+
+test("recent messages update the exact timestamp without rewinding newer activity", (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  const activity = memberActivity(store, {
+    guildIds: ["1"],
+    isMember: (id) => id === "42",
+  });
+  const at = Date.now() - 600000;
+  const message = (createdTimestamp) => ({
+    guildId: "1",
+    author: { id: "42", bot: false },
+    createdTimestamp,
+  });
+  activity.observe("42", "online", at);
+  activity.observeMessage(message(at + 1000));
+  activity.observeMessage(message(at + 2000));
+  assert.equal(activity.lastActiveAt("42"), at + 2000);
+  activity.observeMessage(message(at));
+  activity.observe("42", "online", at - 60000);
+  assert.equal(activity.lastActiveAt("42"), at + 2000);
+  activity.observe("42", "online", at + 120000);
+  activity.observeMessage(message(at + 3000));
+  assert.equal(activity.lastActiveAt("42"), at + 120000);
 });

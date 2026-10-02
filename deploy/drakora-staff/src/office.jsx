@@ -362,8 +362,10 @@ export function Office() {
                 <p>Search to find more members.</p>
               )}
               <p className="presence-note">
-                Last active is recorded from observed Discord presence. Earlier
-                activity is unavailable.
+                Last active includes observed presence and messages in Drakora
+                or Drakora Staff, including messages sent while invisible.
+                Recent readable message history is included; older or
+                inaccessible messages may be missing.
               </p>
             </aside>
           </div>

@@ -55,6 +55,18 @@ export function validateConfig(config) {
     );
   if (new Set(config.ranks.map((rank) => rank.id)).size !== config.ranks.length)
     throw new Error("Staff rank IDs must be unique");
+  if (
+    config.activityGuildIds !== undefined &&
+    (!config.office ||
+      !Array.isArray(config.activityGuildIds) ||
+      config.activityGuildIds.length > 2 ||
+      new Set([config.guildId, ...config.activityGuildIds]).size > 2 ||
+      !config.activityGuildIds.every(snowflake) ||
+      new Set(config.activityGuildIds).size !== config.activityGuildIds.length)
+  )
+    throw new Error(
+      "Configure up to two distinct Discord activity guild IDs with Office enabled",
+    );
   if (config.office) {
     const { categoryId, inviteChannelId, hostRoles, rooms } = config.office;
     if (

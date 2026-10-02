@@ -1034,7 +1034,7 @@ async function stop() {
   clearInterval(sweep);
   await todoSync?.close();
   await applications?.close();
-  office?.close();
+  await office?.close();
   for (const socket of sockets) socket.destroy();
   server.close(() => {
     store.close();

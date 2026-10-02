@@ -6,6 +6,8 @@ The Office shows Discord presence, profile pictures, voice participants, and lin
 
 The dashboard places the Drakora logo beside the staff name in its sidebar heading, with the same branding above navigation on mobile. There is no separate Discord server rail.
 
+Last active combines observed presence with message timestamps, including messages sent while invisible. Set `activityGuildIds` to the community guild ID to include its messages; the staff guild is always included. Only current staff guild members contribute activity records. The bot must be present and able to view the relevant channels. Read Message History permits a bounded refresh of the latest 100 messages in each readable channel and active thread after connection. Older and inaccessible history may be missing. Only the latest activity timestamp is retained, never message contents.
+
 Huly Contacts shows the configured Discord staff ranks for linked employees. The rank badges refresh while Contacts is open. The generic Huly Worker badge is hidden in this deployment; its underlying HR data remains intact.
 
 ## Requirements
@@ -13,7 +15,7 @@ Huly Contacts shows the configured Discord staff ranks for linked employees. The
 - A working [Huly self-hosted installation](https://github.com/hcengineering/huly-selfhost), matching this checkout's Huly version.
 - Docker Compose and a shared private Docker network.
 - Two HTTPS origins routed through this service, preserving the original Host header and setting X-Forwarded-Proto to https.
-- A Discord application with OAuth2 and a bot in the staff guild. Enable Server Members Intent and Presence Intent. Message Content Intent is unnecessary.
+- A Discord application with OAuth2 and a bot in the staff guild and any community guild configured for activity. Enable Server Members Intent and Presence Intent. Message Content Intent is unnecessary.
 - Node.js 24 and pnpm 11.19.0 for local portal development.
 
 ## Install
