@@ -417,9 +417,29 @@ function ApplicationReviews({ csrf, capabilities }) {
             </p>
             {(data.comments ?? []).map((entry) => (
               <article className="application-feedback" key={entry.id}>
-                <strong>{entry.author.name}</strong>
-                {" · "}
-                <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                <header className="application-feedback-author">
+                  <span
+                    className="application-feedback-avatar"
+                    aria-hidden="true"
+                  >
+                    {entry.author.name?.trim().charAt(0).toUpperCase() || "?"}
+                    {entry.author.avatar && (
+                      <img
+                        src={entry.author.avatar}
+                        alt=""
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.hidden = true;
+                        }}
+                      />
+                    )}
+                  </span>
+                  <div>
+                    <strong>{entry.author.name}</strong>
+                    {" · "}
+                    <time>{new Date(entry.createdAt).toLocaleString()}</time>
+                  </div>
+                </header>
                 <p>{entry.text}</p>
               </article>
             ))}

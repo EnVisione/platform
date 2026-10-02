@@ -56,7 +56,13 @@ const applicationDatabase = config.applications
   : undefined;
 const minecraft = minecraftRegistry(store);
 const applications = applicationDatabase
-  ? applicationService(config, applicationDatabase.store, fetch, minecraft.get)
+  ? applicationService(
+      config,
+      applicationDatabase.store,
+      fetch,
+      minecraft.get,
+      (id) => store.get("user", id)?.avatar,
+    )
   : undefined;
 const rolePolicy = rolePermissions(config, store);
 const discord = discordClient(config, store, fetch, rolePolicy.apply);

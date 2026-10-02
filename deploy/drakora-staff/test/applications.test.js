@@ -39,6 +39,7 @@ function setup(
   fetcher = async () => new Response(null, { status: 404 }),
   getMinecraftLink,
   settings = config,
+  getStaffAvatar,
 ) {
   const database = openStore(":memory:", randomBytes(32).toString("base64"));
   const service = applicationService(
@@ -46,6 +47,7 @@ function setup(
     database.store,
     fetcher,
     getMinecraftLink,
+    getStaffAvatar,
   );
   t.after(async () => {
     await service.close();
@@ -423,6 +425,47 @@ test("unrecognized Discord roles never expose a stored staff Minecraft link", (t
   service.connect("session", { id: "123", roles: [] });
   assert.equal(service.view("session").linkedMinecraft, null);
   assert.equal(service.view("session").answers.ign, undefined);
+});
+test("feedback uses trusted Discord avatars and restores legacy authors from cached profiles", async (t) => {
+  const profiles = new Map();
+  const { service, store } = setup(t, undefined, undefined, config, (id) =>
+    profiles.get(id),
+  );
+  service.patch("session", { role: "community", answers: answers() });
+  const { id } = await service.submit("session");
+  const author = {
+    ...reviewer(),
+    avatar: "https://cdn.discordapp.com/embed/avatars/0.png",
+  };
+  const saved = service.addComment(
+    id,
+    author,
+    "I know this player from the server.",
+  );
+  assert.equal(saved.comments[0].author.avatar, author.avatar);
+  assert.equal(
+    store.get("application", id).comments[0].author.avatar,
+    author.avatar,
+  );
+  profiles.set(author.id, "https://cdn.discordapp.com/embed/avatars/1.png");
+  assert.equal(
+    service.get(id).comments[0].author.avatar,
+    profiles.get(author.id),
+  );
+  const legacy = store.get("application", id);
+  delete legacy.comments[0].author.avatar;
+  store.set("application", id, legacy, Number.MAX_SAFE_INTEGER);
+  assert.equal(
+    service.get(id).comments[0].author.avatar,
+    profiles.get(author.id),
+  );
+  assert.equal(
+    store.get("application", id).comments[0].author.avatar,
+    undefined,
+  );
+  profiles.clear();
+  assert.equal(service.get(id).comments[0].author.avatar, null);
+  assert.equal(service.get(id).comments[0].author.name, author.name);
 });
 test("Jr Moderator and higher can leave feedback but only Manager and Founder can make a final decision", async (t) => {
   const { service } = setup(t);

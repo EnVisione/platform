@@ -52,6 +52,7 @@ export function applicationService(
   store,
   fetcher = fetch,
   getMinecraftLink = () => undefined,
+  getStaffAvatar = () => undefined,
 ) {
   const notifications = applicationNotifications(config, store, fetcher);
   const forms = applicationForms(config, store);
@@ -599,7 +600,7 @@ export function applicationService(
       record.comments.push({
         id: randomUUID(),
         text: comment,
-        author: { id: user.id, name: user.name },
+        author: { id: user.id, name: user.name, avatar: user.avatar ?? null },
         createdAt: Date.now(),
       });
       store.set("application", id, record, permanent);
@@ -610,6 +611,14 @@ export function applicationService(
     return record
       ? {
           ...record,
+          comments: (record.comments ?? []).map((entry) => ({
+            ...entry,
+            author: {
+              ...entry.author,
+              avatar:
+                getStaffAvatar(entry.author.id) ?? entry.author.avatar ?? null,
+            },
+          })),
           emailEnabled: Boolean(config.applications.smtp),
           notifications: notifications.status(record.id),
         }
