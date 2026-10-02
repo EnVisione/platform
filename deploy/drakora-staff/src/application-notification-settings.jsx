@@ -6,6 +6,7 @@ export function NotificationSettings({
   preference,
   email,
   emailAvailable,
+  emailEnabled,
   onChange,
 }) {
   return (
@@ -49,9 +50,11 @@ export function NotificationSettings({
               {linked ? "Email · no Discord updates" : "Contact email"}
             </strong>
             <small>
-              Automatic email is not available yet. Your email is saved
-              privately so staff can contact you manually. Review updates remain
-              available on this receipt in this browser for 7 days.
+              {emailEnabled
+                ? "We will email your submission confirmation and review updates. Check your spam folder if an update does not arrive."
+                : "Automatic email is not available yet. Your email is saved privately so staff can contact you manually."}{" "}
+              Review updates remain available on this receipt in this browser
+              for 7 days.
             </small>
           </span>
         </label>
@@ -103,9 +106,11 @@ export function NotificationDeliveries({ notifications = [] }) {
               : update.pending
                 ? update.route === "private"
                   ? "Private channel update queued"
-                  : "Discord update queued"
+                  : update.route === "email"
+                    ? "Email update queued"
+                    : "Discord update queued"
                 : update.sentAt
-                  ? `${update.route === "private" ? "Sent in private channel" : "Sent by DM"} · ${new Date(update.sentAt).toLocaleString()}`
+                  ? `${update.route === "private" ? "Sent in private channel" : update.route === "email" ? "Accepted by email service" : "Sent by DM"} · ${new Date(update.sentAt).toLocaleString()}`
                   : update.reason === "fallback_join_required"
                     ? "Could not deliver. Join the main Drakora server or contact staff by email."
                     : "Could not deliver. Staff can follow up using the contact email."}

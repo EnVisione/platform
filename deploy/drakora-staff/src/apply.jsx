@@ -459,7 +459,9 @@ export function PublicApplication() {
                 </p>
                 <p className="apply-muted">
                   {receipt.notificationPreference === "email"
-                    ? "You chose email contact. Automatic email sending is awaiting setup; staff can use your saved address manually."
+                    ? receipt.emailEnabled
+                      ? "Watch for an email confirmation and review updates. Check your spam folder too."
+                      : "You chose email contact. Automatic email sending is awaiting setup; staff can use your saved address manually."
                     : "Watch for a Discord DM. If DMs are blocked, check your private update channel in Drakora."}
                 </p>
               </div>
@@ -493,6 +495,7 @@ export function PublicApplication() {
                   <summary>Change notification preferences</summary>
                   <form onSubmit={saveNotifications}>
                     <NotificationSettings
+                      emailEnabled={receipt.emailEnabled}
                       linked={receipt.discordLinked}
                       preference={
                         answers.notificationPreference ??
@@ -818,6 +821,7 @@ export function PublicApplication() {
                       </>
                     )}
                     <NotificationSettings
+                      emailEnabled={draft.emailEnabled}
                       linked={Boolean(draft.discord)}
                       preference={notificationPreference}
                       email={answers.contactEmail}

@@ -1,6 +1,7 @@
 import { applicationChannels } from "./application-channels.js";
 import { hash } from "./store.js";
 import { applicationRoles } from "../shared/application-form.js";
+import { applicationMail } from "./application-mail.js";
 
 const permanent = Number.MAX_SAFE_INTEGER;
 const events = ["received", "reviewing", "approved", "denied"];
@@ -26,11 +27,17 @@ function priority(pending) {
   );
 }
 
-export function applicationNotifications(config, store, fetcher) {
+export function applicationNotifications(
+  config,
+  store,
+  fetcher,
+  mailer = applicationMail(config),
+) {
   let timer;
   let running;
   let closed = false;
   let offset = 0;
+  let emailOffset = 0;
   const fallback = applicationChannels(config, store, request);
 
   function queueStaff(record, event = "received") {
@@ -132,6 +139,7 @@ export function applicationNotifications(config, store, fetcher) {
   }
   function queueEmail(record, event, payload) {
     const key = keyFor(record.id, event);
+    if (store.get("application-dm-delivery", key)?.sentAt) return;
     store.set(
       "application-email-notification",
       key,
@@ -141,7 +149,8 @@ export function applicationNotifications(config, store, fetcher) {
         recipient: record.contactEmail,
         queuedAt: Date.now(),
         payload,
-        awaitingSetup: true,
+        attempts: 0,
+        nextAt: Date.now(),
       },
       permanent,
     );
@@ -194,7 +203,8 @@ export function applicationNotifications(config, store, fetcher) {
           {
             event,
             route: "email",
-            awaitingSetup: true,
+            awaitingSetup: !mailer,
+            pending: Boolean(mailer),
             queuedAt: email.queuedAt,
           },
         ];
@@ -299,8 +309,16 @@ export function applicationNotifications(config, store, fetcher) {
     };
   }
   function applicantUpdate(record, event) {
-    if (notificationMode(record) === "email")
-      return "Email selected. Automatic email is awaiting SMTP setup; follow up manually using the contact email.";
+    if (notificationMode(record) === "email") {
+      const update = status(record.id).find((update) => update.event === event);
+      if (update?.sentAt)
+        return "Applicant update accepted by the email service.";
+      if (update?.failedAt)
+        return "Could not send the applicant email. Use the contact email to follow up.";
+      return mailer
+        ? "Applicant email queued for delivery."
+        : "Email selected. Automatic email is awaiting SMTP setup; follow up manually using the contact email.";
+    }
     const pending = store.get(
       "application-notification",
       keyFor(record.id, event),
@@ -321,7 +339,85 @@ export function applicationNotifications(config, store, fetcher) {
       return "Could not deliver the applicant's Discord update. Use the contact details to follow up.";
     return "Applicant update is not scheduled.";
   }
+  async function deliverEmail() {
+    if (!mailer) return;
+    const page = store.page("application-email-notification", 20, emailOffset);
+    emailOffset = emailOffset + 20 < page.total ? emailOffset + 20 : 0;
+    for (const pending of page.items.sort(
+      (a, b) => priority(a) - priority(b),
+    )) {
+      if (closed || pending.nextAt > Date.now()) continue;
+      const key = keyFor(pending.id, pending.event);
+      const record = store.get("application", pending.id);
+      if (
+        !record ||
+        notificationMode(record) !== "email" ||
+        store.get("application-dm-delivery", key)?.sentAt
+      ) {
+        store.delete("application-email-notification", key);
+        continue;
+      }
+      if (
+        events
+          .slice(0, events.indexOf(pending.event))
+          .some((event) =>
+            store.get(
+              "application-email-notification",
+              keyFor(record.id, event),
+            ),
+          )
+      )
+        continue;
+      try {
+        const result = await mailer.send(record, pending.event);
+        if (
+          !result.accepted?.some(
+            (address) =>
+              address.toLowerCase() === record.contactEmail.toLowerCase(),
+          )
+        )
+          throw Object.assign(new Error("Recipient not accepted"), {
+            responseCode: 550,
+          });
+        store.transaction(() => {
+          store.set(
+            "application-dm-delivery",
+            key,
+            { route: "email", messageId: result.messageId, sentAt: Date.now() },
+            permanent,
+          );
+          store.delete("application-email-notification", key);
+        });
+      } catch (error) {
+        pending.attempts = (pending.attempts ?? 0) + 1;
+        if (
+          pending.attempts >= 8 ||
+          (error.responseCode >= 500 && error.code !== "EAUTH")
+        ) {
+          store.transaction(() => {
+            store.set(
+              "application-dm-delivery",
+              key,
+              {
+                route: "email",
+                failedAt: Date.now(),
+                reason: "email_delivery_failed",
+              },
+              permanent,
+            );
+            store.delete("application-email-notification", key);
+          });
+          console.error("Application email could not be sent:", key);
+        } else {
+          pending.nextAt =
+            Date.now() + Math.min(3600000, 30000 * 2 ** pending.attempts);
+          store.set("application-email-notification", key, pending, permanent);
+        }
+      }
+    }
+  }
   async function deliver() {
+    await deliverEmail();
     if (store.get("application-discord-limit", "pause")) return;
     const page = store.page("application-notification", 20, offset);
     offset = offset + 20 < page.total ? offset + 20 : 0;
@@ -529,6 +625,7 @@ export function applicationNotifications(config, store, fetcher) {
       closed = true;
       clearInterval(timer);
       await running;
+      mailer?.close();
     },
   };
 }

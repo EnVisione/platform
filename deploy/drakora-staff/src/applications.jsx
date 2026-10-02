@@ -560,7 +560,9 @@ function ApplicationReviews({ csrf, canDecide }) {
             <h3 id="application-dm-title">Applicant updates</h3>
             <p>
               {data.notificationPreference === "email" || !data.discord
-                ? "Email contact selected. Automatic sending is awaiting SMTP setup. Use the contact email to follow up manually."
+                ? data.emailEnabled
+                  ? "Email updates are selected. Delivery status shows when the mail service accepted each update. Refresh to see changes."
+                  : "Email contact selected. Automatic sending is awaiting SMTP setup. Use the contact email to follow up manually."
                 : "Discord DMs are preferred. Blocked DMs fall back to a private channel in the main Drakora server. Refresh to see delivery updates."}
             </p>
             <NotificationDeliveries notifications={data.notifications} />

@@ -106,6 +106,7 @@ export function applicationService(
       const record = store.get("application", draft.submittedId);
       return {
         submitted: {
+          emailEnabled: Boolean(config.applications.smtp),
           id: draft.submittedId,
           role: applicationRoles[draft.role].label,
           name: record.answers.displayName,
@@ -127,6 +128,7 @@ export function applicationService(
     const linked = linkedMinecraft(draft);
     return {
       id: draft.id,
+      emailEnabled: Boolean(config.applications.smtp),
       questionnaire: {
         version: draft.questionnaireVersion,
         forms: Object.fromEntries(
@@ -610,7 +612,11 @@ export function applicationService(
   }
   function applicationView(record) {
     return record
-      ? { ...record, notifications: notifications.status(record.id) }
+      ? {
+          ...record,
+          emailEnabled: Boolean(config.applications.smtp),
+          notifications: notifications.status(record.id),
+        }
       : undefined;
   }
   function saveStatus(record, event) {

@@ -140,6 +140,33 @@ export function validateConfig(config) {
   }
   if (config.applications) {
     const settings = config.applications;
+    if (settings.smtp !== undefined) {
+      const smtp = settings.smtp;
+      const address = (value) =>
+        typeof value === "string" &&
+        value.length <= 254 &&
+        /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(
+          value,
+        );
+      if (
+        !smtp ||
+        typeof smtp.socketPath !== "string" ||
+        !smtp.socketPath.startsWith("/") ||
+        smtp.socketPath.includes("\0") ||
+        typeof smtp.user !== "string" ||
+        !smtp.user ||
+        /[\r\n\0]/.test(smtp.user) ||
+        typeof smtp.password !== "string" ||
+        !smtp.password ||
+        !address(smtp.from) ||
+        (smtp.replyTo !== undefined && !address(smtp.replyTo)) ||
+        typeof smtp.ca !== "string" ||
+        !smtp.ca.includes("-----BEGIN CERTIFICATE-----")
+      )
+        throw new Error(
+          "Configure the private SMTP socket, Bridge credentials, sender address, and trusted certificate",
+        );
+    }
     const origin = new URL(settings.publicOrigin);
     if (
       origin.protocol !== "https:" ||
