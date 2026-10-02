@@ -89,6 +89,8 @@ For a live installation, verify a user with each access combination, the Huly Of
 
 ## Application storage and delivery
 
+Application sign-out removes the draft's linked Discord identity and confirmation and persists a marker requiring fresh Discord authorization on reconnection. The application OAuth challenge carries that preference, so an existing staff session cannot silently reconnect the account just disconnected. The marker clears after a successful new connection. Draft answers, staff sessions, and Huly sessions are preserved.
+
 When configured, applications use a separate encrypted SQLite store mounted at `/applications`. Records include the submitted answers, questionnaire version, assigned scenario, contact email, optional Discord identity snapshot, and an unverified Minecraft name and resolved profile UUID. Roles used to determine available application types are read from Discord identity responses, never accepted from the form. No Discord bio or applicant OAuth access token is retained. Future network activity fields remain empty until a server integration supplies evidence.
 
 Registered staff who connect Discord receive their Minecraft name from the panel registry under their verified Discord ID. The form requires confirmation of that exact name. Selecting an incorrect name directs them to panel Settings for a change request. A pending change blocks submission until Founder or Manager approval or rejection. An approved name change invalidates the previous confirmation. The server rejects attempts to substitute another name and rechecks the linked name after profile lookup before committing the application. Ordinary applicants without an active staff rank and registered link still enter their name manually.

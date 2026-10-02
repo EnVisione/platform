@@ -457,9 +457,13 @@ app.get("/auth/discord", async (req, res) => {
   const state = newToken();
   const next = safeNext(req.query.next);
   if (req.query.purpose === "application") {
-    if (!applications?.getChallenge(req.query.challenge))
-      throw new AuthError("invalid_login_state");
-    if (req.session.userId && req.session.until > Date.now()) {
+    const challenge = applications?.getChallenge(req.query.challenge);
+    if (!challenge) throw new AuthError("invalid_login_state");
+    if (
+      challenge.useStaffSession !== false &&
+      req.session.userId &&
+      req.session.until > Date.now()
+    ) {
       const user = await discord.check(req.session.userId, true);
       return res.redirect(
         applications.handoff(req.query.challenge, {

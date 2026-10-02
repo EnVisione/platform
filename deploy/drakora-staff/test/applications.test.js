@@ -254,6 +254,24 @@ test("only applicants without Discord must answer the final communication questi
   assert.equal(connected.answers.discordWilling, undefined);
   assert.equal(connected.discord.id, "123");
 });
+test("signing out of an application preserves answers and requires a fresh Discord connection", (t) => {
+  const { service } = setup(t);
+  const first = service.challenge("session");
+  assert.equal(service.getChallenge(first).useStaffSession, true);
+  connectedDraft(service);
+  const disconnected = service.disconnect("session");
+  assert.equal(disconnected.discord, null);
+  assert.equal(disconnected.answers.displayName, "Application fixture");
+  assert.equal(disconnected.answers.discordConfirmed, undefined);
+  const reconnect = service.challenge("session");
+  assert.equal(service.getChallenge(reconnect).useStaffSession, false);
+  service.connect("session", { id: "456", name: "Other applicant", roles: [] });
+  assert.equal(service.view("session").discord.id, "456");
+  assert.equal(
+    service.getChallenge(service.challenge("session")).useStaffSession,
+    true,
+  );
+});
 test("one of twenty scenarios stays fixed and cannot be supplied by the applicant", (t) => {
   const { service } = setup(t);
   assert.equal(applicationScenarios.community.length, 20);

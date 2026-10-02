@@ -437,7 +437,17 @@ export function PublicApplication() {
                         your Discord account.
                       </p>
                       {draft.discord ? (
-                        <span>Connected as @{draft.discord.username}</span>
+                        <>
+                          <p>Connected as @{draft.discord.username}</p>
+                          <button
+                            className="apply-link"
+                            type="button"
+                            onClick={disconnect}
+                            disabled={busy}
+                          >
+                            Not you? Sign out
+                          </button>
+                        </>
                       ) : (
                         <button type="button" onClick={connect} disabled={busy}>
                           Connect Discord

@@ -215,6 +215,7 @@ export function applicationService(
     if (draft.submittedId)
       throw new AuthError("application_already_submitted", 409);
     draft.identity = identity;
+    delete draft.discordSignedOut;
     delete draft.answers.discordConfirmed;
     delete draft.answers.minecraftConfirmed;
     delete draft.answers.minecraftConfirmedName;
@@ -229,6 +230,7 @@ export function applicationService(
     if (draft.submittedId)
       throw new AuthError("application_already_submitted", 409);
     delete draft.identity;
+    draft.discordSignedOut = true;
     delete draft.answers.discordConfirmed;
     write(sessionId, draft);
     return view(sessionId);
@@ -253,7 +255,7 @@ export function applicationService(
     store.set(
       "application-oauth",
       hash(value),
-      { sessionId },
+      { sessionId, useStaffSession: draft.discordSignedOut !== true },
       Date.now() + 600000,
     );
     return value;
