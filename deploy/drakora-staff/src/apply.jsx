@@ -27,7 +27,7 @@ const timezoneOptions = [
       : [Intl.DateTimeFormat().resolvedOptions().timeZone]),
   ]),
 ];
-const stepKey = "drakora.application.step";
+const stepKey = "drakora.application.step.v2";
 function storedStep() {
   try {
     return Math.max(0, Number(sessionStorage.getItem(stepKey)) || 0);
@@ -139,8 +139,8 @@ export function PublicApplication() {
   }
   const questions = questionList(draft?.role, answers.communities ?? []);
   const stages = [
-    "role",
     "name",
+    "role",
     "ign",
     "discord",
     "details",
@@ -177,7 +177,7 @@ export function PublicApplication() {
     try {
       const data = await save({ role });
       setDraft((old) => ({ ...old, ...data }));
-      setStep(1);
+      setStep(stages.indexOf("ign"));
     } catch (failure) {
       setError(notices[failure.message] || notices.service_unavailable);
     } finally {
@@ -185,12 +185,6 @@ export function PublicApplication() {
     }
   }
   async function connect() {
-    if (!answers.displayName?.trim()) {
-      setError(
-        "Please tell us what we should call you before connecting Discord.",
-      );
-      return;
-    }
     setBusy(true);
     setError("");
     try {
@@ -218,6 +212,10 @@ export function PublicApplication() {
   async function next(event) {
     event.preventDefault();
     setError("");
+    if (current === "name" && !answers.displayName?.trim()) {
+      setError("Please tell us what we should call you before continuing.");
+      return;
+    }
     if (current === "communities" && !answers.communities?.length) {
       setError("Choose at least one community where you are active.");
       return;
@@ -393,11 +391,7 @@ export function PublicApplication() {
                       {draft.discord ? (
                         <span>Connected as @{draft.discord.username}</span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={connect}
-                          disabled={busy || !answers.displayName?.trim()}
-                        >
+                        <button type="button" onClick={connect} disabled={busy}>
                           Connect Discord
                         </button>
                       )}
@@ -738,8 +732,8 @@ export function PublicApplication() {
                     )}
                   </>
                 )}
-                {current !== "role" && (
-                  <div className="apply-actions">
+                <div className="apply-actions">
+                  {index > 0 && (
                     <button
                       type="button"
                       className="apply-secondary"
@@ -751,6 +745,8 @@ export function PublicApplication() {
                     >
                       Back
                     </button>
+                  )}
+                  {current !== "role" && (
                     <button
                       className="apply-button"
                       type="submit"
@@ -762,8 +758,8 @@ export function PublicApplication() {
                           ? "Submit application"
                           : "Continue"}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </form>
               <p className="apply-save" role="status">
                 {saveState ||

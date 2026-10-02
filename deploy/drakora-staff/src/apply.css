@@ -135,6 +135,9 @@
   margin-top: 32px;
   flex-wrap: wrap;
 }
+.apply-actions button[type="submit"] {
+  margin-left: auto;
+}
 .apply-card button,
 .staff-applications button {
   font: inherit;

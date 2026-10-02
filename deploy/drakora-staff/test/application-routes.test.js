@@ -58,6 +58,23 @@ test("public form mutations require its browser session, CSRF token, and origin"
     Origin: config.applications.publicOrigin,
     "X-CSRF-Token": csrf,
   };
+  const connect = (overrides = {}) =>
+    fetch(`${origin}/apply/api/discord/start`, {
+      method: "POST",
+      headers: { ...headers, ...overrides },
+      body: "{}",
+    });
+  assert.equal((await connect({ "X-CSRF-Token": "wrong-token" })).status, 403);
+  assert.equal((await connect({ Cookie: "" })).status, 403);
+  const login = await connect();
+  assert.equal(login.status, 200);
+  const destination = new URL((await login.json()).url);
+  assert.equal(destination.origin, config.staffOrigin);
+  assert.equal(destination.pathname, "/auth/discord");
+  assert.equal(destination.searchParams.get("purpose"), "application");
+  assert.ok(
+    applications.getChallenge(destination.searchParams.get("challenge")),
+  );
   const request = (overrides) =>
     fetch(`${origin}/apply/api/draft`, {
       method: "PATCH",

@@ -70,7 +70,33 @@ test("application roles follow verified Discord rank IDs", () => {
   ]);
   assert.deepEqual(availableApplicationRoles(config, { roles: ["51"] }), [
     "community",
+    "artist",
+    "developer",
   ]);
+  assert.deepEqual(availableApplicationRoles(config, { roles: ["52"] }), [
+    "community",
+    "builder",
+    "developer",
+  ]);
+  assert.deepEqual(availableApplicationRoles(config, { roles: ["25"] }), [
+    "community",
+    "builder",
+    "artist",
+  ]);
+  assert.deepEqual(availableApplicationRoles(config, { roles: ["51", "52"] }), [
+    "community",
+    "developer",
+  ]);
+  for (const id of ["20", "21", "22", "23", "24"])
+    assert.deepEqual(availableApplicationRoles(config, { roles: [id] }), [
+      "builder",
+      "artist",
+      "developer",
+    ]);
+  assert.deepEqual(
+    availableApplicationRoles(config, { roles: ["20", "51", "52", "25"] }),
+    [],
+  );
   for (const [id, expected] of [
     ["20", true],
     ["21", true],
@@ -93,6 +119,39 @@ test("application roles follow verified Discord rank IDs", () => {
       false,
     );
   }
+});
+test("Discord can connect before a name or role, while a preferred name remains required", async (t) => {
+  const { service } = setup(t);
+  const challenge = service.challenge("session");
+  const url = service.handoff(challenge, {
+    id: "123",
+    username: "fixture",
+    name: "Discord Name",
+    avatar: "https://cdn.discordapp.com/test",
+    email: "fixture@example.com",
+    roles: ["51"],
+  });
+  service.complete("session", new URL(url).searchParams.get("code"));
+  const draft = service.view("session");
+  assert.equal(draft.role, null);
+  assert.equal(draft.answers.displayName, undefined);
+  assert.equal(draft.discord.name, "Discord Name");
+  assert.deepEqual(draft.roles, ["community", "artist", "developer"]);
+  assert.throws(
+    () => service.patch("session", { role: "builder" }),
+    /application_role_unavailable/,
+  );
+  service.patch("session", {
+    role: "artist",
+    answers: { ...answers("artist"), displayName: "", discordConfirmed: true },
+  });
+  assert.ok((await service.submit("session")).errors.displayName);
+  service.patch("session", { answers: { displayName: "Preferred name" } });
+  assert.ok((await service.submit("session")).id);
+  assert.throws(
+    () => service.challenge("session"),
+    /application_already_submitted/,
+  );
 });
 test("one of twenty scenarios stays fixed and cannot be supplied by the applicant", (t) => {
   const { service } = setup(t);

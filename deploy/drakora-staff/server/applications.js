@@ -58,12 +58,9 @@ export function availableApplicationRoles(config, identity) {
   const held = Object.entries(config.applications.specialistRoles)
     .filter(([, id]) => ids.has(id))
     .map(([role]) => role);
-  if (!community && !held.length) return Object.keys(applicationRoles);
-  if (community)
-    return ["builder", "artist", "developer"].filter(
-      (role) => !held.includes(role),
-    );
-  return ["community"];
+  return Object.keys(applicationRoles).filter((role) =>
+    role === "community" ? !community : !held.includes(role),
+  );
 }
 
 export function applicationService(config, store, fetcher = fetch) {
@@ -200,8 +197,6 @@ export function applicationService(config, store, fetcher = fetch) {
   }
   function challenge(sessionId) {
     const draft = load(sessionId);
-    if (!draft.role || !text(draft.answers.displayName))
-      throw new AuthError("application_name_required", 400);
     if (draft.submittedId)
       throw new AuthError("application_already_submitted", 409);
     const value = token();
