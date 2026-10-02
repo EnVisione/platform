@@ -612,21 +612,11 @@ function App() {
       className="workspace"
       style={{ "--accent": accent, "--accent-text": accentText(accent) }}
     >
-      <aside className="server-rail" aria-label="Server links">
-        <a className="server-icon active" href="/" aria-label="Drakora Staff">
-          <img src={logo} alt="" />
-        </a>
-        <span className="rail-divider" />
-        <a
-          className="server-icon discord-icon"
-          href="https://discord.com/channels/1554936494479642714"
-          aria-label="Open staff Discord server"
-        >
-          <DiscordIcon />
-        </a>
-      </aside>
       <aside className="sidebar">
-        <div className="sidebar-heading">Drakora Staff</div>
+        <a className="sidebar-heading" href="/">
+          <img src={logo} alt="" />
+          Drakora Staff
+        </a>
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
@@ -687,6 +677,10 @@ function App() {
       </aside>
       <div className="main-area">
         <header className="topbar">
+          <a className="mobile-brand" href="/">
+            <img src={logo} alt="" />
+            Drakora Staff
+          </a>
           <h1>
             {settingsPage
               ? "Settings"

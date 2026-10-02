@@ -24,6 +24,7 @@ const baseFields = [
   "minecraftConfirmedName",
   "discordUses",
   "discordWhy",
+  "discordWilling",
   "contactEmail",
   "pronouns",
   "age",
@@ -311,6 +312,9 @@ export function applicationService(
         errors.discordUses = "Tell us whether you use Discord.";
       if (a.discordUses === "no" && text(a.discordWhy).length < 10)
         errors.discordWhy = "Tell us why you do not use Discord.";
+      if (a.discordUses === "no" && !["yes", "no"].includes(a.discordWilling))
+        errors.discordWilling =
+          "Tell us whether you would download Discord for staff communication if approved.";
     }
     if (
       (!draft.identity?.email &&
@@ -411,11 +415,13 @@ export function applicationService(
         Object.entries(draft.answers).filter(([key]) => allowed.has(key)),
       );
       const identity = draft.identity;
+      if (identity || answers.discordUses !== "no")
+        delete answers.discordWilling;
       const record = {
         id: draft.id,
         createdAt,
         role: draft.role,
-        questionnaireVersion: 2,
+        questionnaireVersion: 3,
         status: "Received",
         answers,
         scenario: draft.scenarios[draft.role],

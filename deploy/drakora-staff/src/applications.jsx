@@ -182,6 +182,18 @@ export function StaffApplications({ csrf, canDecide }) {
               {a.discordUses}
               {a.discordWhy && ` — ${a.discordWhy}`}
             </dd>
+            {a.discordUses === "no" && (
+              <>
+                <dt>Willing to download Discord if approved</dt>
+                <dd>
+                  {a.discordWilling === "yes"
+                    ? "Yes"
+                    : a.discordWilling === "no"
+                      ? "No"
+                      : "Not asked on this application"}
+                </dd>
+              </>
+            )}
           </>
         )}
       </dl>

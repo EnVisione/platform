@@ -67,7 +67,8 @@ button:disabled {
 }
 
 .brand img,
-.server-icon img,
+.sidebar-heading img,
+.mobile-brand img,
 .loading img {
   display: block;
   object-fit: cover;
@@ -282,66 +283,8 @@ button:disabled {
   --accent: #5865f2;
   --accent-text: #fff;
   display: grid;
-  grid-template-columns: 72px 240px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100svh;
-}
-
-.server-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 0;
-  background: #1e1f22;
-}
-
-.server-icon {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  overflow: visible;
-  border-radius: 16px;
-  background: #313338;
-  color: #dbdee1;
-  transition:
-    background-color 0.15s ease,
-    border-radius 0.15s ease;
-}
-
-.server-icon:hover {
-  border-radius: 14px;
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
-.server-icon.active::before {
-  position: absolute;
-  left: -12px;
-  width: 4px;
-  height: 36px;
-  border-radius: 0 4px 4px 0;
-  background: #f2f3f5;
-  content: "";
-}
-
-.server-icon img {
-  width: 48px;
-  height: 48px;
-  border-radius: inherit;
-}
-
-.server-icon svg {
-  width: 25px;
-  height: 25px;
-}
-
-.rail-divider {
-  width: 32px;
-  height: 2px;
-  border-radius: 2px;
-  background: #35363c;
 }
 
 .sidebar {
@@ -354,11 +297,24 @@ button:disabled {
 .sidebar-heading {
   display: flex;
   align-items: center;
+  gap: 10px;
   height: 58px;
   padding: 0 18px;
   border-bottom: 1px solid #1e1f22;
   font-size: 15px;
   font-weight: 700;
+  color: inherit;
+}
+
+.sidebar-heading img,
+.mobile-brand img {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.mobile-brand {
+  display: none;
 }
 
 .nav-label {
@@ -890,21 +846,21 @@ button:disabled {
     flex-wrap: wrap;
   }
   .workspace {
-    grid-template-columns: 56px minmax(0, 1fr);
-  }
-
-  .server-icon,
-  .server-icon img {
-    width: 42px;
-    height: 42px;
-  }
-
-  .server-icon.active::before {
-    left: -7px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
     display: none;
+  }
+
+  .mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-basis: 100%;
+    color: inherit;
+    font-size: 15px;
+    font-weight: 700;
   }
 
   .topbar {

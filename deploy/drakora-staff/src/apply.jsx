@@ -147,6 +147,7 @@ export function PublicApplication() {
     setErrors((current) => ({ ...current, [key]: undefined }));
   }
   const questions = questionList(draft?.role, answers.communities ?? []);
+  const needsDiscordQuestion = !draft?.discord && answers.discordUses === "no";
   const stages = [
     "name",
     "role",
@@ -155,6 +156,7 @@ export function PublicApplication() {
     "details",
     "communities",
     ...questions.map(([key]) => key),
+    ...(needsDiscordQuestion ? ["discordWilling"] : []),
     "review",
   ];
   const index = Math.min(step, stages.length - 1);
@@ -722,6 +724,37 @@ export function PublicApplication() {
                     </label>
                   </>
                 )}
+                {current === "discordWilling" && (
+                  <>
+                    <h1 id="apply-title">Staff communication</h1>
+                    <p id="discord-willing-question">
+                      If your application is approved, are you willing to
+                      download Discord for staff communication?
+                    </p>
+                    <div
+                      className="apply-radios"
+                      role="radiogroup"
+                      aria-labelledby="discord-willing-question"
+                    >
+                      {["yes", "no"].map((value) => (
+                        <label key={value}>
+                          <input
+                            type="radio"
+                            name="discordWilling"
+                            required
+                            value={value}
+                            checked={answers.discordWilling === value}
+                            onChange={() => update("discordWilling", value)}
+                          />
+                          <span>{value === "yes" ? "Yes" : "No"}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {errors.discordWilling && (
+                      <p className="apply-error">{errors.discordWilling}</p>
+                    )}
+                  </>
+                )}
                 {current === "review" && (
                   <>
                     <h1 id="apply-title">Check your application</h1>
@@ -736,6 +769,9 @@ export function PublicApplication() {
                         ["discord", "Discord and contact"],
                         ["details", "Personal details"],
                         ["communities", "Communities"],
+                        ...(needsDiscordQuestion
+                          ? [["discordWilling", "Staff communication"]]
+                          : []),
                       ].map(([stage, label]) => (
                         <button
                           className="apply-link"
@@ -758,6 +794,18 @@ export function PublicApplication() {
                           ? `@${draft.discord.username}`
                           : "Not connected"}
                       </dd>
+                      {needsDiscordQuestion && (
+                        <>
+                          <dt>Willing to download Discord if approved</dt>
+                          <dd>
+                            {answers.discordWilling === "yes"
+                              ? "Yes"
+                              : answers.discordWilling === "no"
+                                ? "No"
+                                : "Not answered"}
+                          </dd>
+                        </>
+                      )}
                       <dt>Contact</dt>
                       <dd>
                         {draft.discord?.emailAvailable

@@ -53,6 +53,7 @@ function answers(role = "community", communities = ["prom2"]) {
     ign: "Test_Player",
     discordUses: "no",
     discordWhy: "I prefer another contact method.",
+    discordWilling: "yes",
     contactEmail: "fixture@example.com",
     pronouns: "They/them",
     age: "24",
@@ -188,6 +189,42 @@ test("Discord can connect before a name or role, while a preferred name remains 
     () => service.challenge("session"),
     /application_already_submitted/,
   );
+});
+test("only applicants without Discord must answer the final communication question", async (t) => {
+  const { service } = setup(t);
+  const incomplete = answers();
+  delete incomplete.discordWilling;
+  service.patch("without-discord", { role: "community", answers: incomplete });
+  assert.ok((await service.submit("without-discord")).errors.discordWilling);
+  service.patch("without-discord", { answers: { discordWilling: "maybe" } });
+  assert.ok((await service.submit("without-discord")).errors.discordWilling);
+  service.patch("without-discord", { answers: { discordWilling: "no" } });
+  const declined = service.get((await service.submit("without-discord")).id);
+  assert.equal(declined.answers.discordWilling, "no");
+  assert.equal(declined.status, "Received");
+  assert.equal(declined.questionnaireVersion, 3);
+
+  service.patch("uses-discord", {
+    role: "community",
+    answers: { ...incomplete, discordUses: "yes", discordWhy: "" },
+  });
+  const existing = service.get((await service.submit("uses-discord")).id);
+  assert.equal(existing.answers.discordWilling, undefined);
+
+  service.connect("connected", {
+    id: "123",
+    username: "fixture",
+    name: "Fixture",
+    email: "verified@example.com",
+    roles: [],
+  });
+  service.patch("connected", {
+    role: "community",
+    answers: { ...answers(), discordConfirmed: true },
+  });
+  const connected = service.get((await service.submit("connected")).id);
+  assert.equal(connected.answers.discordWilling, undefined);
+  assert.equal(connected.discord.id, "123");
 });
 test("one of twenty scenarios stays fixed and cannot be supplied by the applicant", (t) => {
   const { service } = setup(t);
