@@ -28,7 +28,7 @@ export const applicationRoles = {
       [
         "portfolio",
         "Show us your building work",
-        "Share portfolio links, screenshots, or videos. Explain which parts you made yourself and whether anyone else contributed.",
+        "Upload screenshots to Imgur and paste the image or album link here. You can also share portfolio or video links. Explain which parts you made yourself and whether anyone else contributed.",
       ],
       [
         "buildingStyle",
@@ -55,7 +55,7 @@ export const applicationRoles = {
       [
         "portfolio",
         "Show us your artwork",
-        "Share portfolio links or examples. Identify your own contribution, references, and any third-party or generated elements.",
+        "Upload examples to Imgur and paste the image or album link here, or share your portfolio link. Identify your own contribution, references, and any third-party or generated elements.",
       ],
       [
         "artMediums",
@@ -141,7 +141,7 @@ export const commonQuestions = [
   [
     "experienceProof",
     "Evidence or references",
-    "Optional. Upload screenshots, add public links, or explain how we could confirm your previous role or identity. Do not include passwords, private messages, or personal documents.",
+    "Optional. Upload screenshots to Imgur and share their links, add other public references, or explain how we could confirm your previous role or identity. Do not include passwords, private messages, or personal documents.",
   ],
   [
     "motivation",
@@ -164,8 +164,6 @@ const optionalQuestions = new Set(["experienceProof", "comments"]);
 export const requiredApplicationQuestion = (key) => !optionalQuestions.has(key);
 
 export const evidenceLimits = {
-  maxImages: 3,
-  maxImageBytes: 5 * 1024 * 1024,
   maxLinks: 5,
 };
 

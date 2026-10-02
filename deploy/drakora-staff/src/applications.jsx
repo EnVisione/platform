@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { applicationRoles, questionList } from "../shared/application-form.js";
 import "./apply.css";
-import { EvidenceImages, EvidenceLinks } from "./application-evidence.jsx";
+import { EvidenceLinks } from "./application-evidence.jsx";
 
 export function StaffApplications({ csrf, canDecide }) {
   const id = location.pathname.split("/")[2];
@@ -213,13 +213,7 @@ export function StaffApplications({ csrf, canDecide }) {
           {key === "scenarioAnswer" && <blockquote>{data.scenario}</blockquote>}
           <p>{a[key] || "Not provided"}</p>
           {key === "experienceProof" && (
-            <>
-              <EvidenceLinks value={a.experienceLinks} />
-              <EvidenceImages
-                images={data.evidenceImages}
-                basePath={`/api/applications/${data.id}/evidence/images`}
-              />
-            </>
+            <EvidenceLinks value={a.experienceLinks} />
           )}
         </section>
       ))}

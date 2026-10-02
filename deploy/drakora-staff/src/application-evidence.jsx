@@ -13,41 +13,6 @@ export function RequiredMark() {
   );
 }
 
-export function EvidenceImages({ images = [], basePath, onRemove, disabled }) {
-  return images.length ? (
-    <ul className="apply-evidence-images">
-      {images.map((image) => (
-        <li key={image.id}>
-          <a
-            href={`${basePath}/${image.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <img
-              src={`${basePath}/${image.id}`}
-              alt={`Evidence: ${image.name}`}
-              loading="lazy"
-            />
-            <span>{image.name}</span>
-          </a>
-          <small>{(image.size / 1024 / 1024).toFixed(2)} MB</small>
-          {onRemove && (
-            <button
-              type="button"
-              className="apply-link"
-              disabled={disabled}
-              onClick={() => onRemove(image.id)}
-              aria-label={`Remove ${image.name}`}
-            >
-              Remove image
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
-  ) : null;
-}
-
 export function EvidenceLinks({ value }) {
   const { links } = parseEvidenceLinks(value);
   return links.length ? (

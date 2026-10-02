@@ -56,15 +56,6 @@ export function openStore(path, encryptionKey) {
     delete(kind, id) {
       remove.run(kind, id);
     },
-    extendExpiration(kind, id, expires) {
-      return (
-        db
-          .prepare(
-            "UPDATE records SET expires=MAX(expires,?) WHERE kind=? AND id=? AND expires>?",
-          )
-          .run(expires, kind, id, Date.now()).changes === 1
-      );
-    },
     take(kind, id) {
       const row = this.get(kind, id);
       this.delete(kind, id);

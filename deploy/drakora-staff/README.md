@@ -45,7 +45,7 @@ The optional `todoForums` configuration links Discord forum to-do lists to Huly 
 
 The connected Discord account on the introduction screen includes a **Not you? Sign out** button. It disconnects that account from the application while preserving the draft. Reconnecting opens Discord authorization rather than automatically reusing a signed-in dashboard account. Dashboard and Huly sessions are unaffected.
 
-Required questions and fields have a red asterisk. Evidence or references remains optional and accepts explanatory text, up to five public HTTP or HTTPS links, and up to three PNG, JPEG, or WebP images of 5 MB each. Images are previewed before submission, can be removed from the draft, and are saved privately in the encrypted application database. Authorized application reviewers can open the images and links from the submission.
+Required questions and fields have a red asterisk. Portfolio and evidence questions link to Imgur for screenshot hosting. Applicants paste the image, album, portfolio, or other public reference links into their answers. Evidence or references remains optional and also accepts up to five public HTTP or HTTPS links in a separate field. Image uploads are unavailable, and the service does not download or store linked screenshots. Authorized reviewers can open evidence links from the private submission.
 
 The optional `applications` configuration serves a public form at the separate `publicOrigin` under `/apply`. Route that hostname to this service while preserving Host and HTTPS forwarding. Its root redirects to `/apply`; staff APIs and Huly are unavailable on the public hostname. Existing staff and Huly hostnames retain their authentication requirements.
 

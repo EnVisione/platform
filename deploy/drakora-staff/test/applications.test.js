@@ -17,7 +17,6 @@ import {
 import { applicationScenarios } from "../server/application-scenarios.js";
 import {
   questionList,
-  evidenceLimits,
   parseEvidenceLinks,
 } from "../shared/application-form.js";
 import { discordClient } from "../server/discord.js";
@@ -103,115 +102,6 @@ function connectedDraft(
     answers: { ...answers(role), discordConfirmed: true },
   });
 }
-const evidencePng = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/YQAAAAASUVORK5CYII=",
-  "base64",
-);
-
-test("evidence images stay private, survive submission, and cannot be changed afterward", async (t) => {
-  const { service, store } = setup(t);
-  service.patch("owner", { role: "community", answers: answers() });
-  const uploaded = service.addImage(
-    "owner",
-    evidencePng,
-    "image/png",
-    "Screenshot.png",
-  );
-  const image = uploaded.evidenceImages[0];
-  assert.equal(image.name, "Screenshot.png");
-  assert.equal(image.size, evidencePng.length);
-  assert.equal(image.data, undefined);
-  assert.equal(
-    service.draftImage("owner", image.id).data,
-    evidencePng.toString("base64"),
-  );
-  assert.throws(() => service.draftImage("stranger", image.id), {
-    code: "evidence_image_not_found",
-  });
-  assert.throws(() => service.removeImage("stranger", image.id), {
-    code: "evidence_image_not_found",
-  });
-  const { id } = await service.submit("owner");
-  assert.ok(id);
-  assert.deepEqual(service.get(id).evidenceImages, [image]);
-  assert.throws(() => service.applicationImage(id, image.id, reviewer("27")), {
-    code: "application_review_role_required",
-  });
-  assert.equal(
-    service.applicationImage(id, image.id, reviewer("30")).name,
-    image.name,
-  );
-  assert.throws(
-    () => service.applicationImage("another-application", image.id, reviewer()),
-    { code: "evidence_image_not_found" },
-  );
-  assert.throws(() => service.removeImage("owner", image.id), {
-    code: "application_already_submitted",
-  });
-  assert.throws(
-    () => service.addImage("owner", evidencePng, "image/png", "Another.png"),
-    { code: "application_already_submitted" },
-  );
-  const future = Date.now() + 8 * 86400000;
-  t.mock.method(Date, "now", () => future);
-  store.clean();
-  assert.equal(
-    service.applicationImage(id, image.id, reviewer()).data,
-    evidencePng.toString("base64"),
-  );
-});
-
-test("image uploads enforce format, size, count, removal, and draft expiry", (t) => {
-  const { service, store } = setup(t);
-  assert.throws(
-    () =>
-      service.addImage(
-        "owner",
-        Buffer.from("<svg></svg>"),
-        "image/png",
-        "fake.png",
-      ),
-    { code: "invalid_evidence_image" },
-  );
-  assert.throws(
-    () => service.addImage("owner", evidencePng, "image/jpeg", "fake.jpg"),
-    { code: "invalid_evidence_image" },
-  );
-  assert.throws(
-    () =>
-      service.addImage(
-        "owner",
-        Buffer.alloc(evidenceLimits.maxImageBytes + 1),
-        "image/png",
-        "large.png",
-      ),
-    { code: "evidence_image_too_large" },
-  );
-  for (let i = 0; i < 3; i++)
-    service.addImage("owner", evidencePng, "image/png", `Evidence ${i}.png`);
-  assert.throws(
-    () => service.addImage("owner", evidencePng, "image/png", "fourth.png"),
-    { code: "evidence_images_full" },
-  );
-  const removed = service.view("owner").evidenceImages[0];
-  assert.equal(
-    service.removeImage("owner", removed.id).evidenceImages.length,
-    2,
-  );
-  assert.equal(store.get("application-image", removed.id), undefined);
-  service.addImage("owner", evidencePng, "image/png", "replacement.png");
-  const remaining = service.view("owner").evidenceImages[0];
-  const start = Date.now();
-  t.mock.method(Date, "now", () => start + 6 * 86400000);
-  service.patch("owner", { answers: { displayName: "Still drafting" } });
-  t.mock.method(Date, "now", () => start + 8 * 86400000);
-  assert.equal(service.draftImage("owner", remaining.id).name, remaining.name);
-  t.mock.method(Date, "now", () => start + 14 * 86400000);
-  store.clean();
-  assert.equal(store.get("application-image", remaining.id), undefined);
-  assert.deepEqual(service.view("owner").evidenceImages, []);
-});
-
 test("evidence accepts safe public links and no evidence is required to submit", async (t) => {
   const { service } = setup(t);
   const safe = "https://example.com/portfolio\nhttp://example.org/reference";
@@ -235,7 +125,19 @@ test("evidence accepts safe public links and no evidence is required to submit",
   const result = await service.submit("owner");
   assert.ok(result.id);
   assert.equal(service.get(result.id).answers.experienceLinks, safe);
-  assert.deepEqual(service.get(result.id).evidenceImages, []);
+  assert.equal(service.get(result.id).evidenceImages, undefined);
+});
+test("application patches reject image uploads and attachment metadata", (t) => {
+  const { service, store } = setup(t);
+  assert.throws(() => service.patch("session", { evidenceImages: [] }), {
+    code: "invalid_request",
+  });
+  assert.throws(
+    () =>
+      service.patch("session", { answers: { evidenceImages: "image data" } }),
+    { code: "invalid_request" },
+  );
+  assert.deepEqual(store.entries("application-image"), []);
 });
 test("application roles follow verified Discord rank IDs", () => {
   assert.deepEqual(availableApplicationRoles(config), [
@@ -368,7 +270,7 @@ test("only applicants without Discord must answer the final communication questi
   const declined = service.get((await service.submit("without-discord")).id);
   assert.equal(declined.answers.discordWilling, "no");
   assert.equal(declined.status, "Received");
-  assert.equal(declined.questionnaireVersion, 4);
+  assert.equal(declined.questionnaireVersion, 5);
 
   service.patch("uses-discord", {
     role: "community",

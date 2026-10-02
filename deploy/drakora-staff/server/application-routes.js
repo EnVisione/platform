@@ -2,8 +2,6 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { AuthError } from "./discord.js";
-import { evidenceLimits } from "../shared/application-form.js";
-import { sendEvidenceImage } from "./application-evidence.js";
 
 export function applicationRouter(config, applications, dist) {
   const router = express.Router();
@@ -45,52 +43,6 @@ export function applicationRouter(config, applications, dist) {
     mutation(req);
     res.json(applications.restart(req.sessionID));
   });
-  router.post(
-    "/apply/api/evidence/images",
-    rateLimit({
-      windowMs: 3600000,
-      limit: 15,
-      legacyHeaders: false,
-      handler: (_req, res) =>
-        res.status(429).json({ error: "evidence_upload_rate_limited" }),
-    }),
-    (req, _res, next) => {
-      mutation(req);
-      next();
-    },
-    express.raw({
-      type: ["image/png", "image/jpeg", "image/webp"],
-      limit: evidenceLimits.maxImageBytes,
-    }),
-    (req, res) => {
-      let filename;
-      try {
-        filename = decodeURIComponent(req.get("X-File-Name") ?? "");
-      } catch {
-        throw new AuthError("invalid_request", 400);
-      }
-      res
-        .status(201)
-        .json(
-          applications.addImage(
-            req.sessionID,
-            req.body,
-            req.get("Content-Type"),
-            filename,
-          ),
-        );
-    },
-  );
-  router.delete("/apply/api/evidence/images/:id", (req, res) => {
-    mutation(req);
-    res.json(applications.removeImage(req.sessionID, req.params.id));
-  });
-  router.get("/apply/api/evidence/images/:id", (req, res) =>
-    sendEvidenceImage(
-      res,
-      applications.draftImage(req.sessionID, req.params.id),
-    ),
-  );
   router.post("/apply/api/discord/disconnect", (req, res) => {
     mutation(req);
     res.json(applications.disconnect(req.sessionID));
@@ -156,12 +108,7 @@ export function applicationRouter(config, applications, dist) {
   router.use((_req, res) => res.status(404).send("Page not found."));
   router.use((error, req, res, _next) => {
     const code =
-      error instanceof AuthError
-        ? error.code
-        : error.type === "entity.too.large" &&
-            req.path === "/apply/api/evidence/images"
-          ? "evidence_image_too_large"
-          : "service_unavailable";
+      error instanceof AuthError ? error.code : "service_unavailable";
     const status =
       error instanceof AuthError
         ? error.status

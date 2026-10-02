@@ -105,41 +105,13 @@
 .apply-field .apply-evidence-link-input {
   min-height: 100px;
 }
-.apply-evidence-images {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
-  padding: 0;
-  list-style: none;
-}
-.apply-evidence-images li {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-  background: #2b2d31;
-  border: 1px solid #50535c;
-  border-radius: 8px;
-}
-.apply-evidence-images a,
-.apply-evidence-links a {
-  color: #a8b0ff;
-  overflow-wrap: anywhere;
-}
-.apply-evidence-images img {
-  width: 100%;
-  height: 130px;
-  object-fit: contain;
-  display: block;
-  margin-bottom: 8px;
-}
-.apply-evidence-images small {
-  color: #b5bac1;
-}
 .apply-evidence-links {
   padding-left: 20px;
   line-height: 1.7;
+}
+.apply-evidence-links a {
+  color: #a8b0ff;
+  overflow-wrap: anywhere;
 }
 .apply-roles {
   display: grid;

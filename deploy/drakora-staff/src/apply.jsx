@@ -4,14 +4,9 @@ import {
   communityOptions,
   questionList,
   requiredApplicationQuestion,
-  evidenceLimits,
   parseEvidenceLinks,
 } from "../shared/application-form.js";
-import {
-  RequiredMark,
-  EvidenceImages,
-  EvidenceLinks,
-} from "./application-evidence.jsx";
+import { RequiredMark, EvidenceLinks } from "./application-evidence.jsx";
 import logo from "./assets/drakora-logo.png";
 import "./apply.css";
 
@@ -28,15 +23,6 @@ const notices = {
     "Your Discord roles changed which applications are available. Choose another role.",
   application_minecraft_link_changed:
     "Your linked Minecraft name changed. Refresh this page and confirm the current name.",
-  invalid_evidence_image:
-    "Choose a PNG, JPEG, or WebP image. Other files are not supported.",
-  evidence_image_too_large: "Each image must be 5 MB or smaller.",
-  evidence_images_full:
-    "You can upload up to 3 images. Remove one before adding another.",
-  evidence_image_expired:
-    "An evidence image expired. Refresh the page and upload it again.",
-  evidence_upload_rate_limited:
-    "Too many image uploads. Please try again in an hour.",
 };
 const timezoneOptions = [
   ...new Set([
@@ -69,19 +55,13 @@ export function PublicApplication() {
   const changed = useRef(false);
   const csrf = useRef("");
   async function request(path, method = "GET", body) {
-    const image = body instanceof File;
     const response = await fetch(`/apply/api/${path}`, {
       method,
       headers: {
-        "Content-Type": image ? body.type : "application/json",
-        ...(image ? { "X-File-Name": encodeURIComponent(body.name) } : {}),
+        "Content-Type": "application/json",
         "X-CSRF-Token": csrf.current,
       },
-      body: image
-        ? body
-        : body === undefined
-          ? undefined
-          : JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await response.json();
     if (!response.ok && response.status !== 422)
@@ -239,68 +219,6 @@ export function PublicApplication() {
       update("discordConfirmed", false);
     } catch {
       setError(notices.service_unavailable);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function uploadImages(event) {
-    const files = [...event.target.files];
-    event.target.value = "";
-    if (!files.length) return;
-    setError("");
-    if (
-      files.length + (draft.evidenceImages?.length ?? 0) >
-      evidenceLimits.maxImages
-    ) {
-      setError(notices.evidence_images_full);
-      return;
-    }
-    if (files.some((file) => file.size > evidenceLimits.maxImageBytes)) {
-      setError(notices.evidence_image_too_large);
-      return;
-    }
-    if (
-      files.some(
-        (file) =>
-          !["image/png", "image/jpeg", "image/webp"].includes(file.type),
-      )
-    ) {
-      setError(notices.invalid_evidence_image);
-      return;
-    }
-    setBusy(true);
-    setSaveState("Uploading evidence images…");
-    const action = queue.current
-      .catch(() => {})
-      .then(async () => {
-        for (const file of files) {
-          const data = await request("evidence/images", "POST", file);
-          setDraft((old) => ({ ...old, evidenceImages: data.evidenceImages }));
-        }
-      });
-    queue.current = action;
-    try {
-      await action;
-      setSaveState("Evidence images saved with your draft.");
-    } catch (failure) {
-      setSaveState("");
-      setError(notices[failure.message] || notices.service_unavailable);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function removeImage(id) {
-    setBusy(true);
-    setError("");
-    const action = queue.current
-      .catch(() => {})
-      .then(() => request(`evidence/images/${id}`, "DELETE"));
-    queue.current = action;
-    try {
-      const data = await action;
-      setDraft((old) => ({ ...old, evidenceImages: data.evidenceImages }));
-    } catch (failure) {
-      setError(notices[failure.message] || notices.service_unavailable);
     } finally {
       setBusy(false);
     }
@@ -846,6 +764,22 @@ export function PublicApplication() {
                       {requiredApplicationQuestion(current) && <RequiredMark />}
                     </h1>
                     <p>{question[2]}</p>
+                    {["portfolio", "experienceProof"].includes(current) && (
+                      <>
+                        <a
+                          className="apply-button"
+                          href="https://imgur.com/upload"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open Imgur
+                        </a>
+                        <p className="apply-muted">
+                          Upload your screenshots to Imgur, then paste the image
+                          or album link here. Screenshots stay on Imgur.
+                        </p>
+                      </>
+                    )}
                     {current === "availability" &&
                       field(
                         "hoursPerWeek",
@@ -880,52 +814,25 @@ export function PublicApplication() {
                       )}
                     </label>
                     {current === "experienceProof" && (
-                      <>
-                        <label className="apply-field">
-                          <span>Public links (optional)</span>
-                          <textarea
-                            rows={3}
-                            className="apply-evidence-link-input"
-                            maxLength={6000}
-                            value={answers.experienceLinks ?? ""}
-                            onChange={(event) =>
-                              update("experienceLinks", event.target.value)
-                            }
-                            placeholder="https://example.com/your-work&#10;One link per line, up to 5 links."
-                            aria-invalid={Boolean(errors.experienceLinks)}
-                          />
-                          {errors.experienceLinks && (
-                            <small className="apply-error">
-                              {errors.experienceLinks}
-                            </small>
-                          )}
-                        </label>
-                        <label className="apply-field">
-                          <span>Upload images (optional)</span>
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            multiple
-                            onChange={uploadImages}
-                            disabled={
-                              busy ||
-                              (draft.evidenceImages?.length ?? 0) >=
-                                evidenceLimits.maxImages
-                            }
-                            aria-describedby="evidence-image-help"
-                          />
-                        </label>
-                        <p id="evidence-image-help" className="apply-muted">
-                          Up to 3 PNG, JPEG, or WebP images, 5 MB each. Images
-                          are saved privately with your application.
-                        </p>
-                        <EvidenceImages
-                          images={draft.evidenceImages}
-                          basePath="/apply/api/evidence/images"
-                          onRemove={removeImage}
-                          disabled={busy}
+                      <label className="apply-field">
+                        <span>Public links (optional)</span>
+                        <textarea
+                          rows={3}
+                          className="apply-evidence-link-input"
+                          maxLength={6000}
+                          value={answers.experienceLinks ?? ""}
+                          onChange={(event) =>
+                            update("experienceLinks", event.target.value)
+                          }
+                          placeholder="https://example.com/your-work&#10;One link per line, up to 5 links."
+                          aria-invalid={Boolean(errors.experienceLinks)}
                         />
-                      </>
+                        {errors.experienceLinks && (
+                          <small className="apply-error">
+                            {errors.experienceLinks}
+                          </small>
+                        )}
+                      </label>
                     )}
                   </>
                 )}
@@ -1033,13 +940,7 @@ export function PublicApplication() {
                         )}
                         <p>{answers[key] || "No answer"}</p>
                         {key === "experienceProof" && (
-                          <>
-                            <EvidenceLinks value={answers.experienceLinks} />
-                            <EvidenceImages
-                              images={draft.evidenceImages}
-                              basePath="/apply/api/evidence/images"
-                            />
-                          </>
+                          <EvidenceLinks value={answers.experienceLinks} />
                         )}
                         <button
                           type="button"
@@ -1058,7 +959,7 @@ export function PublicApplication() {
                         </p>
                       ))}
                     <p className="apply-muted">
-                      Your answers, evidence images, contact details, and linked
+                      Your answers, shared links, contact details, and linked
                       Discord and Minecraft identity are stored privately for
                       staff applications. Authorized staff with Jr Moderator
                       rank or higher can read them. Minecraft ownership and
