@@ -16,6 +16,9 @@ html[data-drakora-embedded].theme-dark,
 html[data-drakora-embedded].theme-dark * {
   --theme-bg-color: #313338;
   --theme-panel-color: #313338;
+  --theme-comp-header-color: #2b2d31;
+  --theme-calendar-weekend-stroke-color: #45474f;
+  --theme-calendar-zone: color-mix(in srgb, var(--staff-accent) 12%, #313338);
   --theme-navpanel-color: #2b2d31;
   --theme-navpanel-selected: #404249;
   --theme-navpanel-hovered: #383a40;

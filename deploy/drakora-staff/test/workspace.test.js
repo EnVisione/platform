@@ -161,6 +161,31 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
     postMessage: (message, origin) => messages.push({ message, origin }),
   };
   let disconnected = false;
+  let observeUpdate;
+  const axes = [
+    "12am",
+    "1am",
+    "12pm",
+    "6pm",
+    "24:00",
+    "25:00",
+    "not a time",
+  ].map((textContent) => ({
+    childNodes: [{ nodeType: 3, data: textContent }],
+    childElementCount: 0,
+    get textContent() {
+      return this.childNodes[0].data;
+    },
+  }));
+  const nowLine = {
+    value: "5:45pm",
+    getAttribute() {
+      return this.value;
+    },
+    setAttribute(_key, value) {
+      this.value = value;
+    },
+  };
   const location = {
     pathname: "/workbench/staff/tracker/my-issues",
     replace: (value) => destinations.push(value),
@@ -180,6 +205,8 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
       style: { setProperty: (...args) => styles.push(args) },
     },
     querySelector: () => ({}),
+    querySelectorAll: (selector) =>
+      selector === ".time-cell" ? axes : [nowLine],
   };
   runInNewContext(
     readFileSync(
@@ -191,6 +218,9 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
       document,
       location,
       MutationObserver: class {
+        constructor(callback) {
+          observeUpdate = callback;
+        }
         observe() {}
         disconnect() {
           disconnected = true;
@@ -239,6 +269,28 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
     ["--staff-accent", "#FFFFFF"],
     ["--staff-accent-text", "#16171C"],
   ]);
+  send(
+    { type: "drakora-workspace-time", format: "24" },
+    "https://evil.invalid",
+  );
+  assert.equal(axes[0].textContent, "12am");
+  send({ type: "drakora-workspace-time", format: "24" });
+  assert.deepEqual(
+    axes.map((n) => n.textContent),
+    ["00:00", "01:00", "12:00", "18:00", "00:00", "25:00", "not a time"],
+  );
+  assert.equal(nowLine.value, "17:45");
+  const nativeTextNode = axes[0].childNodes[0];
+  nativeTextNode.data = "2am";
+  nowLine.value = "6:01pm";
+  observeUpdate();
+  assert.equal(axes[0].childNodes[0], nativeTextNode);
+  assert.equal(axes[0].textContent, "02:00");
+  assert.equal(nowLine.value, "18:01");
+  send({ type: "drakora-workspace-time", format: "12" });
+  assert.equal(axes[0].textContent, "2:00 AM");
+  assert.equal(axes[2].textContent, "12:00 PM");
+  assert.equal(nowLine.value, "6:01 PM");
   handlers.get("pagehide")();
   assert.equal(disconnected, true);
   let prevented = false;

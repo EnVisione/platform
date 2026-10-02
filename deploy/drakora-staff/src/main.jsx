@@ -859,6 +859,7 @@ function App() {
                 view={workspaceView}
                 origin={user.workspaceOrigin}
                 accent={accent}
+                timeFormat={preferences.format}
                 onNavigate={navigateWorkspace}
               />
             ) : (

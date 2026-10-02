@@ -6,12 +6,44 @@
   document.documentElement.setAttribute("data-drakora-embedded", "");
   let previous = "";
   let scheduled = false;
+  let timeFormat;
+  const calendarTime = (value) => {
+    const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(value.trim());
+    if (!match || !timeFormat) return value;
+    let hour = Number(match[1]);
+    const minute = Number(match[2] ?? 0);
+    if (minute > 59 || hour > (match[3] ? 12 : 24)) return value;
+    if (match[3])
+      hour = (hour % 12) + (match[3].toLowerCase() === "pm" ? 12 : 0);
+    else hour %= 24;
+    const minutes = String(minute).padStart(2, "0");
+    return timeFormat === "24"
+      ? `${String(hour).padStart(2, "0")}:${minutes}`
+      : `${hour % 12 || 12}:${minutes} ${hour < 12 ? "AM" : "PM"}`;
+  };
+  const formatCalendar = () => {
+    if (!timeFormat) return;
+    for (const node of document.querySelectorAll(".time-cell")) {
+      if (node.childElementCount) continue;
+      for (const child of node.childNodes) {
+        if (child.nodeType !== 3) continue;
+        const text = calendarTime(child.data);
+        if (text !== child.data) child.data = text;
+      }
+    }
+    for (const node of document.querySelectorAll(".now-line[data-now]")) {
+      const value = node.getAttribute("data-now");
+      const text = calendarTime(value);
+      if (text !== value) node.setAttribute("data-now", text);
+    }
+  };
   const report = () => {
     scheduled = false;
     const ready =
       location.pathname.startsWith(base) &&
       Boolean(document.querySelector(".workbench-container"));
     if (!ready) return;
+    formatCalendar();
     const alias = location.pathname.slice(base.length).split("/")[0];
     const view = Object.keys(views).find((key) => views[key] === alias) ?? null;
     const path = location.pathname;
@@ -24,6 +56,13 @@
   };
   window.addEventListener("message", (event) => {
     if (event.origin !== staffOrigin || event.source !== window.parent) return;
+    if (
+      event.data?.type === "drakora-workspace-time" &&
+      ["12", "24"].includes(event.data.format)
+    ) {
+      timeFormat = event.data.format;
+      formatCalendar();
+    }
     if (
       event.data?.type === "drakora-workspace-open" &&
       Object.hasOwn(views, event.data.view)
@@ -92,6 +131,9 @@
   });
   observer.observe(document.documentElement, {
     childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["data-now"],
     subtree: true,
   });
   window.addEventListener("popstate", report);
@@ -103,6 +145,9 @@
     previous = "";
     observer.observe(document.documentElement, {
       childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["data-now"],
       subtree: true,
     });
     report();

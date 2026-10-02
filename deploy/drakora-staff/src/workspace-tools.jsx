@@ -17,7 +17,13 @@ export const dashboardTools = [
   },
 ];
 
-export function WorkspaceTools({ view, origin, accent, onNavigate }) {
+export function WorkspaceTools({
+  view,
+  origin,
+  accent,
+  timeFormat,
+  onNavigate,
+}) {
   const frame = useRef(null);
   const initialView = useRef(view);
   const opened = useRef(false);
@@ -57,6 +63,7 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
         accent,
         foreground: accentForeground(accent),
       });
+      send({ type: "drakora-workspace-time", format: timeFormat });
       if (!opened.current) {
         opened.current = true;
         if (event.data.view !== view) {
@@ -75,7 +82,7 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
       clearTimeout(timer);
       window.removeEventListener("message", receive);
     };
-  }, [origin, view, accent, onNavigate, attempt]);
+  }, [origin, view, accent, timeFormat, onNavigate, attempt]);
   useEffect(() => {
     if (ready)
       frame.current?.contentWindow.postMessage(
@@ -87,6 +94,13 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
         origin,
       );
   }, [accent, origin, ready]);
+  useEffect(() => {
+    if (ready)
+      frame.current?.contentWindow.postMessage(
+        { type: "drakora-workspace-time", format: timeFormat },
+        origin,
+      );
+  }, [timeFormat, origin, ready]);
   function retry() {
     initialView.current = view;
     opened.current = false;
