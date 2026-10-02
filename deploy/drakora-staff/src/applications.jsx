@@ -570,7 +570,7 @@ function ApplicationReviews({ csrf, canDecide }) {
             {data.questionnaireVersion}
           </p>
         </div>
-        <ApplicationPlayer application={data} />
+        <ApplicationPlayer application={data} listSearch={listSearch} />
       </div>
     </article>
   );

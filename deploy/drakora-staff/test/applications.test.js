@@ -868,6 +868,132 @@ test("applicant history paginates only owned applications and rejects invalid of
     assert.throws(() => service.history("owner", offset), /invalid_request/);
 });
 
+test("staff history matches Discord identity across name changes and returns current statuses without the open application", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const { service } = setup(t);
+  const previous = [];
+  for (const role of ["community", "builder", "artist"]) {
+    connectedDraft(service, role, role, "123");
+    previous.push(await service.submit(role));
+    t.mock.timers.tick(10);
+  }
+  service.decide(previous[0].id, reviewer(), "deny", "", 0);
+  service.startReview(previous[1].id, reviewer());
+  service.decide(previous[2].id, reviewer(), "approve");
+  connectedDraft(service, "unrelated", "developer", "456");
+  service.patch("unrelated", { answers: { ign: "Renamed_Player" } });
+  await service.submit("unrelated");
+  t.mock.timers.tick(10);
+  connectedDraft(service, "current", "developer", "123");
+  service.patch("current", { answers: { ign: "Renamed_Player" } });
+  const current = await service.submit("current");
+  const page = service.previousApplications(current.id);
+  assert.equal(page.total, 3);
+  assert.deepEqual(
+    page.items.map(({ id }) => id),
+    previous.map(({ id }) => id).reverse(),
+  );
+  assert.deepEqual(
+    page.items.map(({ status }) => status),
+    ["Approved", "Reviewing", "Denied"],
+  );
+  for (const item of page.items)
+    assert.deepEqual(Object.keys(item).sort(), [
+      "createdAt",
+      "id",
+      "ign",
+      "role",
+      "status",
+    ]);
+  service.decide(previous[1].id, reviewer(), "approve");
+  assert.equal(
+    service
+      .previousApplications(current.id)
+      .items.find(({ id }) => id === previous[1].id).status,
+    "Approved",
+  );
+  assert.throws(() => service.previousApplications("missing"), {
+    code: "application_not_found",
+    status: 404,
+  });
+});
+
+test("staff history matches anonymous contact and Minecraft name together without granting public history access", async (t) => {
+  const { service } = setup(t);
+  service.patch("first", { role: "community", answers: answers() });
+  const first = await service.submit("first");
+  for (const [session, changes] of [
+    ["wrong-email", { contactEmail: "someone-else@example.com" }],
+    ["wrong-ign", { ign: "Another_Player" }],
+  ]) {
+    service.patch(session, {
+      role: "artist",
+      answers: { ...answers("artist"), ...changes },
+    });
+    await service.submit(session);
+  }
+  service.patch("current", {
+    role: "builder",
+    answers: {
+      ...answers("builder"),
+      contactEmail: "FIXTURE@example.com",
+      ign: "test_player",
+      displayName: "New preferred name",
+    },
+  });
+  const current = await service.submit("current");
+  assert.deepEqual(
+    service.previousApplications(current.id).items.map(({ id }) => id),
+    [first.id],
+  );
+  assert.deepEqual(
+    service.previousApplications(first.id).items.map(({ id }) => id),
+    [current.id],
+  );
+  assert.equal(service.history("current").total, 1);
+  assert.equal(service.history("stranger").total, 0);
+});
+
+test("staff history paginates matching applications and validates offsets", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1800000000000 });
+  const { service } = setup(t);
+  const ids = [];
+  for (let index = 0; index < 12; index++) {
+    const session = `history-page-${index}`;
+    connectedDraft(service, session, "builder", "123");
+    ids.push((await service.submit(session)).id);
+    t.mock.timers.tick(10);
+  }
+  const current = ids.pop();
+  const pages = [0, 5, 10].map((offset) =>
+    service.previousApplications(current, offset),
+  );
+  assert.deepEqual(
+    pages.map(({ total, pageSize, items }) => [total, pageSize, items.length]),
+    [
+      [11, 5, 5],
+      [11, 5, 5],
+      [11, 5, 1],
+    ],
+  );
+  assert.deepEqual(
+    pages.flatMap(({ items }) => items.map(({ id }) => id)),
+    ids.reverse(),
+  );
+  for (const offset of [
+    -1,
+    1.5,
+    NaN,
+    Infinity,
+    "0",
+    Number.MAX_SAFE_INTEGER + 1,
+  ])
+    assert.throws(() => service.previousApplications(current, offset), {
+      code: "invalid_request",
+      status: 400,
+    });
+});
+
 test("review starts once, requires decision access, and queues ordered applicant updates", async (t) => {
   const dms = [];
   const notices = [];

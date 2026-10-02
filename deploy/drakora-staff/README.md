@@ -71,6 +71,8 @@ The notification channel also receives blue review, green acceptance, and red de
 
 The receipt also lists your current and previous applications with submission dates and colored review statuses. Refresh updates reloads the list. History matches the connected Discord account or applications submitted without Discord in the same browser session. Contact email and Minecraft name alone cannot retrieve another applicant's history. The list uses pages of twenty applications and does not include private staff feedback.
 
+The staff review side panel lists the applicant's other stored applications, with application type, Minecraft name, submission date, colored current status, and a link to each review. It excludes the application being viewed and uses pages of five. Linked submissions match the same Discord account. If either submission has no Discord account, both the contact email and Minecraft name must match. These anonymous matches are claimed identities, not proof of ownership. This staff history remains private to authorized reviewers and does not expand public receipt access.
+
 ## Huly frontend image
 
 From the platform repository root, using Node.js 20 through 24:

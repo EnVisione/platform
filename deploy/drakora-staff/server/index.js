@@ -922,6 +922,16 @@ app.get("/api/applications/:id", async (req, res) => {
   if (!record) throw new AuthError("application_not_found", 404);
   res.json(record);
 });
+app.get("/api/applications/:id/history", async (req, res) => {
+  await applicationViewer(req);
+  res.set("Cache-Control", "no-store");
+  res.json(
+    applications.previousApplications(
+      req.params.id,
+      Number(req.query.offset ?? 0),
+    ),
+  );
+});
 app.post(
   "/api/applications/:id/comments",
   rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),

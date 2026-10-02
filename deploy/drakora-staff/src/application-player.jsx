@@ -1,4 +1,109 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { applicationRoles } from "../shared/application-form.js";
+import { ApplicationStatus } from "./application-status.jsx";
+
+function PreviousApplications({ id, listSearch }) {
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState(null);
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setPage(null);
+    setError("");
+    fetch(
+      `/api/applications/${encodeURIComponent(id)}/history?offset=${offset}`,
+      {
+        signal: controller.signal,
+      },
+    )
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error("Could not load previous applications.");
+        const result = await response.json();
+        if (!controller.signal.aborted) setPage(result);
+      })
+      .catch((failure) => {
+        if (!controller.signal.aborted) setError(failure.message);
+      });
+    return () => controller.abort();
+  }, [id, offset, refresh]);
+  return (
+    <section
+      className="application-player-card"
+      aria-labelledby="application-previous-title"
+    >
+      <h2 id="application-previous-title">Previous staff applications</h2>
+      {error ? (
+        <>
+          <p role="alert">{error}</p>
+          <button onClick={() => setRefresh((value) => value + 1)}>
+            Try again
+          </button>
+        </>
+      ) : !page ? (
+        <p role="status">Loading previous applications…</p>
+      ) : !page.total ? (
+        <p className="apply-muted">No previous applications found.</p>
+      ) : (
+        <>
+          <p className="apply-muted">
+            {page.total} other{" "}
+            {page.total === 1 ? "application" : "applications"}
+          </p>
+          <ul className="application-previous-list">
+            {page.items.map((item) => (
+              <li key={item.id}>
+                <a
+                  href={`/applications/${encodeURIComponent(item.id)}${listSearch}`}
+                >
+                  <strong>
+                    {applicationRoles[item.role]?.label || item.role}
+                  </strong>
+                  <ApplicationStatus status={item.status} />
+                  <span>{item.ign}</span>
+                  <time dateTime={new Date(item.createdAt).toISOString()}>
+                    {new Date(item.createdAt).toLocaleString()}
+                  </time>
+                  <span className="application-previous-open">
+                    View application →
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          {page.total > page.pageSize && (
+            <nav
+              className="application-previous-pages"
+              aria-label="Previous application pages"
+            >
+              <button
+                disabled={!offset}
+                onClick={() => setOffset(Math.max(0, offset - page.pageSize))}
+              >
+                Previous
+              </button>
+              <span role="status">
+                {offset + 1}–{Math.min(offset + page.pageSize, page.total)} of{" "}
+                {page.total}
+              </span>
+              <button
+                disabled={offset + page.pageSize >= page.total}
+                onClick={() => setOffset(offset + page.pageSize)}
+              >
+                Next
+              </button>
+            </nav>
+          )}
+        </>
+      )}
+      <p className="apply-muted application-previous-note">
+        Applications without Discord are matched by contact email and Minecraft
+        name.
+      </p>
+    </section>
+  );
+}
 
 function PendingStats({ labels }) {
   return (
@@ -13,7 +118,7 @@ function PendingStats({ labels }) {
   );
 }
 
-export function ApplicationPlayer({ application }) {
+export function ApplicationPlayer({ application, listSearch = "" }) {
   const identifier = /^[a-f0-9]{32}$/i.test(application.minecraft.uuid ?? "")
     ? application.minecraft.uuid
     : application.answers.ign;
@@ -99,6 +204,11 @@ export function ApplicationPlayer({ application }) {
           ]}
         />
       </section>
+      <PreviousApplications
+        key={application.id}
+        id={application.id}
+        listSearch={listSearch}
+      />
     </aside>
   );
 }

@@ -755,6 +755,40 @@ export function applicationService(
       })),
     };
   }
+  function previousApplications(id, offset = 0) {
+    if (!Number.isSafeInteger(offset) || offset < 0)
+      throw new AuthError("invalid_request", 400);
+    const record = store.get("application", id);
+    if (!record) throw new AuthError("application_not_found", 404);
+    const email = text(record.contactEmail).toLowerCase();
+    const ign = text(record.answers.ign).toLowerCase();
+    const pageSize = 5;
+    const page = store.page(
+      "application-summary",
+      pageSize,
+      offset,
+      (summary) => {
+        if (summary.id === record.id) return false;
+        if (record.discord?.id && summary.discordId)
+          return summary.discordId === record.discord.id;
+        if (!email || !ign || text(summary.ign).toLowerCase() !== ign)
+          return false;
+        const previous = store.get("application", summary.id);
+        return text(previous?.contactEmail).toLowerCase() === email;
+      },
+    );
+    return {
+      total: page.total,
+      pageSize,
+      items: page.items.map(({ id, role, ign, createdAt, status }) => ({
+        id,
+        role,
+        ign,
+        createdAt,
+        status,
+      })),
+    };
+  }
   return {
     forms,
     view,
@@ -774,6 +808,7 @@ export function applicationService(
     minecraftProfile,
     list,
     history,
+    previousApplications,
     get: (id) => applicationView(store.get("application", id)),
     delivery: notifications.delivery,
     start: notifications.start,
