@@ -7,7 +7,7 @@ export const applicationStatuses = {
 
 export const applicationRoles = {
   community: {
-    label: "Community Staff",
+    label: "Community Staff (Moderator)",
     description:
       "Support players, moderate fairly, and help keep Drakora welcoming.",
     questions: [
