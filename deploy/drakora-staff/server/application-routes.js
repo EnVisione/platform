@@ -72,10 +72,13 @@ export function applicationRouter(config, applications, dist) {
     res.json(await applications.minecraftProfile(req.params.name)),
   );
   router.get("/apply/api/head/:name", async (req, res) => {
-    if (!/^[A-Za-z0-9_]{3,16}$/.test(req.params.name))
+    if (
+      !/^[A-Za-z0-9_]{3,16}$/.test(req.params.name) &&
+      !/^[a-f0-9]{32}$/i.test(req.params.name)
+    )
       return res.status(400).end();
     const response = await fetch(
-      `https://api.mcheads.org/head/${encodeURIComponent(req.params.name)}/64`,
+      `https://mc-heads.net/avatar/${encodeURIComponent(req.params.name)}/64`,
       { signal: AbortSignal.timeout(8000) },
     );
     if (

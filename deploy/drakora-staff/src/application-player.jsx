@@ -14,17 +14,37 @@ function PendingStats({ labels }) {
 }
 
 export function ApplicationPlayer({ application }) {
+  const identifier = /^[a-f0-9]{32}$/i.test(application.minecraft.uuid ?? "")
+    ? application.minecraft.uuid
+    : application.answers.ign;
   return (
     <aside
       className="application-player"
       aria-label="Applicant player information"
     >
       <section className="application-player-card">
-        <h2>Player profile</h2>
-        <strong className="application-player-name">
-          {application.answers.ign}
-        </strong>
-        <p className="apply-muted">{application.minecraft.verification}</p>
+        <div className="application-player-profile">
+          <div>
+            <h2>Player profile</h2>
+            <strong className="application-player-name">
+              {application.answers.ign}
+            </strong>
+            <p className="apply-muted">{application.minecraft.verification}</p>
+          </div>
+          {/^[A-Za-z0-9_]{3,16}$/.test(application.answers.ign ?? "") && (
+            <img
+              key={identifier}
+              className="application-player-avatar"
+              src={`/apply/api/head/${encodeURIComponent(identifier)}`}
+              alt={`${application.answers.ign}'s Minecraft skin`}
+              width="64"
+              height="64"
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          )}
+        </div>
         <dl className="application-player-stats">
           <div>
             <dt>Profile UUID</dt>

@@ -666,6 +666,22 @@
 .application-player-card p {
   line-height: 1.6;
 }
+.application-player-profile {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.application-player-profile > div {
+  min-width: 0;
+}
+.application-player-avatar {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  image-rendering: pixelated;
+}
 .application-player-name {
   display: block;
   font-size: 22px;

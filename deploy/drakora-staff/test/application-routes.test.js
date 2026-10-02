@@ -8,6 +8,52 @@ import { applicationService } from "../server/applications.js";
 import { applicationRouter } from "../server/application-routes.js";
 import { config as fixture } from "./fixture.js";
 
+test("Minecraft head proxy accepts names and UUIDs and rejects unsafe images", async (t) => {
+  const app = express();
+  app.use(applicationRouter(fixture, {}, "/unused-test-assets"));
+  const server = app.listen(0, "127.0.0.1");
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let image = new Uint8Array([137, 80, 78, 71]);
+  let contentType = "image/png";
+  t.mock.method(globalThis, "fetch", (url, options) => {
+    if (String(url).startsWith(origin)) return originalFetch(url, options);
+    const destination = new URL(url);
+    assert.equal(destination.origin, "https://mc-heads.net");
+    calls.push(destination.pathname);
+    return Promise.resolve(
+      new Response(image, { headers: { "Content-Type": contentType } }),
+    );
+  });
+  for (const identifier of ["rarara", "c206df67643e485cb691a896594fc272"]) {
+    const response = await fetch(`${origin}/apply/api/head/${identifier}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/png");
+    assert.equal(
+      response.headers.get("cache-control"),
+      "private, max-age=3600",
+    );
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), image);
+  }
+  assert.equal(calls.length, 2);
+  const invalid = await fetch(
+    `${origin}/apply/api/head/${encodeURIComponent("https://private.invalid")}`,
+  );
+  assert.equal(invalid.status, 400);
+  assert.equal(calls.length, 2);
+  contentType = "image/svg+xml";
+  assert.equal((await fetch(`${origin}/apply/api/head/rarara`)).status, 404);
+  contentType = "image/png";
+  image = new Uint8Array(256001);
+  assert.equal((await fetch(`${origin}/apply/api/head/rarara`)).status, 502);
+});
+
 test("public form mutations require its browser session, CSRF token, and origin", async (t) => {
   const config = {
     ...fixture,

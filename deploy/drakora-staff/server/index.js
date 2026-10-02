@@ -165,7 +165,10 @@ app.use((req, res, next) => {
 if (applications) {
   const publicApplications = applicationRouter(config, applications, dist);
   app.use((req, res, next) =>
-    req.headers.host === applicationHost
+    req.headers.host === applicationHost ||
+    (req.headers.host === staffHost &&
+      ["GET", "HEAD"].includes(req.method) &&
+      req.path.startsWith("/apply/api/head/"))
       ? publicApplications(req, res, next)
       : next(),
   );
