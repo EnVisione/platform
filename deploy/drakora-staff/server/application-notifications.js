@@ -9,7 +9,7 @@ const staffKeyFor = (id, event) =>
   event === "received" ? id : `${id}:staff:${event}`;
 const mentions = { parse: [], users: [], roles: [], replied_user: false };
 const colors = {
-  received: 0xf0b94c,
+  received: 0x2dd4bf,
   reviewing: 0x5865f2,
   approved: 0x3ba55c,
   denied: 0xed4245,
@@ -47,20 +47,64 @@ export function applicationNotifications(config, store, fetcher) {
   function queueApplicant(record, event) {
     if (!record.discord) return;
     const label = applicationRoles[record.role].label;
+    const name = escape(record.answers.displayName);
     const descriptions = {
-      received: `Thank you, ${escape(record.answers.displayName)}. Your ${label} application was submitted and will be reviewed. We will send status updates here.`,
-      reviewing:
-        "The Drakora team has started reviewing your application. We will send you another update when a decision is made.",
-      approved:
-        escape(record.decision?.reason ?? "") ||
-        "Your application was approved. The team will contact you about the next steps.",
-      denied: escape(record.decision?.reason ?? ""),
+      received: `Thanks for applying, **${name}**! Your **${label}** application is safely with the Drakora team.\n\nWe're glad you want to help our community. We'll keep you updated right here when your review starts and when a decision is made.`,
+      reviewing: `Hi **${name}**! The team is now taking a closer look at your **${label}** application.\n\nThanks for your patience. We'll send another update here when we have a decision.`,
+      approved: `Congratulations, **${name}**! Your **${label}** application has been approved. We're excited to welcome you to the Drakora team!\n\nThe team will reach out to help you get started.`,
+      denied: `Thank you for applying, **${name}**. Your **${label}** application wasn't accepted this time.\n\nWe appreciate the time you put into it. You can apply for this role again after the date below, or explore other teams you're eligible for.`,
     };
-    const fields = [{ name: "Application type", value: label }];
-    if (event === "denied")
+    const fields = [
+      { name: "📋 Applied for", value: label, inline: true },
+      {
+        name: "📍 Status",
+        value: {
+          received: "Received",
+          reviewing: "In review",
+          approved: "Approved",
+          denied: "Not accepted this time",
+        }[event],
+        inline: true,
+      },
+    ];
+    if (event === "denied") {
+      const timestamp = Math.ceil(record.decision.reapplyAfter / 1000);
       fields.push({
-        name: "You can reapply from",
-        value: `<t:${Math.ceil(record.decision.reapplyAfter / 1000)}:F>`,
+        name: "🗓️ Apply for this role again",
+        value: `<t:${timestamp}:F> · <t:${timestamp}:R>\nMinimum wait: ${record.decision.reapplyDays} days.`,
+      });
+    }
+    const embeds = [
+      {
+        author: { name: "Drakora · Staff Applications" },
+        title: {
+          received: "📬 We received your application!",
+          reviewing: "🔎 Your application is under review",
+          approved: "🎉 Welcome to the Drakora team!",
+          denied: "💬 An update on your application",
+        }[event],
+        color: colors[event],
+        thumbnail: record.discord.avatar
+          ? { url: record.discord.avatar }
+          : undefined,
+        description: descriptions[event],
+        fields,
+        timestamp: new Date().toISOString(),
+        footer: { text: `Drakora · Application reference ${record.id}` },
+      },
+    ];
+    const feedback =
+      event === "approved" || event === "denied"
+        ? escape(record.decision?.reason ?? "")
+        : "";
+    if (feedback)
+      embeds.push({
+        title:
+          event === "denied"
+            ? "💬 Feedback from the team"
+            : "💬 A message from the team",
+        color: colors[event],
+        description: feedback,
       });
     const key = keyFor(record.id, event);
     store.set(
@@ -72,22 +116,7 @@ export function applicationNotifications(config, store, fetcher) {
         event,
         attempts: 0,
         nextAt: Date.now(),
-        payload: {
-          embeds: [
-            {
-              title: {
-                received: "Application received",
-                reviewing: "Application under review",
-                approved: "Application approved",
-                denied: "Application denied",
-              }[event],
-              color: colors[event],
-              description: descriptions[event],
-              fields,
-              footer: { text: `Drakora · Reference ${record.id}` },
-            },
-          ],
-        },
+        payload: { embeds },
       },
       permanent,
     );

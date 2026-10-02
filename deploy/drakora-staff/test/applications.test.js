@@ -20,6 +20,7 @@ import {
   parseEvidenceLinks,
 } from "../shared/application-form.js";
 import { discordClient } from "../server/discord.js";
+import { applicationNotifications } from "../server/application-notifications.js";
 import { config as fixture } from "./fixture.js";
 
 const config = {
@@ -577,7 +578,12 @@ test("submission is idempotent and notifications never ping users or roles", asy
   assert.equal(sent.length, 2);
   const notice = sent.find((message) => message.url.includes("/channels/50/"));
   const dm = sent.find((message) => message.url.includes("/channels/999/"));
-  assert.match(dm.embeds[0].description, /submitted and will be reviewed/);
+  assert.match(dm.embeds[0].description, /Thanks for applying/);
+  assert.match(dm.embeds[0].description, /keep you updated right here/);
+  assert.equal(dm.embeds[0].color, 0x2dd4bf);
+  assert.equal(dm.embeds[0].fields[1].value, "Received");
+  assert.equal(dm.embeds[0].thumbnail, undefined);
+  assert.equal(dm.embeds[0].author.name, "Drakora · Staff Applications");
   assert.ok(service.get(first.id).notifications[0].sentAt);
   assert.notEqual(notice.nonce, dm.nonce);
   assert.deepEqual(notice.allowed_mentions, {
@@ -592,6 +598,64 @@ test("submission is idempotent and notifications never ping users or roles", asy
     `${config.staffOrigin}/applications/${first.id}`,
   );
   assert.equal(store.page("application-notification").total, 0);
+});
+test("applicant updates preserve full feedback within Discord embed limits", async (t) => {
+  const { store } = setup(t);
+  const notifications = applicationNotifications(config, store, () =>
+    assert.fail("No live Discord request is needed"),
+  );
+  t.after(() => notifications.close());
+  const record = {
+    id: "00000000-0000-4000-8000-000000000000",
+    role: "artist",
+    answers: { displayName: "*".repeat(80) },
+    discord: {
+      id: "123",
+      avatar: "https://cdn.discordapp.com/embed/avatars/0.png",
+    },
+    decision: {
+      reason: "\\*".repeat(1000),
+      reapplyAfter: Date.now() + 7 * 86400000,
+      reapplyDays: 7,
+    },
+  };
+  for (const event of ["received", "reviewing", "approved", "denied"]) {
+    notifications.queueApplicant(record, event);
+    const { embeds } = store.get(
+      "application-notification",
+      `${record.id}:${event}`,
+    ).payload;
+    assert.equal(embeds[0].thumbnail.url, record.discord.avatar);
+    assert.ok(embeds[0].description.includes("\\*"));
+    assert.equal(
+      new Date(embeds[0].timestamp).toISOString(),
+      embeds[0].timestamp,
+    );
+    let characters = 0;
+    for (const embed of embeds) {
+      assert.ok(embed.title.length <= 256);
+      assert.ok(embed.description.length <= 4096);
+      characters += embed.title.length + embed.description.length;
+      characters += embed.author?.name.length ?? 0;
+      characters += embed.footer?.text.length ?? 0;
+      for (const field of embed.fields ?? []) {
+        assert.ok(field.name.length <= 256);
+        assert.ok(field.value.length <= 1024);
+        characters += field.name.length + field.value.length;
+      }
+    }
+    assert.ok(characters <= 6000);
+    if (event === "approved" || event === "denied") {
+      assert.equal(embeds.length, 2);
+      assert.equal(embeds[1].description.length, 4000);
+      assert.equal(
+        embeds[1].description.replaceAll("\\", ""),
+        "*".repeat(1000),
+      );
+    } else {
+      assert.equal(embeds.length, 1);
+    }
+  }
 });
 test("a notification failure preserves the application and retries later", async (t) => {
   const { service, store } = setup(
@@ -713,11 +777,18 @@ test("review starts once, requires decision access, and queues ordered applicant
   assert.deepEqual(
     dms.map((message) => message.embeds[0].title),
     [
-      "Application received",
-      "Application under review",
-      "Application approved",
+      "📬 We received your application!",
+      "🔎 Your application is under review",
+      "🎉 Welcome to the Drakora team!",
     ],
   );
+  assert.deepEqual(
+    dms.map((message) => message.embeds[0].color),
+    [0x2dd4bf, 0x5865f2, 0x3ba55c],
+  );
+  assert.equal(dms[1].embeds[0].fields[1].value, "In review");
+  assert.match(dms[2].embeds[0].description, /excited to welcome you/);
+  assert.equal(dms[2].embeds[1].description, "Welcome to the team.");
   assert.equal(new Set(dms.map((message) => message.nonce)).size, 3);
   assert.equal(notices.length, 3);
   assert.match(notices[0].content, /just filled out/);
@@ -938,11 +1009,15 @@ test("denial needs a message and at least seven days, persists cooldown across d
   assert.equal(until, Date.now() + 10 * 86400000);
   assert.equal(service.list().items[0].status, "Denied");
   const dm = store.get("application-notification", `${id}:denied`);
-  assert.equal(dm.payload.embeds[0].description, denied.decision.reason);
+  assert.match(dm.payload.embeds[0].description, /wasn't accepted this time/);
+  assert.equal(dm.payload.embeds[0].color, 0xed4245);
+  assert.equal(dm.payload.embeds[1].description, denied.decision.reason);
   assert.match(
-    dm.payload.embeds[0].fields[1].value,
+    dm.payload.embeds[0].fields[2].value,
     new RegExp(String(until / 1000)),
   );
+  assert.match(dm.payload.embeds[0].fields[2].value, /:R>/);
+  assert.match(dm.payload.embeds[0].fields[2].value, /Minimum wait: 10 days/);
   await service.close();
   const restarted = applicationService(
     config,
