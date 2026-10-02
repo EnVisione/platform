@@ -20,7 +20,11 @@ import {
   applicationReviewAccess,
   applicationDecisionAccess,
   mailAccess,
+  staffCapability,
 } from "./roles.js";
+import { rolePermissions } from "./role-permissions.js";
+import { roleAssignments } from "./role-assignment.js";
+import { roleRouter } from "./role-routes.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
 
@@ -54,11 +58,37 @@ const minecraft = minecraftRegistry(store);
 const applications = applicationDatabase
   ? applicationService(config, applicationDatabase.store, fetch, minecraft.get)
   : undefined;
-const discord = discordClient(config, store);
+const rolePolicy = rolePermissions(config, store);
+const discord = discordClient(config, store, fetch, rolePolicy.apply);
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
 const office = config.office ? discordOffice(config, store) : undefined;
+const assignments =
+  office && config.roleSync
+    ? roleAssignments(
+        config,
+        store,
+        rolePolicy,
+        office.roleAdministration,
+        office.roleSync,
+      )
+    : undefined;
+office?.onRolesChanged((id) => {
+  void (id ? assignments?.reconcile(id) : assignments?.retry())?.catch(() =>
+    console.error("Staff role assignment is pending."),
+  );
+});
+const assignmentTimer = assignments
+  ? setInterval(
+      () =>
+        void assignments
+          .retry()
+          .catch(() => console.error("Staff role assignment is pending.")),
+      60000,
+    )
+  : undefined;
+assignmentTimer?.unref();
 const todoSync = config.todoForums
   ? discordTodoSync(config, store, huly)
   : undefined;
@@ -188,6 +218,7 @@ function safeNext(value) {
       "/applications",
       "/applications/editor",
       "/email",
+      "/roles",
     ].includes(value)
   )
     return value;
@@ -227,9 +258,14 @@ async function signedIn(req, { allowUnlinked = false, syncHuly = true } = {}) {
   const link = minecraft.get(user.id);
   if (!allowUnlinked && !link)
     throw new AuthError("minecraft_name_required", 428);
-  if (syncHuly && link && user.syncedAt !== user.checkedAt)
+  if (
+    syncHuly &&
+    link &&
+    (user.syncedAt !== user.checkedAt ||
+      user.syncedPolicyRevision !== user.policyRevision)
+  )
     user = await huly.sync(user);
-  return user;
+  return rolePolicy.apply(user);
 }
 
 function publicUser(user) {
@@ -238,6 +274,8 @@ function publicUser(user) {
     name: user.name,
     avatar: user.avatar,
     mail: mailAccess(config, user),
+    capabilities: user.capabilities,
+    rolesPanel: Boolean(user.capabilities["roles.view"]),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     applications: Boolean(
@@ -245,6 +283,9 @@ function publicUser(user) {
     ),
     applicationDecision: Boolean(
       applications && applicationDecisionAccess(config, user),
+    ),
+    applicationEdit: Boolean(
+      applications && user.capabilities["applications.edit"],
     ),
     ...managementAccess(config, user),
     ...user.permissions,
@@ -294,7 +335,8 @@ const officeRouter = express.Router();
 officeRouter.use(async (req, res, next) => {
   if (!office) throw new AuthError("office_unavailable", 503);
   const user = await signedIn(req);
-  if (!user.permissions.todo) throw new AuthError("todo_role_required");
+  if (!user.capabilities["office.view"])
+    throw new AuthError("office_permission_required");
   req.officeUser = user;
   next();
 });
@@ -327,6 +369,8 @@ officeRouter.post(
     const user = await discord.check(req.session.userId, true);
     if (!user.permissions.dashboard)
       throw new AuthError("dashboard_role_required");
+    if (!user.capabilities["office.host"])
+      throw new AuthError("meeting_host_required");
     if (!["start", "end"].includes(req.params.action))
       throw new AuthError("invalid_request", 404);
     await office.meetings[req.params.action](req.params.room, user);
@@ -601,6 +645,8 @@ app.post(
   async (req, res) => {
     const user = await signedIn(req);
     requireMutation(req);
+    if (!user.capabilities["settings.minecraft"])
+      throw new AuthError("staff_permission_required");
     res.json({ minecraft: minecraft.requestChange(user.id, req.body?.name) });
   },
 );
@@ -628,10 +674,11 @@ app.get("/api/accounts", async (req, res) => {
   accounts.sort((a, b) => a.name.localeCompare(b.name));
   res.json({ accounts });
 });
-async function authorizeMail(req) {
+async function authorizeMail(req, capability = "mail.view") {
   let user = await signedIn(req, { syncHuly: false });
   if (req.method !== "GET") user = await discord.check(user.id, true);
-  if (!mailAccess(config, user)) throw new AuthError("mail_role_required");
+  if (!config.mail || !user.capabilities[capability])
+    throw new AuthError("mail_role_required");
   return user;
 }
 app.use(
@@ -641,6 +688,28 @@ app.use(
     authorize: authorizeMail,
     requireMutation,
     staffHost,
+  }),
+);
+async function authorizeRoles(req) {
+  const user = await signedIn(req, { syncHuly: false });
+  return rolePolicy.authorize(await discord.check(user.id, true), "roles.view");
+}
+app.use(
+  "/api/roles",
+  roleRouter({
+    policy: rolePolicy,
+    assignments,
+    authorize: authorizeRoles,
+    requireMutation,
+    staffHost,
+    onPolicyChange() {
+      for (const socket of sockets) {
+        const user = store.get("user", socket.userId);
+        const current = user && rolePolicy.apply(user);
+        if (!current?.permissions.dashboard || !current.permissions.todo)
+          socket.destroy();
+      }
+    },
   }),
 );
 app.post(
@@ -882,7 +951,8 @@ app.get("/minecraft", async (req, res) => {
 app.get("/office", async (req, res) => {
   try {
     const user = await signedIn(req);
-    if (!user.permissions.todo) throw new AuthError("todo_role_required");
+    if (!user.capabilities["office.view"])
+      throw new AuthError("office_permission_required");
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401) res.redirect("/login");
@@ -900,7 +970,7 @@ async function applicationViewer(req) {
 async function applicationEditor(req) {
   const user = await signedIn(req, { syncHuly: false });
   const current = await discord.check(user.id, true);
-  if (!applications || !applicationDecisionAccess(config, current))
+  if (!applications || !staffCapability(config, current, "applications.edit"))
     throw new AuthError("application_decision_role_required");
   return current;
 }
@@ -1011,21 +1081,27 @@ app.get(["/applications", "/applications/:id"], async (req, res) => {
     throw error;
   }
 });
-app.get(["/", "/settings", "/accounts", "/email"], async (req, res) => {
-  try {
-    const user =
-      req.path === "/email" ? await authorizeMail(req) : await signedIn(req);
-    if (req.path === "/accounts" && !managementAccess(config, user).manager)
-      throw new AuthError("management_role_required");
-    res.sendFile(`${dist}/index.html`);
-  } catch (error) {
-    if (error.status === 401)
-      res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
-    else if (error.code === "minecraft_name_required")
-      res.redirect(`/minecraft?next=${encodeURIComponent(req.path)}`);
-    else throw error;
-  }
-});
+app.get(
+  ["/", "/settings", "/accounts", "/email", "/roles"],
+  async (req, res) => {
+    try {
+      const user =
+        req.path === "/email" ? await authorizeMail(req) : await signedIn(req);
+      if (req.path === "/roles") await authorizeRoles(req);
+      if (req.path === "/settings" && !user.capabilities["settings.view"])
+        throw new AuthError("staff_permission_required");
+      if (req.path === "/accounts" && !managementAccess(config, user).manager)
+        throw new AuthError("management_role_required");
+      res.sendFile(`${dist}/index.html`);
+    } catch (error) {
+      if (error.status === 401)
+        res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
+      else if (error.code === "minecraft_name_required")
+        res.redirect(`/minecraft?next=${encodeURIComponent(req.path)}`);
+      else throw error;
+    }
+  },
+);
 app.use((_req, res) => res.status(404).send("Page not found."));
 app.use((error, req, res, _next) => {
   const status = error instanceof AuthError ? error.status : 503;
@@ -1111,7 +1187,11 @@ const sweep = setInterval(async () => {
         !minecraft.get(user.id)
       )
         throw new Error("Access revoked");
-      if (user.syncedAt !== user.checkedAt) user = await huly.sync(user);
+      if (
+        user.syncedAt !== user.checkedAt ||
+        user.syncedPolicyRevision !== user.policyRevision
+      )
+        user = await huly.sync(user);
     } catch {
       socket.destroy();
     }
@@ -1125,6 +1205,8 @@ todoSync?.start();
 applications?.start();
 async function stop() {
   clearInterval(sweep);
+  clearInterval(assignmentTimer);
+  await assignments?.close();
   await todoSync?.close();
   await applications?.close();
   await office?.close();

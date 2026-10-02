@@ -434,19 +434,22 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
   const { service, state } = harness(t);
   const app = express();
   let roles = ["10", "20"],
-    signedIn = true;
+    signedIn = true,
+    readOnly = false;
   app.use(
     "/api/mail",
     mailRouter({
       service,
       staffHost: "staff.example.invalid",
-      authorize: async () => {
+      authorize: async (_req, capability = "mail.view") => {
         if (!signedIn) throw new AuthError("login_required", 401);
         const user = {
           id: "42",
           roles,
           permissions: permissions(fixture, roles),
         };
+        if (readOnly && capability !== "mail.view")
+          throw new AuthError("mail_role_required");
         if (!mailAccess(settings, user))
           throw new AuthError("mail_role_required");
         return user;
@@ -554,6 +557,33 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
       .status,
     200,
   );
+  readOnly = true;
+  assert.equal((await call("/")).status, 200);
+  assert.equal((await call("/messages?folder=INBOX")).status, 200);
+  assert.equal(
+    (await call("/messages/4?folder=INBOX&validity=51")).status,
+    200,
+  );
+  assert.equal(
+    (await call("/messages/4/attachments/3?folder=INBOX&validity=51")).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call("/flags", {
+        method: "POST",
+        body: JSON.stringify({ ...key, flag: "seen", value: true }),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await call("/send", { method: "POST", body: JSON.stringify(input()) }))
+      .status,
+    403,
+  );
+  assert.equal(state.flags.length, 0);
+  readOnly = false;
   roles = ["10", "23"];
   assert.equal((await call("/")).status, 403);
   assert.equal(state.sends.length, 1);

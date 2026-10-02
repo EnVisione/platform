@@ -90,6 +90,7 @@ export function hulyClient(config, store, fetcher = fetch) {
       ...store.get("user", user.id),
       hulyAccount: account,
       syncedAt: user.checkedAt,
+      syncedPolicyRevision: user.policyRevision,
       projectRanks,
       syncedAvatar,
     };

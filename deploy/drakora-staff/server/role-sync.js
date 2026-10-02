@@ -60,6 +60,18 @@ export function discordRoleTransport(config, client) {
       if (add) await client.rest.put(route, options);
       else await client.rest.delete(route, options);
     },
+    async prepareChanges(guildId, changes) {
+      const guild = guilds.get(guildId);
+      if (
+        changes.some(
+          ([role]) =>
+            !guild?.roles.cache.get(
+              role[guildId === config.guildId ? "staffId" : "mainId"],
+            )?.editable,
+        )
+      )
+        throw new Error("discord_role_hierarchy_required");
+    },
   };
 }
 
@@ -154,6 +166,7 @@ export function staffRoleSync(config, store, transport) {
               )
               .map((role) => [role, true]),
           );
+          await transport.prepareChanges?.(guildId, changes);
           for (const [role, add] of changes) {
             if (stopped || store.get(kind, id).version !== version) break;
             if (add) present.add(role[field]);
@@ -362,6 +375,28 @@ export function staffRoleSync(config, store, transport) {
     initialize,
     update,
     join,
+    async assign(id, roles) {
+      if (
+        stopped ||
+        !/^\d{1,20}$/.test(id) ||
+        !Array.isArray(roles) ||
+        new Set(roles).size !== roles.length ||
+        roles.some((id) => !settings.roles.some((role) => role.staffId === id))
+      )
+        throw new Error("discord_role_mapping_invalid");
+      if (!initialized) await initialize();
+      const state = store.get(kind, id) ?? newState(id);
+      intent(
+        state,
+        config.guildId,
+        settings.roles
+          .filter((role) => roles.includes(role.staffId))
+          .map((role) => role.staffId),
+      );
+      save(state);
+      await queue(id);
+      return store.get(kind, id);
+    },
     async retry(force = false) {
       if (stopped) return;
       if (!initialized) return initialize();

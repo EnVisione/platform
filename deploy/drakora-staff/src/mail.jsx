@@ -384,7 +384,7 @@ function Composer({ draft, identities, csrf, onClose, onSent }) {
   );
 }
 
-export function Mail({ csrf }) {
+export function Mail({ csrf, capabilities }) {
   const [metadata, setMetadata] = useState(null),
     [folders, setFolders] = useState([]);
   const [folder, setFolder] = useState(""),
@@ -598,13 +598,15 @@ export function Mail({ csrf }) {
           <h2 id="mail-title">Email</h2>
           <p>Keep player conversations and staff correspondence together.</p>
         </div>
-        <button
-          className="mail-primary"
-          disabled={!metadata}
-          onClick={() => compose()}
-        >
-          ＋ Compose
-        </button>
+        {capabilities["mail.send"] && (
+          <button
+            className="mail-primary"
+            disabled={!metadata}
+            onClick={() => compose()}
+          >
+            ＋ Compose
+          </button>
+        )}
       </div>
       {notice && (
         <p className="mail-success" role="status">
@@ -823,39 +825,49 @@ export function Mail({ csrf }) {
                   </div>
                 </dl>
                 <div className="mail-reader-actions">
-                  <button
-                    className="mail-primary"
-                    onClick={() => compose("reply")}
-                  >
-                    Reply
-                  </button>
-                  <button
-                    className="mail-secondary"
-                    onClick={() => compose("all")}
-                  >
-                    Reply all
-                  </button>
-                  <button
-                    className="mail-secondary"
-                    onClick={() => compose("forward")}
-                  >
-                    Forward
-                  </button>
-                  <button
-                    className="mail-secondary"
-                    disabled={flagBusy}
-                    onClick={() => changeFlag("seen", !message.seen)}
-                  >
-                    {message.seen ? "Mark unread" : "Mark read"}
-                  </button>
-                  <button
-                    className="mail-icon-button"
-                    aria-label={message.starred ? "Remove star" : "Star email"}
-                    disabled={flagBusy}
-                    onClick={() => changeFlag("starred", !message.starred)}
-                  >
-                    {message.starred ? "★" : "☆"}
-                  </button>
+                  {capabilities["mail.send"] && (
+                    <>
+                      <button
+                        className="mail-primary"
+                        onClick={() => compose("reply")}
+                      >
+                        Reply
+                      </button>
+                      <button
+                        className="mail-secondary"
+                        onClick={() => compose("all")}
+                      >
+                        Reply all
+                      </button>
+                      <button
+                        className="mail-secondary"
+                        onClick={() => compose("forward")}
+                      >
+                        Forward
+                      </button>
+                    </>
+                  )}
+                  {capabilities["mail.flags"] && (
+                    <>
+                      <button
+                        className="mail-secondary"
+                        disabled={flagBusy}
+                        onClick={() => changeFlag("seen", !message.seen)}
+                      >
+                        {message.seen ? "Mark unread" : "Mark read"}
+                      </button>
+                      <button
+                        className="mail-icon-button"
+                        aria-label={
+                          message.starred ? "Remove star" : "Star email"
+                        }
+                        disabled={flagBusy}
+                        onClick={() => changeFlag("starred", !message.starred)}
+                      >
+                        {message.starred ? "★" : "☆"}
+                      </button>
+                    </>
+                  )}
                 </div>
               </header>
               {message.html ? (
@@ -868,22 +880,23 @@ export function Mail({ csrf }) {
                   {message.text || "This email has no readable message body."}
                 </pre>
               )}
-              {message.attachments.length > 0 && (
-                <section className="mail-attachments">
-                  <h4>Attachments</h4>
-                  <p>Download files only when you trust the sender.</p>
-                  {message.attachments.map((file) => (
-                    <a
-                      key={file.part}
-                      href={`/api/mail/messages/${message.uid}/attachments/${file.part}?${new URLSearchParams({ folder: message.folder, validity: message.validity })}`}
-                      download
-                    >
-                      <span>↓ {file.filename}</span>
-                      <small>{sizeLabel(file.size ?? 0)}</small>
-                    </a>
-                  ))}
-                </section>
-              )}
+              {capabilities["mail.attachments"] &&
+                message.attachments.length > 0 && (
+                  <section className="mail-attachments">
+                    <h4>Attachments</h4>
+                    <p>Download files only when you trust the sender.</p>
+                    {message.attachments.map((file) => (
+                      <a
+                        key={file.part}
+                        href={`/api/mail/messages/${message.uid}/attachments/${file.part}?${new URLSearchParams({ folder: message.folder, validity: message.validity })}`}
+                        download
+                      >
+                        <span>↓ {file.filename}</span>
+                        <small>{sizeLabel(file.size ?? 0)}</small>
+                      </a>
+                    ))}
+                  </section>
+                )}
             </>
           ) : (
             !detailError && (
@@ -891,15 +904,16 @@ export function Mail({ csrf }) {
                 <span aria-hidden="true">✉</span>
                 <h3>Your inbox, connected</h3>
                 <p>
-                  Select an email to read it, or compose a message from a
-                  Drakora address.
+                  Select an email to read it.
+                  {capabilities["mail.send"] &&
+                    " You can also compose a message from a Drakora address."}
                 </p>
               </div>
             )
           )}
         </article>
       </div>
-      {draft && (
+      {capabilities["mail.send"] && draft && (
         <Composer
           key={draft.sendId}
           draft={draft}

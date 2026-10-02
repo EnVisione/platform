@@ -11,6 +11,7 @@ import { canHost, permissions } from "./roles.js";
 import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
 import { discordRoleTransport, staffRoleSync } from "./role-sync.js";
+import { discordRoleAdministration } from "./role-assignment.js";
 
 export function discordOffice(config, store) {
   let guild;
@@ -45,6 +46,7 @@ export function discordOffice(config, store) {
   let connecting = false;
   let attempts = 0;
   let stopped = false;
+  let roleListener = () => {};
   const voiceLink = (id) =>
     `https://discord.com/channels/${config.guildId}/${id}`;
   async function channel(id, type) {
@@ -253,6 +255,7 @@ export function discordOffice(config, store) {
       )
     ) {
       void roleSync.retry(true).catch(roleFailure);
+      roleListener();
       return;
     }
     if (
@@ -276,6 +279,7 @@ export function discordOffice(config, store) {
       pending: data.pending,
       joinedAt: data.joined_at,
     };
+    roleListener(member.id);
     void (
       packet.t === "GUILD_MEMBER_ADD"
         ? roleSync.join(member)
@@ -338,6 +342,11 @@ export function discordOffice(config, store) {
   return {
     snapshot,
     meetings,
+    roleSync,
+    roleAdministration: discordRoleAdministration(config, client),
+    onRolesChanged(listener) {
+      roleListener = listener;
+    },
     close: async () => {
       stopped = true;
       clearTimeout(reconnectTimer);

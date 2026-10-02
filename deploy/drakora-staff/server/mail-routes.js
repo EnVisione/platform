@@ -53,6 +53,7 @@ export function mailRouter({ service, authorize, requireMutation, staffHost }) {
     ),
   );
   router.get("/messages/:uid/attachments/:part", async (req, res) => {
+    await authorize(req, "mail.attachments");
     const attachment = await service.attachment({
       uid: req.params.uid,
       folder: req.query.folder,
@@ -67,9 +68,10 @@ export function mailRouter({ service, authorize, requireMutation, staffHost }) {
     requireMutation(req);
     next();
   });
-  router.post("/flags", express.json({ limit: "8kb" }), async (req, res) =>
-    res.json(await service.flags(req.body)),
-  );
+  router.post("/flags", express.json({ limit: "8kb" }), async (req, res) => {
+    await authorize(req, "mail.flags");
+    res.json(await service.flags(req.body));
+  });
   router.post(
     "/send",
     rateLimit({
@@ -80,7 +82,10 @@ export function mailRouter({ service, authorize, requireMutation, staffHost }) {
       legacyHeaders: false,
     }),
     express.json({ limit: "15mb" }),
-    async (req, res) => res.json(await service.send(req.mailUser.id, req.body)),
+    async (req, res) => {
+      await authorize(req, "mail.send");
+      res.json(await service.send(req.mailUser.id, req.body));
+    },
   );
   router.use((error, _req, res, next) => {
     if (error.type === "entity.too.large")

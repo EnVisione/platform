@@ -21,6 +21,7 @@ import {
 } from "../shared/application-form.js";
 import { discordClient } from "../server/discord.js";
 import { applicationNotifications } from "../server/application-notifications.js";
+import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
 const config = {
@@ -2037,4 +2038,31 @@ test("switching an undelivered email update back to Discord exposes the new queu
     service.view("session").submitted.notifications[0].failedAt,
     undefined,
   );
+});
+
+test("application feedback, review, approval and denial enforce independent saved permissions", async (t) => {
+  const { service, store } = setup(t);
+  const policy = rolePermissions(config, store);
+  const current = policy.read(reviewer("20"));
+  const roles = current.roles
+    .filter((role) => role.id)
+    .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
+  const sr = roles.find((role) => role.id === "29");
+  sr.permissions["applications.comment"] = false;
+  sr.permissions["applications.review"] = true;
+  sr.permissions["applications.deny"] = true;
+  policy.save(reviewer("20"), { revision: current.revision, roles });
+  service.patch("scoped", { role: "community", answers: answers() });
+  const { id } = await service.submit("scoped");
+  const member = policy.apply(reviewer("29"));
+  assert.throws(
+    () => service.addComment(id, member, "Staff feedback"),
+    /application_review_role_required/,
+  );
+  assert.equal(service.startReview(id, member).status, "Reviewing");
+  assert.throws(
+    () => service.decide(id, member, "approve"),
+    /application_decision_role_required/,
+  );
+  assert.equal(service.decide(id, member, "deny", "", 0).status, "Denied");
 });

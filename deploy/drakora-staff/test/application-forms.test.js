@@ -11,6 +11,7 @@ import {
   questionList,
   activeFormQuestions,
 } from "../shared/application-form.js";
+import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 const config = {
   ...fixture,
@@ -380,4 +381,27 @@ test("each edited application type accepts only its active questions and keeps p
     assert.equal(record.answers[custom().key], "Okay");
     assert.equal(record.questionnaireVersion, forms.read(user()).version);
   }
+});
+
+test("question editor permission is separate from approval and requires current access", (t) => {
+  const { forms, store } = setup(t);
+  const policy = rolePermissions(config, store);
+  const current = policy.read(user("20"));
+  const roles = current.roles
+    .filter((role) => role.id)
+    .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
+  roles.find((role) => role.id === "29").permissions["applications.edit"] =
+    true;
+  roles.find((role) => role.id === "28").permissions["applications.edit"] =
+    false;
+  policy.save(user("20"), { revision: current.revision, roles });
+  assert.throws(
+    () => forms.read(policy.apply(user("28"))),
+    /application_decision_role_required/,
+  );
+  assert.doesNotThrow(() => forms.read(policy.apply(user("29"))));
+  assert.equal(
+    policy.apply(user("29")).capabilities["applications.approve"],
+    false,
+  );
 });

@@ -1,5 +1,5 @@
 import { AuthError } from "./discord.js";
-import { applicationDecisionAccess } from "./roles.js";
+import { staffCapability } from "./roles.js";
 import { applicationScenarios } from "./application-scenarios.js";
 import {
   applicationRoles,
@@ -163,7 +163,7 @@ export function applicationForms(config, store) {
     return value;
   }
   function authorize(user) {
-    if (!applicationDecisionAccess(config, user))
+    if (!staffCapability(config, user, "applications.edit"))
       throw new AuthError("application_decision_role_required");
   }
   return {

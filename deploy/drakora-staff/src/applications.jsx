@@ -20,19 +20,23 @@ function applicationListSearch(offset, { role, status, name }) {
   return `?${query}`;
 }
 
-export function StaffApplications({ csrf, canDecide }) {
+export function StaffApplications({ csrf, capabilities }) {
   if (location.pathname === "/applications/editor")
-    return canDecide ? (
+    return capabilities["applications.edit"] ? (
       <ApplicationFormEditor csrf={csrf} />
     ) : (
       <p className="notice">
-        Only Managers and Founders can edit application questions.
+        Your roles do not have permission to edit application questions.
       </p>
     );
-  return <ApplicationReviews csrf={csrf} canDecide={canDecide} />;
+  return <ApplicationReviews csrf={csrf} capabilities={capabilities} />;
 }
 
-function ApplicationReviews({ csrf, canDecide }) {
+function ApplicationReviews({ csrf, capabilities }) {
+  const canDecide =
+    capabilities["applications.review"] ||
+    capabilities["applications.approve"] ||
+    capabilities["applications.deny"];
   const id = location.pathname.split("/")[2];
   const [data, setData] = useState(null);
   const [offset, setOffset] = useState(() => {
@@ -86,11 +90,11 @@ function ApplicationReviews({ csrf, canDecide }) {
       if (!response.ok) {
         const messages = {
           application_review_role_required:
-            "Feedback requires Jr Moderator rank or higher and Dashboard access.",
+            "Your roles do not have permission to post application feedback.",
           application_decision_role_required:
-            "Only Managers and Founders with Dashboard access can start review, approve, or deny applications.",
+            "Your roles do not have permission for this application action.",
           application_already_decided:
-            "Another Manager or Founder already decided this application. Refresh to see the decision.",
+            "Another reviewer already decided this application. Refresh to see the decision.",
           application_comments_full:
             "This application has reached its feedback limit.",
           invalid_application_comment:
@@ -128,7 +132,7 @@ function ApplicationReviews({ csrf, canDecide }) {
         if (!response.ok)
           throw new Error(
             response.status === 403
-              ? "Application access requires the Dashboard role and Jr Moderator rank or higher."
+              ? "Your roles do not have permission to view applications."
               : response.status === 404
                 ? "Application not found."
                 : "Could not load applications.",
@@ -152,7 +156,7 @@ function ApplicationReviews({ csrf, canDecide }) {
     return (
       <section className="staff-applications">
         <h2>Staff Applications</h2>
-        {canDecide && (
+        {capabilities["applications.edit"] && (
           <a
             className="apply-button apply-primary application-editor-link"
             href="/applications/editor"
@@ -161,9 +165,8 @@ function ApplicationReviews({ csrf, canDecide }) {
           </a>
         )}
         <p>
-          Private submissions for Jr Moderator rank and higher. Share what you
-          know about the applicant. Managers and Founders make the final
-          decision.
+          Private submissions for staff with application access. Share what you
+          know about the applicant. Review actions follow your role permissions.
         </p>
         <form
           onSubmit={(event) => {
@@ -421,27 +424,29 @@ function ApplicationReviews({ csrf, canDecide }) {
               </article>
             ))}
             {!data.comments?.length && <p>No staff feedback yet.</p>}
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                review("comments", { comment });
-              }}
-            >
-              <label className="apply-field">
-                <span>Your feedback</span>
-                <textarea
-                  required
-                  minLength={3}
-                  maxLength={4000}
-                  value={comment}
-                  onChange={(event) => setComment(event.target.value)}
-                  disabled={busy}
-                />
-              </label>
-              <button className="apply-button" disabled={busy}>
-                Post feedback
-              </button>
-            </form>
+            {capabilities["applications.comment"] && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  review("comments", { comment });
+                }}
+              >
+                <label className="apply-field">
+                  <span>Your feedback</span>
+                  <textarea
+                    required
+                    minLength={3}
+                    maxLength={4000}
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <button className="apply-button" disabled={busy}>
+                  Post feedback
+                </button>
+              </form>
+            )}
           </section>
           <section
             className="application-response"
@@ -472,80 +477,87 @@ function ApplicationReviews({ csrf, canDecide }) {
             ) : canDecide ? (
               <>
                 <p>
-                  Only Managers and Founders can start review or decide
-                  applications. Applicants receive updates using their selected
-                  notification method. Discord roles are assigned separately.
+                  Review actions follow your role permissions. Applicants
+                  receive updates using their selected notification method.
+                  Discord roles are assigned separately.
                 </p>
-                {data.status === "Received" && (
-                  <button
-                    className="apply-button application-review-start"
-                    disabled={busy}
-                    onClick={() => review("review", {})}
-                  >
-                    Start reviewing
-                  </button>
+                {capabilities["applications.review"] &&
+                  data.status === "Received" && (
+                    <button
+                      className="apply-button application-review-start"
+                      disabled={busy}
+                      onClick={() => review("review", {})}
+                    >
+                      Start reviewing
+                    </button>
+                  )}
+                {(capabilities["applications.approve"] ||
+                  capabilities["applications.deny"]) && (
+                  <label className="apply-field">
+                    <span>Message to applicant (optional)</span>
+                    <textarea
+                      maxLength={2000}
+                      placeholder="Leave blank to send a generic denial message."
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
                 )}
-                <label className="apply-field">
-                  <span>Message to applicant (optional)</span>
-                  <textarea
-                    maxLength={2000}
-                    placeholder="Leave blank to send a generic denial message."
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    disabled={busy}
-                  />
-                </label>
-                <label className="apply-field">
-                  <span>
-                    Wait before reapplying for this role (days, if denied)
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={365}
-                    step={1}
-                    value={reapplyDays}
-                    onChange={(event) => setReapplyDays(event.target.value)}
-                    disabled={busy}
-                  />
-                  <small>
-                    Choose 0–365 whole days, counted from the denial. Zero adds
-                    no waiting period.
-                  </small>
-                </label>
+                {capabilities["applications.deny"] && (
+                  <label className="apply-field">
+                    <span>
+                      Wait before reapplying for this role (days, if denied)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={365}
+                      step={1}
+                      value={reapplyDays}
+                      onChange={(event) => setReapplyDays(event.target.value)}
+                      disabled={busy}
+                    />
+                    <small>
+                      Choose 0–365 whole days, counted from the denial. Zero
+                      adds no waiting period.
+                    </small>
+                  </label>
+                )}
                 <div className="apply-actions">
-                  <button
-                    className="apply-button application-approve"
-                    disabled={busy}
-                    onClick={() =>
-                      review("decision", { decision: "approve", reason })
-                    }
-                  >
-                    Approve application
-                  </button>
-                  <button
-                    className="apply-secondary application-deny"
-                    disabled={busy}
-                    onClick={() =>
-                      review("decision", {
-                        decision: "deny",
-                        reason,
-                        reapplyDays:
-                          reapplyDays.trim() === ""
-                            ? null
-                            : Number(reapplyDays),
-                      })
-                    }
-                  >
-                    Deny application
-                  </button>
+                  {capabilities["applications.approve"] && (
+                    <button
+                      className="apply-button application-approve"
+                      disabled={busy}
+                      onClick={() =>
+                        review("decision", { decision: "approve", reason })
+                      }
+                    >
+                      Approve application
+                    </button>
+                  )}
+                  {capabilities["applications.deny"] && (
+                    <button
+                      className="apply-secondary application-deny"
+                      disabled={busy}
+                      onClick={() =>
+                        review("decision", {
+                          decision: "deny",
+                          reason,
+                          reapplyDays:
+                            reapplyDays.trim() === ""
+                              ? null
+                              : Number(reapplyDays),
+                        })
+                      }
+                    >
+                      Deny application
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
-              <p>
-                Awaiting a Manager or Founder decision. You can add staff
-                feedback above.
-              </p>
+              <p>Awaiting a decision from an authorized reviewer.</p>
             )}
             {reviewError && (
               <p className="apply-error" role="alert">

@@ -5,10 +5,11 @@ import { PublicApplication } from "./apply.jsx";
 import { StaffApplications } from "./applications.jsx";
 import { Office } from "./office.jsx";
 import { Mail } from "./mail.jsx";
+import { Roles } from "./roles.jsx";
 import logo from "./assets/drakora-logo.png";
 
 const messages = {
-  mail_role_required: "Email access requires Admin, Manager or Founder rank.",
+  mail_role_required: "Your roles do not have permission to open Email.",
   invalid_minecraft_name:
     "Use your Java Edition username: 3–16 letters, numbers, or underscores.",
   minecraft_name_taken:
@@ -48,6 +49,7 @@ function safeTarget(value) {
       "/applications",
       "/applications/editor",
       "/email",
+      "/roles",
     ].includes(value)
   )
     return value;
@@ -284,7 +286,7 @@ function MinecraftRegistration({ user, csrf, next, onLogout }) {
     </main>
   );
 }
-function MinecraftSettings({ minecraft, csrf }) {
+function MinecraftSettings({ minecraft, csrf, canChange }) {
   const [link, setLink] = useState(minecraft);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
@@ -333,29 +335,31 @@ function MinecraftSettings({ minecraft, csrf }) {
           Founder or Manager approval
         </p>
       )}
-      <form onSubmit={request}>
-        <label htmlFor="new-minecraft-name">Request a different name</label>
-        <div className="change-name-row">
-          <input
-            id="new-minecraft-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            minLength={3}
-            maxLength={16}
-            pattern="[A-Za-z0-9_]{3,16}"
-            required
-          />
-          <button className="button save-accent">Request change</button>
-        </div>
-        {message && (
-          <p
-            className={error ? "settings-message error" : "settings-message"}
-            role="status"
-          >
-            {message}
-          </p>
-        )}
-      </form>
+      {canChange && (
+        <form onSubmit={request}>
+          <label htmlFor="new-minecraft-name">Request a different name</label>
+          <div className="change-name-row">
+            <input
+              id="new-minecraft-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              minLength={3}
+              maxLength={16}
+              pattern="[A-Za-z0-9_]{3,16}"
+              required
+            />
+            <button className="button save-accent">Request change</button>
+          </div>
+          {message && (
+            <p
+              className={error ? "settings-message error" : "settings-message"}
+              role="status"
+            >
+              {message}
+            </p>
+          )}
+        </form>
+      )}
     </section>
   );
 }
@@ -520,6 +524,7 @@ function App() {
   const settingsPage = location.pathname === "/settings";
   const accountsPage = location.pathname === "/accounts";
   const emailPage = location.pathname === "/email";
+  const rolesPage = location.pathname === "/roles";
   const applicationsPage =
     location.pathname === "/applications" ||
     location.pathname.startsWith("/applications/");
@@ -635,10 +640,14 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage ? "" : " active"}`}
             href="/"
             aria-current={
-              settingsPage || accountsPage || applicationsPage || emailPage
+              settingsPage ||
+              accountsPage ||
+              applicationsPage ||
+              emailPage ||
+              rolesPage
                 ? undefined
                 : "page"
             }
@@ -677,13 +686,24 @@ function App() {
               <span aria-hidden="true">✉</span>Email
             </a>
           )}
-          <a
-            className={`nav-item${settingsPage ? " active" : ""}`}
-            href="/settings"
-            aria-current={settingsPage ? "page" : undefined}
-          >
-            <span aria-hidden="true">⚙</span>Settings
-          </a>
+          {user.rolesPanel && (
+            <a
+              className={`nav-item${rolesPage ? " active" : ""}`}
+              href="/roles"
+              aria-current={rolesPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">♜</span>Roles
+            </a>
+          )}
+          {user.capabilities["settings.view"] && (
+            <a
+              className={`nav-item${settingsPage ? " active" : ""}`}
+              href="/settings"
+              aria-current={settingsPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">⚙</span>Settings
+            </a>
+          )}
         </nav>
         <div className="account-bar">
           {user.avatar ? (
@@ -714,18 +734,24 @@ function App() {
                   ? "Staff Applications"
                   : emailPage
                     ? "Email"
-                    : "Overview"}
+                    : rolesPage
+                      ? "Roles"
+                      : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
             {(settingsPage ||
               accountsPage ||
               applicationsPage ||
-              emailPage) && <a href="/">Overview</a>}
+              emailPage ||
+              rolesPage) && <a href="/">Overview</a>}
             {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
             {user.applications && !applicationsPage && (
               <a href="/applications">Applications</a>
             )}
-            {!settingsPage && <a href="/settings">Settings</a>}
+            {user.capabilities["settings.view"] && !settingsPage && (
+              <a href="/settings">Settings</a>
+            )}
+            {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
             {user.mail && !emailPage && <a href="/email">Email</a>}
           </nav>
           <button className="signout" onClick={logout} disabled={busy}>
@@ -738,7 +764,9 @@ function App() {
               ? "dashboard dashboard-applications"
               : emailPage
                 ? "dashboard dashboard-mail"
-                : "dashboard"
+                : rolesPage
+                  ? "dashboard dashboard-roles"
+                  : "dashboard"
           }
         >
           {error && (
@@ -746,23 +774,32 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {emailPage ? (
-            user.mail ? (
-              <Mail csrf={state.csrf} />
+          {rolesPage ? (
+            user.rolesPanel ? (
+              <Roles csrf={state.csrf} userId={user.id} />
             ) : (
               <p className="notice">
-                Email access requires Admin, Manager or Founder rank.
+                Roles requires Manager or Founder rank and role management
+                access.
+              </p>
+            )
+          ) : emailPage ? (
+            user.mail ? (
+              <Mail csrf={state.csrf} capabilities={user.capabilities} />
+            ) : (
+              <p className="notice">
+                Your roles do not have permission to open Email.
               </p>
             )
           ) : applicationsPage ? (
             user.applications ? (
               <StaffApplications
                 csrf={state.csrf}
-                canDecide={user.applicationDecision}
+                capabilities={user.capabilities}
               />
             ) : (
               <p className="notice">
-                Application access requires Jr Moderator rank or higher.
+                Your roles do not have permission to view applications.
               </p>
             )
           ) : settingsPage ? (
@@ -772,7 +809,11 @@ function App() {
                 accent={accent}
                 onChange={setAccent}
               />
-              <MinecraftSettings minecraft={user.minecraft} csrf={state.csrf} />
+              <MinecraftSettings
+                minecraft={user.minecraft}
+                csrf={state.csrf}
+                canChange={user.capabilities["settings.minecraft"]}
+              />
             </>
           ) : accountsPage ? (
             <Accounts

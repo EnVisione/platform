@@ -1,5 +1,6 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
+import { staffCapability, communityRankNames } from "./roles.js";
 import { hash } from "./store.js";
 import {
   applicationRoles,
@@ -15,11 +16,6 @@ import {
   applicationNotifications,
   notificationMode,
 } from "./application-notifications.js";
-import {
-  communityRankNames,
-  applicationReviewAccess,
-  applicationDecisionAccess,
-} from "./roles.js";
 
 const week = 7 * 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
@@ -589,7 +585,7 @@ export function applicationService(
     });
   }
   function addComment(id, user, value) {
-    if (!applicationReviewAccess(config, user))
+    if (!staffCapability(config, user, "applications.comment"))
       throw new AuthError("application_review_role_required");
     const comment = text(value);
     if (comment.length < 3 || comment.length > 4000)
@@ -634,7 +630,7 @@ export function applicationService(
     return applicationView(record);
   }
   function startReview(id, user) {
-    if (!applicationDecisionAccess(config, user))
+    if (!staffCapability(config, user, "applications.review"))
       throw new AuthError("application_decision_role_required");
     return store.transaction(() => {
       const record = store.get("application", id);
@@ -651,7 +647,13 @@ export function applicationService(
     });
   }
   function decide(id, user, decision, reason = "", reapplyDays = 7) {
-    if (!applicationDecisionAccess(config, user))
+    if (
+      !staffCapability(
+        config,
+        user,
+        decision === "deny" ? "applications.deny" : "applications.approve",
+      )
+    )
       throw new AuthError("application_decision_role_required");
     if (
       !["approve", "deny"].includes(decision) ||

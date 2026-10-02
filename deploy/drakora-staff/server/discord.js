@@ -9,7 +9,12 @@ export class AuthError extends Error {
   }
 }
 
-export function discordClient(config, store, fetcher = fetch) {
+export function discordClient(
+  config,
+  store,
+  fetcher = fetch,
+  applyPermissions = (user) => user,
+) {
   const pending = new Map();
   async function token(params) {
     const response = await fetcher("https://discord.com/api/oauth2/token", {
@@ -96,7 +101,7 @@ export function discordClient(config, store, fetcher = fetch) {
         id,
         refresh(id, force).finally(() => pending.delete(id)),
       );
-    return pending.get(id);
+    return applyPermissions(await pending.get(id));
   }
   async function identity(code) {
     const tokens = await token({
