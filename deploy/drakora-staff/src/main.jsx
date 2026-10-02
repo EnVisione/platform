@@ -66,6 +66,36 @@ function safeTarget(value) {
 function timeLabel(value) {
   return value ? new Date(value).toLocaleString() : "Not observed yet";
 }
+function DashboardClock() {
+  const [now, setNow] = useState(() => new Date());
+  const [formatter] = useState(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+  );
+  const zone = formatter.resolvedOptions().timeZone;
+  const label = zone.split("/").at(-1).replaceAll("_", " ");
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <time
+      className="dashboard-clock"
+      dateTime={now.toISOString()}
+      title={`${zone} · ${now.toLocaleDateString()}`}
+      aria-label={`Local time in ${label}: ${formatter.format(now)}`}
+    >
+      <span className="dashboard-clock-icon" aria-hidden="true">
+        ◷
+      </span>
+      <span className="dashboard-clock-zone">{label}</span>
+      <strong>{formatter.format(now)}</strong>
+    </time>
+  );
+}
 const defaultAccent = "#5865F2";
 function normalizeHex(value) {
   if (typeof value !== "string") return null;
@@ -800,6 +830,7 @@ function App() {
             {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
             {user.mail && !emailPage && <a href="/email">Email</a>}
           </nav>
+          <DashboardClock />
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>

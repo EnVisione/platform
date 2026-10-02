@@ -1,3 +1,14 @@
+html.drakora-embedded .antiStatusBar,
+html.drakora-embedded
+  .workbench-container:not(.inner)
+  > .antiPanel-application {
+  display: none;
+}
+html.drakora-embedded body > div > .app {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
 html.drakora-embedded.theme-dark {
   --staff-accent: #5865f2;
   --theme-bg-color: #313338;
