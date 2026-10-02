@@ -912,6 +912,7 @@ app.get("/api/applications", async (req, res) => {
     applications.list(offset, {
       role: req.query.role,
       status: req.query.status,
+      name: req.query.name,
     }),
   );
 });

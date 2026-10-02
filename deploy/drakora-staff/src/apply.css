@@ -447,7 +447,7 @@
 }
 .application-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: end;
   gap: 16px;
   margin: 24px 0 12px;
@@ -465,7 +465,8 @@
   font-size: 14px;
   font-weight: 600;
 }
-.application-filters select {
+.application-filters select,
+.application-filters input {
   width: 100%;
   min-width: 0;
   padding: 11px 12px;
@@ -475,6 +476,12 @@
   background: #1e1f22;
   font: inherit;
   color-scheme: dark;
+}
+.application-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  grid-column: 1 / -1;
 }
 .staff-applications > .application-retention {
   margin: 0 0 24px;
@@ -637,6 +644,7 @@
 }
 .staff-applications button:focus-visible,
 .application-filters select:focus-visible,
+.application-filters input:focus-visible,
 .staff-applications a:focus-visible {
   outline: 2px solid #a8b0ff;
   outline-offset: 3px;

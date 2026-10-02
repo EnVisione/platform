@@ -692,23 +692,33 @@ export function applicationService(
       return saveStatus(record, decision === "approve" ? "approved" : "denied");
     });
   }
-  function list(offset = 0, { role = "", status = "" } = {}) {
+  function list(offset = 0, { role = "", status = "", name = "" } = {}) {
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
       typeof role !== "string" ||
       (role && !Object.hasOwn(applicationRoles, role)) ||
       typeof status !== "string" ||
-      (status && !Object.hasOwn(applicationStatuses, status))
+      (status && !Object.hasOwn(applicationStatuses, status)) ||
+      typeof name !== "string" ||
+      name.length > 80
     )
       throw new AuthError("invalid_request", 400);
+    const search = name.trim().toLowerCase();
     const page = store.page(
       "application-summary",
       50,
       offset,
-      role || status
+      role || status || search
         ? (item) =>
-            (!role || item.role === role) && (!status || item.status === status)
+            (!role || item.role === role) &&
+            (!status || item.status === status) &&
+            (!search ||
+              [item.name, item.ign, item.discordId].some(
+                (value) =>
+                  typeof value === "string" &&
+                  value.toLowerCase().includes(search),
+              ))
         : undefined,
     );
     return {

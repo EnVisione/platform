@@ -12,10 +12,11 @@ import { ApplicationPlayer } from "./application-player.jsx";
 import { ApplicationFormEditor } from "./application-form-editor.jsx";
 import { ApplicationStatus } from "./application-status.jsx";
 
-function applicationListSearch(offset, { role, status }) {
+function applicationListSearch(offset, { role, status, name }) {
   const query = new URLSearchParams({ offset: String(offset) });
   if (role) query.set("role", role);
   if (status) query.set("status", status);
+  if (name) query.set("name", name);
   return `?${query}`;
 }
 
@@ -44,13 +45,16 @@ function ApplicationReviews({ csrf, canDecide }) {
     const query = new URLSearchParams(location.search);
     const role = query.get("role") ?? "";
     const status = query.get("status") ?? "";
+    const name = query.get("name") ?? "";
     return {
       role: Object.hasOwn(applicationRoles, role) ? role : "",
       status: Object.hasOwn(applicationStatuses, status) ? status : "",
+      name: name.length <= 80 ? name.trim() : "",
     };
   });
+  const [nameInput, setNameInput] = useState(filters.name);
   const listSearch = applicationListSearch(offset, filters);
-  const filtered = Boolean(filters.role || filters.status);
+  const filtered = Boolean(filters.role || filters.status || filters.name);
   function updateList(nextFilters, nextOffset = 0) {
     setFilters(nextFilters);
     setOffset(nextOffset);
@@ -163,48 +167,79 @@ function ApplicationReviews({ csrf, canDecide }) {
           know about the applicant. Managers and Founders make the final
           decision.
         </p>
-        <fieldset className="application-filters">
-          <legend className="sr-only">Filter staff applications</legend>
-          <label>
-            Application type
-            <select
-              value={filters.role}
-              onChange={(event) =>
-                updateList({ ...filters, role: event.target.value })
-              }
-            >
-              <option value="">All types</option>
-              {Object.entries(applicationRoles).map(([value, role]) => (
-                <option key={value} value={value}>
-                  {role.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Status
-            <select
-              value={filters.status}
-              onChange={(event) =>
-                updateList({ ...filters, status: event.target.value })
-              }
-            >
-              <option value="">All statuses</option>
-              {Object.entries(applicationStatuses).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={!filtered}
-            onClick={() => updateList({ role: "", status: "" })}
-          >
-            Reset filters
-          </button>
-        </fieldset>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            updateList({ ...filters, name: nameInput.trim() });
+          }}
+        >
+          <fieldset className="application-filters">
+            <legend className="sr-only">Filter staff applications</legend>
+            <label>
+              Applicant name
+              <input
+                type="search"
+                placeholder="Name, Minecraft username, or Discord ID"
+                maxLength={80}
+                value={nameInput}
+                onChange={(event) => setNameInput(event.target.value)}
+              />
+            </label>
+            <label>
+              Application type
+              <select
+                value={filters.role}
+                onChange={(event) =>
+                  updateList({
+                    ...filters,
+                    name: nameInput.trim(),
+                    role: event.target.value,
+                  })
+                }
+              >
+                <option value="">All types</option>
+                {Object.entries(applicationRoles).map(([value, role]) => (
+                  <option key={value} value={value}>
+                    {role.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Status
+              <select
+                value={filters.status}
+                onChange={(event) =>
+                  updateList({
+                    ...filters,
+                    name: nameInput.trim(),
+                    status: event.target.value,
+                  })
+                }
+              >
+                <option value="">All statuses</option>
+                {Object.entries(applicationStatuses).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="application-filter-actions">
+              <button type="submit">Search</button>
+              <button
+                type="button"
+                disabled={!filtered && !nameInput}
+                onClick={() => {
+                  setNameInput("");
+                  updateList({ role: "", status: "", name: "" });
+                }}
+              >
+                Reset filters
+              </button>
+            </div>
+          </fieldset>
+        </form>
         <p className="application-retention">
           Denied applications are kept for reference.
         </p>

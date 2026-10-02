@@ -1016,8 +1016,74 @@ test("application filters combine type and status and retain denied records afte
     "More role experience needed.",
   );
   assert.equal(restarted.get(deniedId).answers.ign, "builder_3");
+  assert.equal(
+    restarted.list(0, { name: "BUILDER_3", status: "Denied" }).items[0].id,
+    deniedId,
+  );
   assert.equal(restarted.list().total, 16);
   assert.ok(ids.every((id) => restarted.get(id)));
+});
+
+test("application name filters match preferred names, Minecraft names, and Discord IDs", (t) => {
+  const { service, store } = setup(t);
+  const rows = [
+    {
+      id: "builder",
+      name: "Rani [Builder]",
+      ign: "Lunar_Player",
+      discordId: "123456789012345678",
+      role: "builder",
+      status: "Received",
+    },
+    {
+      id: "artist",
+      name: "Rani",
+      ign: "Lunar_Player",
+      discordId: "123456789012345678",
+      role: "artist",
+      status: "Denied",
+    },
+    {
+      id: "developer",
+      name: "Another applicant",
+      ign: "Rani_Dev",
+      discordId: "987654321098765432",
+      role: "developer",
+      status: "Reviewing",
+    },
+    { id: "legacy", role: "community", status: "Received" },
+  ];
+  for (const [index, row] of rows.entries())
+    store.set(
+      "application-summary",
+      `${Date.now() + index}.${row.id}`,
+      { ...row, browserSessionHash: "private-session-hash" },
+      Number.MAX_SAFE_INTEGER,
+    );
+  assert.equal(service.list(0, { name: "  rAnI  " }).total, 3);
+  assert.equal(service.list(0, { name: "lUnAr_PlAyEr" }).total, 2);
+  const account = service.list(0, { name: "123456789012345678" });
+  assert.equal(account.total, 2);
+  assert.deepEqual(
+    new Set(account.items.map((item) => item.id)),
+    new Set(["builder", "artist"]),
+  );
+  assert.ok(
+    account.items.every((item) => !Object.hasOwn(item, "browserSessionHash")),
+  );
+  assert.equal(service.list(0, { name: "[Builder]" }).items[0].id, "builder");
+  assert.equal(service.list(0, { name: "%" }).total, 0);
+  assert.equal(service.list(0, { name: "private-session-hash" }).total, 0);
+  assert.equal(service.list(0, { name: "   " }).total, 4);
+  assert.deepEqual(service.list(0, { name: "not found" }), {
+    items: [],
+    total: 0,
+  });
+  assert.equal(
+    service.list(0, { name: "Rani", role: "artist", status: "Denied" }).items[0]
+      .id,
+    "artist",
+  );
 });
 
 test("application filters search beyond the first page and paginate matching results only", (t) => {
@@ -1029,6 +1095,7 @@ test("application filters search beyond the first page and paginate matching res
       createdAt: createdAt + index,
       role: index < 30 ? "artist" : "community",
       status: index === 29 ? "Reviewing" : "Received",
+      name: index < 80 ? "Rani" : "Another applicant",
     };
     store.set(
       "application-summary",
@@ -1040,7 +1107,7 @@ test("application filters search beyond the first page and paginate matching res
   store.set(
     "application-summary",
     "expired",
-    { role: "artist", status: "Reviewing" },
+    { role: "artist", status: "Reviewing", name: "Rani" },
     Date.now() - 1,
   );
   store.set(
@@ -1075,9 +1142,31 @@ test("application filters search beyond the first page and paginate matching res
     items: [],
     total: 80,
   });
+  const namedFirst = service.list(0, { name: "Rani" });
+  const namedSecond = service.list(50, { name: "Rani" });
+  assert.equal(namedFirst.total, 80);
+  assert.equal(namedSecond.total, 80);
+  assert.equal(namedFirst.items.length, 50);
+  assert.equal(namedFirst.items[0].id, "summary-79");
+  assert.equal(namedSecond.items.length, 30);
+  assert.equal(namedSecond.items.at(-1).id, "summary-0");
+  assert.equal(
+    new Set([...namedFirst.items, ...namedSecond.items].map((item) => item.id))
+      .size,
+    80,
+  );
+  assert.equal(
+    service.list(0, { name: "Rani", role: "community", status: "Received" })
+      .total,
+    50,
+  );
+  assert.equal(
+    service.list(0, { name: "Rani", status: "Reviewing" }).items[0].id,
+    "summary-29",
+  );
 });
 
-test("application filters reject invalid types, statuses, and offsets", (t) => {
+test("application filters reject invalid types, statuses, names, and offsets", (t) => {
   const { service } = setup(t);
   for (const role of [
     "worker",
@@ -1106,6 +1195,11 @@ test("application filters reject invalid types, statuses, and offsets", (t) => {
   for (const offset of [-1, 0.5, NaN, Infinity, "0", []])
     assert.throws(
       () => service.list(offset),
+      (error) => error.code === "invalid_request" && error.status === 400,
+    );
+  for (const name of [null, {}, ["Rani"], 123, "a".repeat(81)])
+    assert.throws(
+      () => service.list(0, { name }),
       (error) => error.code === "invalid_request" && error.status === 400,
     );
   assert.deepEqual(service.list(0, { role: "", status: "" }), {
