@@ -1,5 +1,11 @@
-html.drakora-embedded {
+html.drakora-embedded.theme-dark {
   --staff-accent: #5865f2;
+  --theme-bg-color: #313338;
+  --theme-panel-color: #313338;
+  --theme-navpanel-color: #2b2d31;
+  --theme-navpanel-selected: #404249;
+  --theme-navpanel-hovered: #383a40;
+  --theme-navpanel-icons-color: #b5bac1;
   --theme-caption-color: #f2f3f5;
   --theme-content-color: #dbdee1;
   --theme-dark-color: #b5bac1;
@@ -10,12 +16,18 @@ html.drakora-embedded {
   --theme-dialog-border-color: #45474f;
   --button-border-color: #45474f;
   --popup-bg-color: #2b2d31;
+  --primary-button-default: #5865f2;
+  --primary-button-hovered: #4752c4;
+  --primary-button-pressed: #3c45a5;
+  --primary-edit-border-color: var(--staff-accent);
+  --global-accent-TextColor: #b4baff;
+  --global-accent-IconColor: #b4baff;
   color-scheme: dark;
 }
-.drakora-embedded .workbench-container {
+html.drakora-embedded.theme-dark .workbench-container {
   background: #313338;
 }
-.drakora-embedded .antiPanel-navigator {
+html.drakora-embedded.theme-dark .antiPanel-navigator {
   background: #2b2d31;
 }
 .drakora-embedded .ac-header {
