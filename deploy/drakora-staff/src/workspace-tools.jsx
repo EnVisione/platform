@@ -1,13 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import "./workspace-tools.css";
+import { accentForeground } from "../shared/accent.js";
 
 export const dashboardTools = [
-  {
-    view: "office",
-    title: "Office",
-    icon: "♟",
-    description: "Staff rooms, activity and meetings",
-  },
   {
     view: "tracker",
     title: "Tracker",
@@ -42,7 +37,6 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
         event.data?.type === "drakora-dashboard-open" &&
         [
           "/",
-          "/office",
           "/tracker",
           "/calendar",
           "/settings",
@@ -58,7 +52,11 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
       if (event.data?.type !== "drakora-workspace-ready") return;
       const send = (data) =>
         frame.current.contentWindow.postMessage(data, origin);
-      send({ type: "drakora-workspace-theme", accent });
+      send({
+        type: "drakora-workspace-theme",
+        accent,
+        foreground: accentForeground(accent),
+      });
       if (!opened.current) {
         opened.current = true;
         if (event.data.view !== view) {
@@ -81,7 +79,11 @@ export function WorkspaceTools({ view, origin, accent, onNavigate }) {
   useEffect(() => {
     if (ready)
       frame.current?.contentWindow.postMessage(
-        { type: "drakora-workspace-theme", accent },
+        {
+          type: "drakora-workspace-theme",
+          accent,
+          foreground: accentForeground(accent),
+        },
         origin,
       );
   }, [accent, origin, ready]);

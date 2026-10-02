@@ -3,11 +3,18 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { PublicApplication } from "./apply.jsx";
 import { StaffApplications } from "./applications.jsx";
-import { Office } from "./office.jsx";
 import { Mail } from "./mail.jsx";
 import { Roles } from "./roles.jsx";
 import { WorkspaceTools, dashboardTools } from "./workspace-tools.jsx";
 import logo from "./assets/drakora-logo.png";
+import { accentForeground } from "../shared/accent.js";
+import {
+  DashboardClock,
+  LocalClock,
+  TimeSettings,
+  useClock,
+  saveTimePreferences,
+} from "./time.jsx";
 
 const messages = {
   mail_role_required: "Your roles do not have permission to open Email.",
@@ -63,39 +70,6 @@ function safeTarget(value) {
   if (/^\/applications\/[a-f0-9-]{36}$/.test(value || "")) return value;
   return "/";
 }
-function timeLabel(value) {
-  return value ? new Date(value).toLocaleString() : "Not observed yet";
-}
-function DashboardClock() {
-  const [now, setNow] = useState(() => new Date());
-  const [formatter] = useState(
-    () =>
-      new Intl.DateTimeFormat(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-  );
-  const zone = formatter.resolvedOptions().timeZone;
-  const label = zone.split("/").at(-1).replaceAll("_", " ");
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return (
-    <time
-      className="dashboard-clock"
-      dateTime={now.toISOString()}
-      title={`${zone} · ${now.toLocaleDateString()}`}
-      aria-label={`Local time in ${label}: ${formatter.format(now)}`}
-    >
-      <span className="dashboard-clock-icon" aria-hidden="true">
-        ◷
-      </span>
-      <span className="dashboard-clock-zone">{label}</span>
-      <strong>{formatter.format(now)}</strong>
-    </time>
-  );
-}
 const defaultAccent = "#5865F2";
 function normalizeHex(value) {
   if (typeof value !== "string") return null;
@@ -104,15 +78,6 @@ function normalizeHex(value) {
   if (/^#[0-9a-f]{3}$/i.test(hex))
     return `#${[...hex.slice(1)].map((digit) => digit.repeat(2)).join("")}`.toUpperCase();
   return null;
-}
-function accentText(hex) {
-  const channels = [1, 3, 5].map((offset) => {
-    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
-    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance =
-    channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-  return luminance > 0.179 ? "#16171C" : "#FFFFFF";
 }
 function accentKey(userId) {
   return `drakora.staff.accent:${userId}`;
@@ -397,7 +362,8 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
     </section>
   );
 }
-function Accounts({ csrf, approveMinecraftChange }) {
+function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
+  const now = useClock();
   const [accounts, setAccounts] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -482,8 +448,13 @@ function Accounts({ csrf, approveMinecraftChange }) {
                 </div>
                 <span>Discord ID {account.id}</span>
                 <span>
-                  Last active on Discord: {timeLabel(account.lastActiveAt)} ·{" "}
-                  {account.discordStatus}
+                  Last active on Discord:{" "}
+                  {account.lastActiveAt
+                    ? new Date(account.lastActiveAt).toLocaleString(undefined, {
+                        hourCycle: format === "24" ? "h23" : "h12",
+                      })
+                    : "Not observed yet"}{" "}
+                  · {account.discordStatus}
                 </span>
               </div>
               <div className="registered-minecraft">
@@ -511,6 +482,20 @@ function Accounts({ csrf, approveMinecraftChange }) {
                       </div>
                     )}
                   </div>
+                )}
+                {(account.id === userId ? timeZone : account.timeZone) ? (
+                  <LocalClock
+                    now={now}
+                    format={format}
+                    timeZone={
+                      account.id === userId ? timeZone : account.timeZone
+                    }
+                    className="account-local-time"
+                  />
+                ) : (
+                  <span className="account-time-unavailable">
+                    Local time unavailable
+                  </span>
                 )}
               </div>
             </article>
@@ -553,6 +538,33 @@ function App() {
   const [state, setState] = useState({ loading: true });
   const [busy, setBusy] = useState(false);
   const [accent, setAccent] = useState(defaultAccent);
+  const [timeZone] = useState(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
+  const preferences = state.user?.timePreferences ?? {
+    format: "12",
+    timeZone: null,
+  };
+  const updateTime = useCallback(
+    (value) =>
+      setState((current) => ({
+        ...current,
+        user: { ...current.user, timePreferences: value },
+      })),
+    [],
+  );
+  useEffect(() => {
+    if (!state.user || preferences.timeZone === timeZone) return;
+    let active = true;
+    saveTimePreferences(state.csrf, { timeZone })
+      .then((value) => {
+        if (active) updateTime(value);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [state.user?.id, state.csrf, preferences.timeZone, timeZone, updateTime]);
   const [workspaceView, setWorkspaceView] = useState(
     () =>
       dashboardTools.find((tool) => location.pathname === `/${tool.view}`)
@@ -674,7 +686,7 @@ function App() {
   return (
     <div
       className={`workspace${workspaceView ? " workspace-tools-page" : ""}`}
-      style={{ "--accent": accent, "--accent-text": accentText(accent) }}
+      style={{ "--accent": accent, "--accent-text": accentForeground(accent) }}
     >
       <aside className="sidebar">
         <a className="sidebar-heading" href="/">
@@ -700,24 +712,17 @@ function App() {
             <span aria-hidden="true">⌂</span>Overview
           </a>
           {user.todo &&
-            dashboardTools
-              .filter(
-                (tool) =>
-                  tool.view !== "office" || user.capabilities["office.view"],
-              )
-              .map((tool) => (
-                <a
-                  key={tool.view}
-                  className={`nav-item${workspaceView === tool.view ? " active" : ""}`}
-                  href={`/${tool.view}`}
-                  aria-current={
-                    workspaceView === tool.view ? "page" : undefined
-                  }
-                >
-                  <span aria-hidden="true">{tool.icon}</span>
-                  {tool.title}
-                </a>
-              ))}
+            dashboardTools.map((tool) => (
+              <a
+                key={tool.view}
+                className={`nav-item${workspaceView === tool.view ? " active" : ""}`}
+                href={`/${tool.view}`}
+                aria-current={workspaceView === tool.view ? "page" : undefined}
+              >
+                <span aria-hidden="true">{tool.icon}</span>
+                {tool.title}
+              </a>
+            ))}
           {user.applications && (
             <a
               className={`nav-item${applicationsPage ? " active" : ""}`}
@@ -809,12 +814,7 @@ function App() {
               workspaceView) && <a href="/">Overview</a>}
             {user.todo &&
               dashboardTools
-                .filter(
-                  (tool) =>
-                    (tool.view !== "office" ||
-                      user.capabilities["office.view"]) &&
-                    tool.view !== workspaceView,
-                )
+                .filter((tool) => tool.view !== workspaceView)
                 .map((tool) => (
                   <a key={tool.view} href={`/${tool.view}`}>
                     {tool.title}
@@ -830,7 +830,7 @@ function App() {
             {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
             {user.mail && !emailPage && <a href="/email">Email</a>}
           </nav>
-          <DashboardClock />
+          <DashboardClock format={preferences.format} timeZone={timeZone} />
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>
@@ -854,8 +854,7 @@ function App() {
             </p>
           )}
           {workspaceView ? (
-            user.todo &&
-            (workspaceView !== "office" || user.capabilities["office.view"]) ? (
+            user.todo ? (
               <WorkspaceTools
                 view={workspaceView}
                 origin={user.workspaceOrigin}
@@ -902,6 +901,12 @@ function App() {
                 accent={accent}
                 onChange={setAccent}
               />
+              <TimeSettings
+                csrf={state.csrf}
+                preferences={preferences}
+                timeZone={timeZone}
+                onChange={updateTime}
+              />
               <MinecraftSettings
                 minecraft={user.minecraft}
                 csrf={state.csrf}
@@ -912,6 +917,9 @@ function App() {
             <Accounts
               csrf={state.csrf}
               approveMinecraftChange={user.approveMinecraftChange}
+              format={preferences.format}
+              userId={user.id}
+              timeZone={timeZone}
             />
           ) : (
             <>
@@ -924,24 +932,18 @@ function App() {
                   <h3 id="staff-tools" className="section-title">
                     Tools
                   </h3>
-                  {dashboardTools
-                    .filter(
-                      (tool) =>
-                        tool.view !== "office" ||
-                        user.capabilities["office.view"],
-                    )
-                    .map((tool) => (
-                      <article className="tool-card" key={tool.view}>
-                        <div className="tool-icon">{tool.icon}</div>
-                        <div className="tool-content">
-                          <h4>{tool.title}</h4>
-                          <p>{tool.description}</p>
-                        </div>
-                        <a className="button open-tool" href={`/${tool.view}`}>
-                          Open {tool.title} <span aria-hidden="true">→</span>
-                        </a>
-                      </article>
-                    ))}
+                  {dashboardTools.map((tool) => (
+                    <article className="tool-card" key={tool.view}>
+                      <div className="tool-icon">{tool.icon}</div>
+                      <div className="tool-content">
+                        <h4>{tool.title}</h4>
+                        <p>{tool.description}</p>
+                      </div>
+                      <a className="button open-tool" href={`/${tool.view}`}>
+                        Open {tool.title} <span aria-hidden="true">→</span>
+                      </a>
+                    </article>
+                  ))}
                 </section>
               )}
               <section className="roles-card" aria-labelledby="your-roles">
@@ -971,8 +973,6 @@ function App() {
 createRoot(document.getElementById("root")).render(
   location.pathname === "/apply" || location.pathname.startsWith("/apply/") ? (
     <PublicApplication />
-  ) : location.pathname === "/_drakora/office" ? (
-    <Office />
   ) : (
     <App />
   ),

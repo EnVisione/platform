@@ -7,7 +7,6 @@ import { isPageRequest } from "./navigation.js";
 export const workspaceViews = {
   tracker: "tracker",
   calendar: "time",
-  office: "love",
 };
 
 export function isWorkspacePage(req) {
@@ -23,11 +22,7 @@ export function workspacePath(config, view) {
 }
 
 export function workspaceAllowed(user, view) {
-  return Boolean(
-    Object.hasOwn(workspaceViews, view) &&
-    user.permissions.todo &&
-    (view !== "office" || user.capabilities["office.view"]),
-  );
+  return Boolean(Object.hasOwn(workspaceViews, view) && user.permissions.todo);
 }
 
 const attribute = (value) =>

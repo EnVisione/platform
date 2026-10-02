@@ -321,7 +321,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
             </div>
             <h5>Staff-server access roles</h5>
             <p className="roles-help">
-              Dashboard and Huly also require these separate Discord access
+              Dashboard and Tracker also require these separate Discord access
               roles. A rank alone does not grant access.
             </p>
             <div className="role-checks">
@@ -351,7 +351,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                     }))
                   }
                 />
-                Huly / Todo access
+                Tracker / Calendar access
               </label>
             </div>
           </fieldset>
@@ -634,7 +634,11 @@ export function Roles({ csrf, userId }) {
                   )}
                   {[
                     ...new Set(
-                      data.permissions.map((permission) => permission.group),
+                      data.permissions
+                        .filter(
+                          (permission) => !permission.key.startsWith("office."),
+                        )
+                        .map((permission) => permission.group),
                     ),
                   ].map((group) => (
                     <fieldset
@@ -643,7 +647,11 @@ export function Roles({ csrf, userId }) {
                     >
                       <legend>{group}</legend>
                       {data.permissions
-                        .filter((permission) => permission.group === group)
+                        .filter(
+                          (permission) =>
+                            permission.group === group &&
+                            !permission.key.startsWith("office."),
+                        )
                         .map((permission) => (
                           <label
                             className="role-permission"

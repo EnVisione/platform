@@ -2,7 +2,7 @@
   if (window.parent === window) return;
   const { staffOrigin, workspace } = document.currentScript.dataset;
   const base = `/workbench/${encodeURIComponent(workspace)}/`;
-  const views = { tracker: "tracker", calendar: "time", office: "love" };
+  const views = { tracker: "tracker", calendar: "time" };
   document.documentElement.setAttribute("data-drakora-embedded", "");
   let previous = "";
   let scheduled = false;
@@ -43,6 +43,11 @@
         "--staff-accent",
         event.data.accent,
       );
+      if (["#16171C", "#FFFFFF"].includes(event.data.foreground))
+        document.documentElement.style.setProperty(
+          "--staff-accent-text",
+          event.data.foreground,
+        );
     }
   });
   document.addEventListener("click", (event) => {
@@ -63,7 +68,6 @@
     if (
       ![
         "/",
-        "/office",
         "/tracker",
         "/calendar",
         "/settings",

@@ -11,6 +11,9 @@ html[data-drakora-embedded] body > div > .app {
 }
 html[data-drakora-embedded].theme-dark {
   --staff-accent: #5865f2;
+}
+html[data-drakora-embedded].theme-dark,
+html[data-drakora-embedded].theme-dark * {
   --theme-bg-color: #313338;
   --theme-panel-color: #313338;
   --theme-navpanel-color: #2b2d31;
@@ -24,16 +27,52 @@ html[data-drakora-embedded].theme-dark {
   --theme-dialog-background-color: #2b2d31;
   --theme-popup-color: #2b2d31;
   --theme-table-row-color: #313338;
+  --theme-list-row-color: #2b2d31;
+  --theme-list-border-color: #45474f;
+  --theme-list-divider-color: #45474f;
+  --theme-list-subheader-color: #383a40;
+  --theme-list-button-color: #383a40;
+  --theme-list-button-hover: #404249;
   --theme-dialog-border-color: #45474f;
   --button-border-color: #45474f;
   --popup-bg-color: #2b2d31;
-  --primary-button-default: #5865f2;
-  --primary-button-hovered: #4752c4;
-  --primary-button-pressed: #3c45a5;
   --primary-edit-border-color: var(--staff-accent);
-  --global-accent-TextColor: #b4baff;
-  --global-accent-IconColor: #b4baff;
   color-scheme: dark;
+}
+html[data-drakora-embedded].theme-dark body,
+html[data-drakora-embedded].theme-dark body * {
+  --global-accent-BackgroundColor: var(--staff-accent);
+  --global-accent-TextColor: color-mix(in srgb, var(--staff-accent), white 55%);
+  --global-accent-IconColor: color-mix(in srgb, var(--staff-accent), white 55%);
+  --global-on-accent-TextColor: var(--staff-accent-text, #fff);
+  --button-primary-BackgroundColor: var(--staff-accent);
+  --button-primary-hover-BackgroundColor: color-mix(
+    in srgb,
+    var(--staff-accent),
+    white 12%
+  );
+  --button-primary-active-BackgroundColor: color-mix(
+    in srgb,
+    var(--staff-accent),
+    black 12%
+  );
+  --button-accent-LabelColor: var(--staff-accent-text, #fff);
+  --primary-button-default: var(--staff-accent);
+  --primary-button-hovered: color-mix(in srgb, var(--staff-accent), white 12%);
+  --primary-button-pressed: color-mix(in srgb, var(--staff-accent), black 12%);
+  --primary-button-focused: var(--staff-accent);
+  --primary-button-color: var(--staff-accent-text, #fff);
+}
+html[data-drakora-embedded].theme-dark .categoryHeader:not(.subLevel) {
+  background-image: var(--header-bg-color);
+  background-color: #313338;
+  background-blend-mode: screen;
+}
+html[data-drakora-embedded].theme-dark .categoryHeader::before {
+  background: none;
+}
+[id="app-love:string:Office"] {
+  display: none;
 }
 html[data-drakora-embedded].theme-dark .workbench-container {
   background: #313338;

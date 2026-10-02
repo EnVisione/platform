@@ -39,6 +39,7 @@ import { applicationRouter } from "./application-routes.js";
 import { applicationFormRouter } from "./application-form-routes.js";
 import { mailboxService } from "./mailbox.js";
 import { mailRouter } from "./mail-routes.js";
+import { timePreferences, timePreferenceRouter } from "./time-preferences.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -61,6 +62,7 @@ const applicationDatabase = config.applications
     )
   : undefined;
 const minecraft = minecraftRegistry(store);
+const timeSettings = timePreferences(store);
 const applications = applicationDatabase
   ? applicationService(
       config,
@@ -320,6 +322,7 @@ function publicUser(user) {
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     workspaceOrigin: config.todoOrigin,
+    timePreferences: timeSettings.get(user.id),
     applications: Boolean(
       applications && applicationReviewAccess(config, user),
     ),
@@ -543,7 +546,7 @@ app.use(async (req, res, next) => {
     if (!response.ok) throw new Error("Huly configuration is unavailable");
     return res.json({
       ...(await response.json()),
-      ...(office ? { OFFICE_URL: "/_drakora/office" } : {}),
+      OFFICE_URL: undefined,
       STAFF_SSO_URL: "/__staff/start",
       STAFF_DASHBOARD_URL: config.staffOrigin,
       STAFF_CONTACT_RANKS_URL: "/_drakora/api/office/contact-ranks",
@@ -551,12 +554,12 @@ app.use(async (req, res, next) => {
       DISABLE_SIGNUP: "true",
     });
   }
-  if (req.method === "GET" && req.path === "/_drakora/office") {
-    res.set(
-      "Content-Security-Policy",
-      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'self' ${config.staffOrigin}; base-uri 'none'; form-action 'self'`,
-    );
-    return res.sendFile(`${dist}/index.html`);
+  if (
+    req.method === "GET" &&
+    (req.path === "/_drakora/office" ||
+      /^\/workbench\/[^/]+\/love(?:\/|$)/.test(req.path))
+  ) {
+    return res.redirect(workspacePath(await workspaceConfig(), "tracker"));
   }
   if (req.path.startsWith("/__staff/assets/")) return next();
   if (req.path.replace(/\/+$/, "") === "/_accounts" && req.method === "POST") {
@@ -697,6 +700,10 @@ app.get("/api/me", async (req, res) => {
   const user = await signedIn(req, { allowUnlinked: true });
   res.json({ user: publicUser(user), csrf: req.session.csrf });
 });
+app.use(
+  "/api/preferences/time",
+  timePreferenceRouter(timeSettings, signedIn, requireMutation),
+);
 app.post(
   "/api/minecraft",
   rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
@@ -739,6 +746,7 @@ app.get("/api/accounts", async (req, res) => {
       minecraft: link,
       discordStatus: member?.status ?? "unknown",
       lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
+      timeZone: timeSettings.get(id).timeZone,
     };
   });
   accounts.sort((a, b) => a.name.localeCompare(b.name));
@@ -1145,24 +1153,19 @@ app.get(["/applications", "/applications/:id"], async (req, res) => {
     throw error;
   }
 });
+app.get("/office", async (req, res) => {
+  await signedIn(req);
+  res.redirect("/tracker");
+});
 app.get(
-  [
-    "/",
-    "/settings",
-    "/accounts",
-    "/email",
-    "/roles",
-    "/office",
-    "/tracker",
-    "/calendar",
-  ],
+  ["/", "/settings", "/accounts", "/email", "/roles", "/tracker", "/calendar"],
   async (req, res) => {
     try {
       const user =
         req.path === "/email" ? await authorizeMail(req) : await signedIn(req);
       if (req.path === "/roles") await authorizeRoles(req);
       if (
-        ["/office", "/tracker", "/calendar"].includes(req.path) &&
+        ["/tracker", "/calendar"].includes(req.path) &&
         !workspaceAllowed(user, req.path.slice(1))
       )
         throw new AuthError("staff_permission_required");

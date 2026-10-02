@@ -7,20 +7,20 @@ export const staffPermissions = [
   ],
   [
     "huly.access",
-    "Workspace and Office",
+    "Workspace",
     "Open Tracker and Calendar",
     "Open the staff workspace from the dashboard. The Discord Todo access role is also required.",
   ],
   [
     "office.view",
-    "Workspace and Office",
+    "Workspace",
     "View the staff office",
     "See staff activity, voice rooms and meetings.",
     ["huly.access"],
   ],
   [
     "office.host",
-    "Workspace and Office",
+    "Workspace",
     "Host meetings",
     "Start and end staff meetings.",
     ["office.view"],

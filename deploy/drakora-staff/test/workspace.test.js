@@ -40,7 +40,7 @@ test("only workspace shell navigations use HTML decoration, downloads and APIs k
   );
 });
 
-test("workspace destinations and permissions retain Todo and Office restrictions", () => {
+test("workspace destinations retain Todo access and exclude the removed Office", () => {
   assert.equal(
     workspacePath(config, "tracker"),
     "/workbench/staff%20%2F%20team/tracker",
@@ -49,10 +49,7 @@ test("workspace destinations and permissions retain Todo and Office restrictions
     workspacePath(config, "calendar"),
     "/workbench/staff%20%2F%20team/time",
   );
-  assert.equal(
-    workspacePath(config, "office"),
-    "/workbench/staff%20%2F%20team/love",
-  );
+  assert.equal(workspacePath(config, "office"), null);
   for (const view of [
     "constructor",
     "__proto__",
@@ -71,7 +68,7 @@ test("workspace destinations and permissions retain Todo and Office restrictions
   assert.equal(workspaceAllowed(user, "calendar"), true);
   assert.equal(workspaceAllowed(user, "office"), false);
   user.capabilities["office.view"] = true;
-  assert.equal(workspaceAllowed(user, "office"), true);
+  assert.equal(workspaceAllowed(user, "office"), false);
   user.permissions.todo = false;
   for (const view of ["tracker", "calendar", "office"])
     assert.equal(workspaceAllowed(user, view), false);
@@ -231,6 +228,17 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
   assert.equal(styles.length, 0);
   send({ type: "drakora-workspace-theme", accent: "#5865f2" });
   assert.deepEqual(styles, [["--staff-accent", "#5865f2"]]);
+  send({ type: "drakora-workspace-open", view: "office" });
+  assert.deepEqual(destinations, ["/workbench/staff/time"]);
+  send({
+    type: "drakora-workspace-theme",
+    accent: "#FFFFFF",
+    foreground: "#16171C",
+  });
+  assert.deepEqual(styles.slice(-2), [
+    ["--staff-accent", "#FFFFFF"],
+    ["--staff-accent-text", "#16171C"],
+  ]);
   handlers.get("pagehide")();
   assert.equal(disconnected, true);
   let prevented = false;
