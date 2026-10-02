@@ -56,10 +56,14 @@ test("highest rank determines Huly permissions and specialist roles stay in Huly
     "MAINTAINER",
   );
   assert.equal(
-    permissions(ranks.slice(2).map((role) => role.id)).hulyRole,
+    permissions(
+      ranks.filter((role) => role.huly === "USER").map((role) => role.id),
+    ).hulyRole,
     "USER",
   );
-  const specialist = permissions(ranks.slice(5).map((role) => role.id));
+  const specialist = permissions(
+    ranks.filter((role) => !role.dashboard).map((role) => role.id),
+  );
   assert.deepEqual(specialist.dashboardRanks, []);
   assert.deepEqual(specialist.hulyRanks, [
     "Developer",

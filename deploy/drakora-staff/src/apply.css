@@ -301,6 +301,17 @@
 .staff-applications h2 {
   font-size: 30px;
 }
+.application-feedback {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #41434a;
+  border-radius: 8px;
+  background: #2b2d31;
+}
+.application-feedback time {
+  color: #b5bac1;
+  font-size: 13px;
+}
 .staff-applications > p {
   color: #b5bac1;
   line-height: 1.6;

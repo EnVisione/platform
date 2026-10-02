@@ -10,7 +10,7 @@ const messages = {
   invalid_minecraft_name:
     "Use your Java Edition username: 3–16 letters, numbers, or underscores.",
   minecraft_name_taken:
-    "This Minecraft name is already linked or awaiting Founder approval.",
+    "This Minecraft name is already linked or awaiting Founder or Manager approval.",
   minecraft_name_locked:
     "Your Minecraft name is already linked. Request a change in Settings.",
   minecraft_name_unchanged: "Enter a different Minecraft name.",
@@ -235,9 +235,9 @@ function MinecraftRegistration({ user, csrf, next, onLogout }) {
             />
             <p className="registration-warning">
               Please be extra careful. You will need to verify this name in-game
-              later. Once submitted, it can only be changed with Founder
-              authorization. For now, you can continue while verification is
-              pending.
+              later. Once submitted, it can only be changed with Founder or
+              Manager authorization. For now, you can continue while
+              verification is pending.
             </p>
             <label className="confirm-name">
               <input
@@ -296,7 +296,7 @@ function MinecraftSettings({ minecraft, csrf }) {
     setName("");
     setError(false);
     setMessage(
-      "Change request sent to a Founder. Your current link stays active.",
+      "Change request sent for Founder or Manager approval. Your current link stays active.",
     );
   }
   return (
@@ -307,8 +307,8 @@ function MinecraftSettings({ minecraft, csrf }) {
       <div className="settings-heading">
         <h2 id="minecraft-settings-title">Minecraft account</h2>
         <p>
-          Your linked Minecraft name is locked until a Founder approves a
-          change.
+          Your linked Minecraft name is locked until a Founder or Manager
+          approves a change.
         </p>
       </div>
       <div className="linked-name">
@@ -318,7 +318,7 @@ function MinecraftSettings({ minecraft, csrf }) {
       {link.changeRequest && (
         <p className="settings-help">
           Requested name: <strong>{link.changeRequest.name}</strong> · Awaiting
-          Founder approval
+          Founder or Manager approval
         </p>
       )}
       <form onSubmit={request}>
@@ -347,7 +347,7 @@ function MinecraftSettings({ minecraft, csrf }) {
     </section>
   );
 }
-function Accounts({ csrf, founder }) {
+function Accounts({ csrf, approveMinecraftChange }) {
   const [accounts, setAccounts] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -379,7 +379,7 @@ function Accounts({ csrf, founder }) {
         ),
       );
     } catch {
-      setError("Could not save the Founder decision. Please try again.");
+      setError("Could not save the name change decision. Please try again.");
     } finally {
       setBusy("");
     }
@@ -443,7 +443,7 @@ function Accounts({ csrf, founder }) {
                     <span>
                       Requested: {account.minecraft.changeRequest.name}
                     </span>
-                    {founder && (
+                    {approveMinecraftChange && (
                       <div>
                         <button
                           disabled={busy === account.id}
@@ -718,10 +718,13 @@ function App() {
           )}
           {applicationsPage ? (
             user.applications ? (
-              <StaffApplications />
+              <StaffApplications
+                csrf={state.csrf}
+                canDecide={user.applicationDecision}
+              />
             ) : (
               <p className="notice">
-                Application access requires Moderator, Admin, or Founder rank.
+                Application access requires Jr Moderator rank or higher.
               </p>
             )
           ) : settingsPage ? (
@@ -734,7 +737,10 @@ function App() {
               <MinecraftSettings minecraft={user.minecraft} csrf={state.csrf} />
             </>
           ) : accountsPage ? (
-            <Accounts csrf={state.csrf} founder={user.founder} />
+            <Accounts
+              csrf={state.csrf}
+              approveMinecraftChange={user.approveMinecraftChange}
+            />
           ) : (
             <>
               <div className="welcome">

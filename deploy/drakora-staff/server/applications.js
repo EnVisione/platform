@@ -7,6 +7,11 @@ import {
   questionList,
 } from "../shared/application-form.js";
 import { applicationScenarios } from "./application-scenarios.js";
+import {
+  communityRankNames,
+  applicationReviewAccess,
+  applicationDecisionAccess,
+} from "./roles.js";
 
 const week = 7 * 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
@@ -15,6 +20,8 @@ const optional = new Set(["experienceProof", "comments"]);
 const baseFields = [
   "displayName",
   "ign",
+  "minecraftConfirmed",
+  "minecraftConfirmedName",
   "discordUses",
   "discordWhy",
   "contactEmail",
@@ -39,6 +46,7 @@ const fields = new Set([
 ]);
 const booleans = new Set([
   "adultConfirmed",
+  "minecraftConfirmed",
   "discordConfirmed",
   "privacyConsent",
   "accuracyConfirmed",
@@ -50,10 +58,7 @@ const text = (value) => (typeof value === "string" ? value.trim() : "");
 export function availableApplicationRoles(config, identity) {
   const ids = new Set(identity?.roles ?? []);
   const community = config.ranks.some(
-    (rank) =>
-      ["Founder", "Admin", "Moderator", "Helper", "Trial Staff"].includes(
-        rank.name,
-      ) && ids.has(rank.id),
+    (rank) => communityRankNames.includes(rank.name) && ids.has(rank.id),
   );
   const held = Object.entries(config.applications.specialistRoles)
     .filter(([, id]) => ids.has(id))
@@ -63,11 +68,30 @@ export function availableApplicationRoles(config, identity) {
   );
 }
 
-export function applicationService(config, store, fetcher = fetch) {
+export function applicationService(
+  config,
+  store,
+  fetcher = fetch,
+  getMinecraftLink = () => undefined,
+) {
   let timer;
   let running;
   let closed = false;
   let deliveryOffset = 0;
+  function linkedMinecraft(draft) {
+    const identity = draft.identity;
+    if (!identity) return null;
+    const ids = new Set(identity.roles);
+    const activeStaff =
+      config.ranks.some((rank) => ids.has(rank.id)) ||
+      Object.values(config.applications.specialistRoles).some((id) =>
+        ids.has(id),
+      );
+    const link = activeStaff ? getMinecraftLink(identity.id) : undefined;
+    return link
+      ? { name: link.name, changePending: Boolean(link.changeRequest) }
+      : null;
+  }
   function load(sessionId) {
     let draft = store.get("application-draft", sessionId);
     if (!draft) {
@@ -94,10 +118,21 @@ export function applicationService(config, store, fetcher = fetch) {
         },
       };
     const identity = draft.identity;
+    const linked = linkedMinecraft(draft);
     return {
       id: draft.id,
       role: draft.role ?? null,
-      answers: draft.answers,
+      answers: linked
+        ? {
+            ...draft.answers,
+            ign: linked.name,
+            minecraftConfirmed:
+              draft.answers.minecraftConfirmedName === linked.name
+                ? draft.answers.minecraftConfirmed
+                : undefined,
+          }
+        : draft.answers,
+      linkedMinecraft: linked,
       scenario: draft.scenarios[draft.role] ?? null,
       roles: availableApplicationRoles(config, identity),
       discord: identity
@@ -140,6 +175,13 @@ export function applicationService(config, store, fetcher = fetch) {
         Array.isArray(input.answers)
       )
         throw new AuthError("invalid_request", 400);
+      const linked = linkedMinecraft(draft);
+      if (
+        linked &&
+        input.answers.ign !== undefined &&
+        input.answers.ign !== linked.name
+      )
+        throw new AuthError("application_minecraft_link_changed", 409);
       for (const [key, value] of Object.entries(input.answers)) {
         if (!fields.has(key)) throw new AuthError("invalid_request", 400);
         if (key === "communities") {
@@ -170,6 +212,10 @@ export function applicationService(config, store, fetcher = fetch) {
       throw new AuthError("application_already_submitted", 409);
     draft.identity = identity;
     delete draft.answers.discordConfirmed;
+    delete draft.answers.minecraftConfirmed;
+    delete draft.answers.minecraftConfirmedName;
+    const linked = linkedMinecraft(draft);
+    if (linked) draft.answers.ign = linked.name;
     if (!availableApplicationRoles(config, identity).includes(draft.role))
       delete draft.role;
     write(sessionId, draft);
@@ -246,6 +292,17 @@ export function applicationService(config, store, fetcher = fetch) {
     if (!validName(a.ign))
       errors.ign =
         "Enter a Java Edition username: 3–16 letters, numbers, or underscores.";
+    const linked = linkedMinecraft(draft);
+    if (
+      linked &&
+      (linked.changePending ||
+        a.ign !== linked.name ||
+        a.minecraftConfirmed !== true ||
+        a.minecraftConfirmedName !== linked.name)
+    )
+      errors.minecraftConfirmed = linked.changePending
+        ? "Wait for a Founder or Manager to approve your Minecraft name change in panel settings."
+        : "Confirm your current linked Minecraft name. If it is incorrect, request a change in panel settings and wait for Founder or Manager approval.";
     if (draft.identity) {
       if (a.discordConfirmed !== true)
         errors.discordConfirmed = "Confirm that this Discord account is yours.";
@@ -341,6 +398,8 @@ export function applicationService(config, store, fetcher = fetch) {
       if (current.submittedId) return { id: current.submittedId };
       if (hash(JSON.stringify(current)) !== fingerprint)
         throw new AuthError("application_draft_changed", 409);
+      const currentErrors = validate(current);
+      if (Object.keys(currentErrors).length) return { errors: currentErrors };
       const createdAt = Date.now();
       const allowed = new Set([
         ...baseFields,
@@ -356,7 +415,7 @@ export function applicationService(config, store, fetcher = fetch) {
         id: draft.id,
         createdAt,
         role: draft.role,
-        questionnaireVersion: 1,
+        questionnaireVersion: 2,
         status: "Received",
         answers,
         scenario: draft.scenarios[draft.role],
@@ -494,6 +553,60 @@ export function applicationService(config, store, fetcher = fetch) {
       });
     return running;
   }
+  function addComment(id, user, value) {
+    if (!applicationReviewAccess(config, user))
+      throw new AuthError("application_review_role_required");
+    const comment = text(value);
+    if (comment.length < 3 || comment.length > 4000)
+      throw new AuthError("invalid_application_comment", 400);
+    return store.transaction(() => {
+      const record = store.get("application", id);
+      if (!record) throw new AuthError("application_not_found", 404);
+      record.comments ??= [];
+      if (record.comments.length >= 100)
+        throw new AuthError("application_comments_full", 409);
+      record.comments.push({
+        id: randomUUID(),
+        text: comment,
+        author: { id: user.id, name: user.name },
+        createdAt: Date.now(),
+      });
+      store.set("application", id, record, permanent);
+      return record;
+    });
+  }
+  function decide(id, user, decision, reason = "") {
+    if (!applicationDecisionAccess(config, user))
+      throw new AuthError("application_decision_role_required");
+    if (
+      !["approve", "deny"].includes(decision) ||
+      typeof reason !== "string" ||
+      reason.length > 2000
+    )
+      throw new AuthError("invalid_request", 400);
+    return store.transaction(() => {
+      const record = store.get("application", id);
+      if (!record) throw new AuthError("application_not_found", 404);
+      if (record.status !== "Received")
+        throw new AuthError("application_already_decided", 409);
+      record.status = decision === "approve" ? "Approved" : "Denied";
+      record.decision = {
+        author: { id: user.id, name: user.name },
+        reason: reason.trim(),
+        decidedAt: Date.now(),
+      };
+      store.set("application", id, record, permanent);
+      const key = `${record.createdAt}.${record.id}`;
+      const summary = store.get("application-summary", key);
+      store.set(
+        "application-summary",
+        key,
+        { ...summary, status: record.status },
+        permanent,
+      );
+      return record;
+    });
+  }
   return {
     view,
     patch,
@@ -505,6 +618,8 @@ export function applicationService(config, store, fetcher = fetch) {
     handoff,
     complete,
     submit,
+    addComment,
+    decide,
     minecraftProfile,
     list: (offset = 0) => store.page("application-summary", 50, offset),
     get: (id) => store.get("application", id),

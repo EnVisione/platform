@@ -21,16 +21,13 @@ export function canHost(config, user) {
 
 export function managementAccess(config, user) {
   const ids = new Set(user.roles ?? []);
-  const founder = config.ranks.find((rank) => rank.name === "Founder");
-  const admin = config.ranks.find((rank) => rank.name === "Admin");
+  const hasRank = (names) =>
+    user.permissions.dashboard &&
+    config.ranks.some((rank) => names.includes(rank.name) && ids.has(rank.id));
   return {
-    founder: Boolean(
-      user.permissions.dashboard && founder && ids.has(founder.id),
-    ),
-    manager: Boolean(
-      user.permissions.dashboard &&
-      ((founder && ids.has(founder.id)) || (admin && ids.has(admin.id))),
-    ),
+    founder: Boolean(hasRank(["Founder"])),
+    manager: Boolean(hasRank(["Founder", "Manager", "Admin"])),
+    approveMinecraftChange: Boolean(hasRank(["Founder", "Manager"])),
   };
 }
 
@@ -39,8 +36,34 @@ export function applicationReviewAccess(config, user) {
     user.permissions.dashboard &&
     config.ranks.some(
       (rank) =>
-        ["Founder", "Admin", "Moderator"].includes(rank.name) &&
+        [
+          "Founder",
+          "Manager",
+          "Admin",
+          "Sr Moderator",
+          "Moderator",
+          "Jr Moderator",
+        ].includes(rank.name) && user.roles.includes(rank.id),
+    ),
+  );
+}
+
+export function applicationDecisionAccess(config, user) {
+  return Boolean(
+    user.permissions.dashboard &&
+    config.ranks.some(
+      (rank) =>
+        ["Founder", "Manager"].includes(rank.name) &&
         user.roles.includes(rank.id),
     ),
   );
 }
+export const communityRankNames = [
+  "Founder",
+  "Manager",
+  "Admin",
+  "Sr Moderator",
+  "Moderator",
+  "Jr Moderator",
+  "Helper",
+];

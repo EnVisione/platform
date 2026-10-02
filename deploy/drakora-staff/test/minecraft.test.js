@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { minecraftRegistry } from "../server/minecraft.js";
 import { managementAccess } from "../server/roles.js";
-import { config, accessRoles, ranks } from "./fixture.js";
+import { config, accessRoles } from "./fixture.js";
 
 function registry() {
   const records = new Map();
@@ -37,7 +37,7 @@ test("Minecraft names are valid, unique regardless of case, and immutable", () =
   });
 });
 
-test("a name change requires a separate Founder decision", () => {
+test("a name change requires a separate authorized decision", () => {
   const links = registry();
   links.register("one", "Original");
   links.register("two", "Second");
@@ -56,19 +56,36 @@ test("a name change requires a separate Founder decision", () => {
   assert.equal(links.get("one").changeRequest, undefined);
 });
 
-test("only Dashboard members with Founder or Admin can view accounts", () => {
+test("account viewers and Minecraft approvers require their ranks and Dashboard access", () => {
   const evaluate = (roles) =>
     managementAccess(config, {
       roles,
       permissions: { dashboard: roles.includes(accessRoles.dashboard) },
     });
-  assert.deepEqual(evaluate([ranks[0].id]), { founder: false, manager: false });
-  assert.deepEqual(evaluate([accessRoles.dashboard, ranks[1].id]), {
+  assert.deepEqual(evaluate(["20"]), {
+    founder: false,
+    manager: false,
+    approveMinecraftChange: false,
+  });
+  assert.deepEqual(evaluate([accessRoles.dashboard, "21"]), {
     founder: false,
     manager: true,
+    approveMinecraftChange: false,
   });
-  assert.deepEqual(evaluate([accessRoles.dashboard, ranks[0].id]), {
+  assert.deepEqual(evaluate([accessRoles.dashboard, "20"]), {
     founder: true,
     manager: true,
+    approveMinecraftChange: true,
   });
+  assert.deepEqual(evaluate([accessRoles.dashboard, "28"]), {
+    founder: false,
+    manager: true,
+    approveMinecraftChange: true,
+  });
+  for (const id of ["22", "29", "30", "23", "24"])
+    assert.deepEqual(evaluate([accessRoles.dashboard, id]), {
+      founder: false,
+      manager: false,
+      approveMinecraftChange: false,
+    });
 });

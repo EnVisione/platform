@@ -15,7 +15,11 @@ import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
 import { minecraftRegistry } from "./minecraft.js";
-import { managementAccess, applicationReviewAccess } from "./roles.js";
+import {
+  managementAccess,
+  applicationReviewAccess,
+  applicationDecisionAccess,
+} from "./roles.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
 
@@ -42,11 +46,11 @@ const applicationDatabase = config.applications
       config.applications.databaseKey,
     )
   : undefined;
+const minecraft = minecraftRegistry(store);
 const applications = applicationDatabase
-  ? applicationService(config, applicationDatabase.store)
+  ? applicationService(config, applicationDatabase.store, fetch, minecraft.get)
   : undefined;
 const discord = discordClient(config, store);
-const minecraft = minecraftRegistry(store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
 const office = config.office ? discordOffice(config, store) : undefined;
@@ -219,6 +223,9 @@ function publicUser(user) {
     minecraft: minecraft.get(user.id) ?? null,
     applications: Boolean(
       applications && applicationReviewAccess(config, user),
+    ),
+    applicationDecision: Boolean(
+      applications && applicationDecisionAccess(config, user),
     ),
     ...managementAccess(config, user),
     ...user.permissions,
@@ -606,8 +613,8 @@ app.post(
     const user = await signedIn(req);
     requireMutation(req);
     const current = await discord.check(user.id, true);
-    if (!managementAccess(config, current).founder)
-      throw new AuthError("founder_role_required");
+    if (!managementAccess(config, current).approveMinecraftChange)
+      throw new AuthError("minecraft_approver_role_required");
     if (!["approve", "reject"].includes(req.body?.decision))
       throw new AuthError("invalid_request", 400);
     const target = store.get("user", req.params.id);
@@ -865,6 +872,37 @@ app.get("/api/applications/:id", async (req, res) => {
   if (!record) throw new AuthError("application_not_found", 404);
   res.json(record);
 });
+app.post(
+  "/api/applications/:id/comments",
+  rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+  express.json({ limit: "8kb" }),
+  async (req, res) => {
+    const user = await applicationViewer(req);
+    requireMutation(req);
+    const current = await discord.check(user.id, true);
+    res.json(
+      applications.addComment(req.params.id, current, req.body?.comment),
+    );
+  },
+);
+app.post(
+  "/api/applications/:id/decision",
+  rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+  express.json({ limit: "8kb" }),
+  async (req, res) => {
+    const user = await applicationViewer(req);
+    requireMutation(req);
+    const current = await discord.check(user.id, true);
+    res.json(
+      applications.decide(
+        req.params.id,
+        current,
+        req.body?.decision,
+        req.body?.reason,
+      ),
+    );
+  },
+);
 app.get(["/applications", "/applications/:id"], async (req, res) => {
   try {
     await applicationViewer(req);

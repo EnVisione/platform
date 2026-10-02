@@ -9,7 +9,11 @@ import {
   applicationService,
   availableApplicationRoles,
 } from "../server/applications.js";
-import { applicationReviewAccess, permissions } from "../server/roles.js";
+import {
+  applicationReviewAccess,
+  applicationDecisionAccess,
+  permissions,
+} from "../server/roles.js";
 import { applicationScenarios } from "../server/application-scenarios.js";
 import { questionList } from "../shared/application-form.js";
 import { discordClient } from "../server/discord.js";
@@ -25,9 +29,18 @@ const config = {
     specialistRoles: { builder: "51", artist: "52", developer: "25" },
   },
 };
-function setup(t, fetcher = async () => new Response(null, { status: 404 })) {
+function setup(
+  t,
+  fetcher = async () => new Response(null, { status: 404 }),
+  getMinecraftLink,
+) {
   const database = openStore(":memory:", randomBytes(32).toString("base64"));
-  const service = applicationService(config, database.store, fetcher);
+  const service = applicationService(
+    config,
+    database.store,
+    fetcher,
+    getMinecraftLink,
+  );
   t.after(async () => {
     await service.close();
     database.store.close();
@@ -87,7 +100,7 @@ test("application roles follow verified Discord rank IDs", () => {
     "community",
     "developer",
   ]);
-  for (const id of ["20", "21", "22", "23", "24"])
+  for (const id of ["20", "28", "21", "29", "22", "30", "23"])
     assert.deepEqual(availableApplicationRoles(config, { roles: [id] }), [
       "builder",
       "artist",
@@ -101,6 +114,9 @@ test("application roles follow verified Discord rank IDs", () => {
     ["20", true],
     ["21", true],
     ["22", true],
+    ["28", true],
+    ["29", true],
+    ["30", true],
     ["23", false],
     ["25", false],
   ]) {
@@ -118,7 +134,27 @@ test("application roles follow verified Discord rank IDs", () => {
       }),
       false,
     );
+    assert.equal(
+      applicationDecisionAccess(config, {
+        roles: ["10", id],
+        permissions: permissions(config, ["10", id]),
+      }),
+      ["20", "28"].includes(id),
+    );
+    assert.equal(
+      applicationDecisionAccess(config, {
+        roles: [id],
+        permissions: permissions(config, [id]),
+      }),
+      false,
+    );
   }
+  assert.deepEqual(availableApplicationRoles(config, { roles: ["24"] }), [
+    "community",
+    "builder",
+    "artist",
+    "developer",
+  ]);
 });
 test("Discord can connect before a name or role, while a preferred name remains required", async (t) => {
   const { service } = setup(t);
@@ -171,6 +207,159 @@ test("one of twenty scenarios stays fixed and cannot be supplied by the applican
     /invalid_request/,
   );
   assert.equal(service.view("session").scenarios, undefined);
+});
+test("registered staff confirm the panel name and cannot apply during a pending correction", async (t) => {
+  let link = { name: "Panel_Name", status: "pending" };
+  const { service } = setup(t, undefined, (id) =>
+    id === "123" ? link : undefined,
+  );
+  service.connect("session", {
+    id: "123",
+    name: "Staff",
+    username: "staff",
+    roles: ["28"],
+    email: "fixture@example.com",
+  });
+  assert.equal(service.view("session").answers.ign, "Panel_Name");
+  assert.deepEqual(service.view("session").linkedMinecraft, {
+    name: "Panel_Name",
+    changePending: false,
+  });
+  assert.throws(
+    () => service.patch("session", { answers: { ign: "Another_Name" } }),
+    /application_minecraft_link_changed/,
+  );
+  service.patch("session", {
+    role: "builder",
+    answers: {
+      ...answers("builder"),
+      ign: "Panel_Name",
+      discordConfirmed: true,
+    },
+  });
+  assert.ok((await service.submit("session")).errors.minecraftConfirmed);
+  service.patch("session", {
+    answers: {
+      minecraftConfirmed: false,
+      minecraftConfirmedName: "Panel_Name",
+    },
+  });
+  assert.ok((await service.submit("session")).errors.minecraftConfirmed);
+  service.patch("session", { answers: { minecraftConfirmed: true } });
+  link.changeRequest = { name: "Corrected_Name" };
+  assert.ok((await service.submit("session")).errors.minecraftConfirmed);
+  link = { name: "Corrected_Name", status: "pending" };
+  const updated = service.view("session");
+  assert.equal(updated.answers.ign, "Corrected_Name");
+  assert.equal(updated.answers.minecraftConfirmed, undefined);
+  assert.ok((await service.submit("session")).errors.minecraftConfirmed);
+  service.patch("session", {
+    answers: {
+      ign: "Corrected_Name",
+      minecraftConfirmed: true,
+      minecraftConfirmedName: "Corrected_Name",
+    },
+  });
+  const result = await service.submit("session");
+  assert.ok(result.id);
+  assert.equal(service.get(result.id).answers.ign, "Corrected_Name");
+});
+test("panel name changes during profile lookup invalidate the confirmation before storing an application", async (t) => {
+  let name = "Original";
+  const { service } = setup(
+    t,
+    async () => {
+      name = "Changed";
+      return new Response(null, { status: 404 });
+    },
+    () => ({ name }),
+  );
+  service.connect("session", {
+    id: "123",
+    roles: ["20"],
+    email: "fixture@example.com",
+  });
+  service.patch("session", {
+    role: "artist",
+    answers: {
+      ...answers("artist"),
+      ign: "Original",
+      discordConfirmed: true,
+      minecraftConfirmed: true,
+      minecraftConfirmedName: "Original",
+    },
+  });
+  assert.ok((await service.submit("session")).errors.minecraftConfirmed);
+  assert.equal(service.list().total, 0);
+});
+test("unrecognized Discord roles never expose a stored staff Minecraft link", (t) => {
+  const { service } = setup(t, undefined, () => ({ name: "PrivateName" }));
+  service.connect("session", { id: "123", roles: [] });
+  assert.equal(service.view("session").linkedMinecraft, null);
+  assert.equal(service.view("session").answers.ign, undefined);
+});
+test("Jr Moderator and higher can leave feedback but only Manager and Founder can make a final decision", async (t) => {
+  const { service } = setup(t);
+  const user = (rank, dashboard = true) => {
+    const roles = [rank, ...(dashboard ? ["10"] : [])];
+    return {
+      id: rank,
+      name: `Reviewer ${rank}`,
+      roles,
+      permissions: permissions(config, roles),
+    };
+  };
+  service.patch("session", { role: "community", answers: answers() });
+  const { id } = await service.submit("session");
+  for (const rank of ["30", "22", "29", "21", "28", "20"])
+    service.addComment(
+      id,
+      user(rank),
+      `I know this player from the server, ${rank}.`,
+    );
+  assert.equal(service.get(id).comments.length, 6);
+  assert.equal(service.get(id).comments[0].author.id, "30");
+  assert.throws(
+    () => service.addComment(id, user("23"), "Feedback"),
+    /application_review_role_required/,
+  );
+  assert.throws(
+    () => service.addComment(id, user("20", false), "Feedback"),
+    /application_review_role_required/,
+  );
+  assert.throws(
+    () => service.addComment(id, user("30"), "  "),
+    /invalid_application_comment/,
+  );
+  for (const rank of ["30", "22", "29", "21", "23"])
+    assert.throws(
+      () => service.decide(id, user(rank), "approve"),
+      /application_decision_role_required/,
+    );
+  assert.throws(
+    () => service.decide(id, user("28", false), "approve"),
+    /application_decision_role_required/,
+  );
+  assert.throws(
+    () => service.decide(id, user("28"), "grant"),
+    /invalid_request/,
+  );
+  const approved = service.decide(
+    id,
+    user("28"),
+    "approve",
+    "Supported by staff feedback.",
+  );
+  assert.equal(approved.status, "Approved");
+  assert.equal(approved.decision.author.id, "28");
+  assert.equal(service.list().items[0].status, "Approved");
+  assert.throws(
+    () => service.decide(id, user("20"), "deny"),
+    /application_already_decided/,
+  );
+  service.patch("another", { role: "artist", answers: answers("artist") });
+  const another = await service.submit("another");
+  assert.equal(service.decide(another.id, user("20"), "deny").status, "Denied");
 });
 test("anonymous applicants need email and adult confirmation; conditional community answers are enforced", async (t) => {
   const { service } = setup(t);

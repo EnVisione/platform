@@ -1,10 +1,12 @@
 export const accessRoles = { dashboard: "10", todo: "11" };
 export const ranks = [
   ["20", "Founder", "OWNER", true],
+  ["28", "Manager", "MAINTAINER", true],
   ["21", "Admin", "MAINTAINER", true],
+  ["29", "Sr Moderator", "USER", true],
   ["22", "Moderator", "USER", true],
+  ["30", "Jr Moderator", "USER", true],
   ["23", "Helper", "USER", true],
-  ["24", "Trial Staff", "USER", true],
   ["25", "Developer", "USER", false],
   ["26", "Discord Management", "USER", false],
   ["27", "Server Management", "USER", false],

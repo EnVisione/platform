@@ -25,9 +25,21 @@
       "dashboard": true
     },
     {
+      "id": "REPLACE_MANAGER_ROLE_ID",
+      "name": "Manager",
+      "huly": "MAINTAINER",
+      "dashboard": true
+    },
+    {
       "id": "REPLACE_ADMIN_ROLE_ID",
       "name": "Admin",
       "huly": "MAINTAINER",
+      "dashboard": true
+    },
+    {
+      "id": "REPLACE_SR_MODERATOR_ROLE_ID",
+      "name": "Sr Moderator",
+      "huly": "USER",
       "dashboard": true
     },
     {
@@ -37,14 +49,14 @@
       "dashboard": true
     },
     {
-      "id": "REPLACE_HELPER_ROLE_ID",
-      "name": "Helper",
+      "id": "REPLACE_JR_MODERATOR_ROLE_ID",
+      "name": "Jr Moderator",
       "huly": "USER",
       "dashboard": true
     },
     {
-      "id": "REPLACE_TRIAL_STAFF_ROLE_ID",
-      "name": "Trial Staff",
+      "id": "REPLACE_HELPER_ROLE_ID",
+      "name": "Helper",
       "huly": "USER",
       "dashboard": true
     },

@@ -18,6 +18,8 @@ const notices = {
     "Applications are temporarily unavailable. Your saved draft is still here. Please try again.",
   application_role_unavailable:
     "Your Discord roles changed which applications are available. Choose another role.",
+  application_minecraft_link_changed:
+    "Your linked Minecraft name changed. Refresh this page and confirm the current name.",
 };
 const timezoneOptions = [
   ...new Set([
@@ -80,6 +82,13 @@ export function PublicApplication() {
         setAnswers(data.answers ?? {});
         if (data.submitted) setReceipt(data.submitted);
         if (!data.role) setStep(0);
+        else if (
+          data.linkedMinecraft &&
+          (data.linkedMinecraft.changePending ||
+            data.answers.minecraftConfirmed !== true ||
+            data.answers.minecraftConfirmedName !== data.linkedMinecraft.name)
+        )
+          setStep((current) => Math.min(current, 2));
         const loginError = new URLSearchParams(location.search).get("error");
         if (loginError)
           setError(
@@ -214,6 +223,18 @@ export function PublicApplication() {
     setError("");
     if (current === "name" && !answers.displayName?.trim()) {
       setError("Please tell us what we should call you before continuing.");
+      return;
+    }
+    if (
+      current === "ign" &&
+      draft.linkedMinecraft &&
+      (draft.linkedMinecraft.changePending ||
+        answers.minecraftConfirmed !== true ||
+        answers.minecraftConfirmedName !== draft.linkedMinecraft.name)
+    ) {
+      setError(
+        "Confirm your linked name before continuing. If it is incorrect, request a change in panel settings and wait for Founder or Manager approval.",
+      );
       return;
     }
     if (current === "communities" && !answers.communities?.length) {
@@ -400,15 +421,74 @@ export function PublicApplication() {
                 )}
                 {current === "ign" && (
                   <>
-                    <h1 id="apply-title">Your Minecraft name</h1>
-                    <p>Enter your Minecraft Java Edition username.</p>
-                    {field("ign", "In-game name (IGN)", {
-                      pattern: "[A-Za-z0-9_]{3,16}",
-                      minLength: 3,
-                      maxLength: 16,
-                      spellCheck: false,
-                      autoComplete: "off",
-                    })}
+                    <h1 id="apply-title">
+                      {draft.linkedMinecraft
+                        ? "Is this your Minecraft name?"
+                        : "Your Minecraft name"}
+                    </h1>
+                    {draft.linkedMinecraft ? (
+                      <>
+                        <p>
+                          Your staff panel already links your Discord account to{" "}
+                          <strong>{draft.linkedMinecraft.name}</strong>.
+                        </p>
+                        <div className="apply-radios">
+                          {[true, false].map((correct) => (
+                            <label key={String(correct)}>
+                              <input
+                                type="radio"
+                                name="minecraftConfirmed"
+                                required
+                                disabled={draft.linkedMinecraft.changePending}
+                                checked={
+                                  answers.minecraftConfirmed === correct &&
+                                  answers.minecraftConfirmedName ===
+                                    draft.linkedMinecraft.name
+                                }
+                                onChange={() => {
+                                  update("minecraftConfirmed", correct);
+                                  update(
+                                    "minecraftConfirmedName",
+                                    draft.linkedMinecraft.name,
+                                  );
+                                }}
+                              />
+                              {correct
+                                ? "Yes, this is correct"
+                                : "No, this is incorrect"}
+                            </label>
+                          ))}
+                        </div>
+                        {(answers.minecraftConfirmed === false ||
+                          draft.linkedMinecraft.changePending) && (
+                          <div className="apply-notice" role="alert">
+                            <p>
+                              Please stop here. Open panel settings and request
+                              the correct Minecraft name. Wait for Founder or
+                              Manager approval, then return here and refresh
+                              before continuing.
+                            </p>
+                            <a
+                              className="apply-button"
+                              href="https://staff.drakora.org/settings"
+                            >
+                              Open panel settings
+                            </a>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p>Enter your Minecraft Java Edition username.</p>
+                        {field("ign", "In-game name (IGN)", {
+                          pattern: "[A-Za-z0-9_]{3,16}",
+                          minLength: 3,
+                          maxLength: 16,
+                          spellCheck: false,
+                          autoComplete: "off",
+                        })}
+                      </>
+                    )}
                     {/^[A-Za-z0-9_]{3,16}$/.test(answers.ign ?? "") && (
                       <div className="apply-player">
                         <img
@@ -717,10 +797,10 @@ export function PublicApplication() {
                     <p className="apply-muted">
                       Your answers, contact details, and linked Discord and
                       Minecraft identity are stored privately for staff
-                      applications. Authorized Moderators, Admins, and Founders
-                      can read them. Minecraft ownership and network activity
-                      are not verified yet. Please do not include passwords,
-                      home addresses, or private documents.
+                      applications. Authorized staff with Jr Moderator rank or
+                      higher can read them. Minecraft ownership and network
+                      activity are not verified yet. Please do not include
+                      passwords, home addresses, or private documents.
                     </p>
                     {check(
                       "privacyConsent",
@@ -750,7 +830,13 @@ export function PublicApplication() {
                     <button
                       className="apply-button"
                       type="submit"
-                      disabled={busy}
+                      disabled={
+                        busy ||
+                        (current === "ign" &&
+                          Boolean(draft.linkedMinecraft) &&
+                          (draft.linkedMinecraft.changePending ||
+                            answers.minecraftConfirmed === false))
+                      }
                     >
                       {busy
                         ? "Saving…"
