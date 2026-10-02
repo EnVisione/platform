@@ -11,6 +11,12 @@ import { openStore, hash } from "./store.js";
 import { AuthError, discordClient } from "./discord.js";
 import { hulyClient } from "./huly.js";
 import { isPageRequest } from "./navigation.js";
+import {
+  workspaceAllowed,
+  workspacePath,
+  workspaceHtmlProxy,
+  isWorkspacePage,
+} from "./workspace.js";
 import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
@@ -69,6 +75,27 @@ const discord = discordClient(config, store, fetch, rolePolicy.apply);
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
+let workspaceAddress;
+async function workspaceConfig() {
+  if (!workspaceAddress) {
+    workspaceAddress = huly
+      .rpc("getWorkspaceInfo", { updateLastVisit: false })
+      .then((workspace) => {
+        if (
+          typeof workspace.url !== "string" ||
+          !workspace.url ||
+          workspace.url.length > 200
+        )
+          throw new Error("Workspace address is unavailable");
+        return { ...config, workspaceUrl: workspace.url };
+      })
+      .catch((error) => {
+        workspaceAddress = undefined;
+        throw error;
+      });
+  }
+  return workspaceAddress;
+}
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
@@ -199,7 +226,7 @@ app.use((req, res, next) => {
   if ([staffHost, applicationHost].includes(req.headers.host))
     res.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
   next();
 });
@@ -227,6 +254,9 @@ function safeNext(value) {
       "/applications/editor",
       "/email",
       "/roles",
+      "/office",
+      "/tracker",
+      "/calendar",
     ].includes(value)
   )
     return value;
@@ -289,6 +319,7 @@ function publicUser(user) {
     rolesPanel: Boolean(user.capabilities["roles.view"]),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
+    workspaceOrigin: config.todoOrigin,
     applications: Boolean(
       applications && applicationReviewAccess(config, user),
     ),
@@ -390,7 +421,7 @@ officeRouter.post(
 );
 app.use(["/api/office", "/_drakora/api/office"], officeRouter);
 
-const proxy = createProxyMiddleware({
+const proxyOptions = {
   target: config.hulyUpstream,
   changeOrigin: false,
   on: {
@@ -408,7 +439,9 @@ const proxy = createProxyMiddleware({
       else response.destroy();
     },
   },
-});
+};
+const proxy = createProxyMiddleware(proxyOptions);
+const htmlProxy = workspaceHtmlProxy(config, proxyOptions);
 
 app.post("/_github/api/webhook", (req, res, next) => {
   if (
@@ -471,7 +504,10 @@ app.use(async (req, res, next) => {
   try {
     user = await signedIn(req);
   } catch (error) {
-    if (error.status === 401 && isPageRequest(req))
+    if (
+      error.status === 401 &&
+      (isPageRequest(req) || req.path.startsWith("/__staff/open/"))
+    )
       return res.redirect("/__staff/start");
     if (error.code === "minecraft_name_required" && isPageRequest(req))
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
@@ -480,6 +516,25 @@ app.use(async (req, res, next) => {
   if (!user.permissions.todo) throw new AuthError("todo_role_required");
   if (!matchingHulyIdentity(req, user))
     throw new AuthError("huly_account_mismatch");
+  if (req.method === "GET" && req.path.startsWith("/__staff/open/")) {
+    const view = req.path.slice("/__staff/open/".length);
+    if (!workspacePath({ workspaceUrl: "" }, view))
+      return res.status(404).end();
+    if (!workspaceAllowed(user, view))
+      throw new AuthError("staff_permission_required");
+    return res.redirect(workspacePath(await workspaceConfig(), view));
+  }
+  if (
+    req.method === "GET" &&
+    ["/__staff/workspace.js", "/__staff/workspace.css"].includes(req.path)
+  ) {
+    return res.sendFile(
+      resolve(
+        "server/workspace-assets",
+        req.path.endsWith(".js") ? "workspace.js" : "workspace.css",
+      ),
+    );
+  }
   if (req.method === "GET" && req.path === "/config.json") {
     const response = await fetch(`${config.hulyUpstream}/config.json`, {
       headers: { Host: todoHost, "X-Forwarded-Proto": "https" },
@@ -499,7 +554,7 @@ app.use(async (req, res, next) => {
   if (req.method === "GET" && req.path === "/_drakora/office") {
     res.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-ancestors 'self' ${config.staffOrigin}; base-uri 'none'; form-action 'self'`,
     );
     return res.sendFile(`${dist}/index.html`);
   }
@@ -523,6 +578,10 @@ app.use(async (req, res, next) => {
           .json({ error: "Use Discord login through the staff portal." });
       proxy(req, res, next);
     });
+  }
+  if (isWorkspacePage(req)) {
+    req.workspaceUrl = (await workspaceConfig()).workspaceUrl;
+    return htmlProxy(req, res, next);
   }
   return proxy(req, res, next);
 });
@@ -760,7 +819,7 @@ app.get(["/huly", "/todo"], async (req, res) => {
   try {
     const user = await signedIn(req);
     if (!user.permissions.todo) throw new AuthError("todo_role_required");
-    res.redirect(`${config.todoOrigin}/__staff/start`);
+    res.redirect("/tracker");
   } catch (error) {
     if (error.status === 401) return res.redirect("/login?next=/huly");
     if (error.code === "minecraft_name_required")
@@ -964,19 +1023,6 @@ app.get("/minecraft", async (req, res) => {
     throw error;
   }
 });
-app.get("/office", async (req, res) => {
-  try {
-    const user = await signedIn(req);
-    if (!user.capabilities["office.view"])
-      throw new AuthError("office_permission_required");
-    res.sendFile(`${dist}/index.html`);
-  } catch (error) {
-    if (error.status === 401) res.redirect("/login");
-    else if (error.code === "minecraft_name_required")
-      res.redirect("/minecraft?next=/huly");
-    else throw error;
-  }
-});
 async function applicationViewer(req) {
   const user = await signedIn(req, {
     syncHuly: false,
@@ -1100,12 +1146,26 @@ app.get(["/applications", "/applications/:id"], async (req, res) => {
   }
 });
 app.get(
-  ["/", "/settings", "/accounts", "/email", "/roles"],
+  [
+    "/",
+    "/settings",
+    "/accounts",
+    "/email",
+    "/roles",
+    "/office",
+    "/tracker",
+    "/calendar",
+  ],
   async (req, res) => {
     try {
       const user =
         req.path === "/email" ? await authorizeMail(req) : await signedIn(req);
       if (req.path === "/roles") await authorizeRoles(req);
+      if (
+        ["/office", "/tracker", "/calendar"].includes(req.path) &&
+        !workspaceAllowed(user, req.path.slice(1))
+      )
+        throw new AuthError("staff_permission_required");
       if (req.path === "/settings" && !user.capabilities["settings.view"])
         throw new AuthError("staff_permission_required");
       if (req.path === "/accounts" && !managementAccess(config, user).manager)

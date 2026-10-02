@@ -1,0 +1,32 @@
+html.drakora-embedded {
+  --staff-accent: #5865f2;
+  --theme-caption-color: #f2f3f5;
+  --theme-content-color: #dbdee1;
+  --theme-dark-color: #b5bac1;
+  --theme-link-color: #a3aaff;
+  --theme-dialog-background-color: #2b2d31;
+  --theme-popup-color: #2b2d31;
+  --theme-table-row-color: #313338;
+  --theme-dialog-border-color: #45474f;
+  --button-border-color: #45474f;
+  --popup-bg-color: #2b2d31;
+  color-scheme: dark;
+}
+.drakora-embedded .workbench-container {
+  background: #313338;
+}
+.drakora-embedded .antiPanel-navigator {
+  background: #2b2d31;
+}
+.drakora-embedded .ac-header {
+  border-color: #45474f;
+}
+.drakora-embedded a:focus-visible,
+.drakora-embedded button:focus-visible {
+  outline: 2px solid var(--staff-accent);
+  outline-offset: 2px;
+}
+.drakora-embedded .antiPanel-navigator a:hover {
+  background-color: #383a40;
+  border-radius: 6px;
+}

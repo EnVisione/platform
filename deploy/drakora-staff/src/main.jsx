@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { PublicApplication } from "./apply.jsx";
@@ -6,6 +6,7 @@ import { StaffApplications } from "./applications.jsx";
 import { Office } from "./office.jsx";
 import { Mail } from "./mail.jsx";
 import { Roles } from "./roles.jsx";
+import { WorkspaceTools, dashboardTools } from "./workspace-tools.jsx";
 import logo from "./assets/drakora-logo.png";
 
 const messages = {
@@ -22,7 +23,7 @@ const messages = {
   verified_email_required:
     "Verify your email address in Discord before signing in.",
   todo_role_required:
-    "You need the Todo role in the Drakora Discord server to open Huly.",
+    "You need the Todo role in the Drakora Discord server to open the workspace.",
   discord_unavailable:
     "Discord is temporarily unavailable. Please try again shortly.",
   service_unavailable:
@@ -35,9 +36,9 @@ const messages = {
   invalid_login_state:
     "This sign-in link has expired. Start a new sign-in below.",
   invalid_handoff:
-    "This Huly link has expired. Open Huly again from the staff dashboard.",
+    "This workspace link has expired. Open Tracker again from the staff dashboard.",
   huly_account_mismatch:
-    "Your Huly session belongs to another account. Open Huly again from the staff dashboard.",
+    "Your workspace session belongs to another account. Open Tracker again from the staff dashboard.",
 };
 function safeTarget(value) {
   if (
@@ -50,6 +51,9 @@ function safeTarget(value) {
       "/applications/editor",
       "/email",
       "/roles",
+      "/office",
+      "/tracker",
+      "/calendar",
     ].includes(value)
   )
     return value;
@@ -519,6 +523,16 @@ function App() {
   const [state, setState] = useState({ loading: true });
   const [busy, setBusy] = useState(false);
   const [accent, setAccent] = useState(defaultAccent);
+  const [workspaceView, setWorkspaceView] = useState(
+    () =>
+      dashboardTools.find((tool) => location.pathname === `/${tool.view}`)
+        ?.view ?? null,
+  );
+  const navigateWorkspace = useCallback((view) => {
+    setWorkspaceView(view);
+    if (location.pathname !== `/${view}`)
+      history.replaceState(null, "", `/${view}`);
+  }, []);
   const params = new URLSearchParams(location.search);
   const loginPage = location.pathname === "/login";
   const settingsPage = location.pathname === "/settings";
@@ -629,7 +643,7 @@ function App() {
   const user = state.user;
   return (
     <div
-      className="workspace"
+      className={`workspace${workspaceView ? " workspace-tools-page" : ""}`}
       style={{ "--accent": accent, "--accent-text": accentText(accent) }}
     >
       <aside className="sidebar">
@@ -640,25 +654,40 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || workspaceView ? "" : " active"}`}
             href="/"
             aria-current={
               settingsPage ||
               accountsPage ||
               applicationsPage ||
               emailPage ||
-              rolesPage
+              rolesPage ||
+              workspaceView
                 ? undefined
                 : "page"
             }
           >
             <span aria-hidden="true">⌂</span>Overview
           </a>
-          {user.todo && (
-            <a className="nav-item" href="/huly">
-              <span aria-hidden="true">✓</span>Huly
-            </a>
-          )}
+          {user.todo &&
+            dashboardTools
+              .filter(
+                (tool) =>
+                  tool.view !== "office" || user.capabilities["office.view"],
+              )
+              .map((tool) => (
+                <a
+                  key={tool.view}
+                  className={`nav-item${workspaceView === tool.view ? " active" : ""}`}
+                  href={`/${tool.view}`}
+                  aria-current={
+                    workspaceView === tool.view ? "page" : undefined
+                  }
+                >
+                  <span aria-hidden="true">{tool.icon}</span>
+                  {tool.title}
+                </a>
+              ))}
           {user.applications && (
             <a
               className={`nav-item${applicationsPage ? " active" : ""}`}
@@ -726,24 +755,41 @@ function App() {
             Drakora Staff
           </a>
           <h1>
-            {settingsPage
-              ? "Settings"
-              : accountsPage
-                ? "Accounts"
-                : applicationsPage
-                  ? "Staff Applications"
-                  : emailPage
-                    ? "Email"
-                    : rolesPage
-                      ? "Roles"
-                      : "Overview"}
+            {workspaceView
+              ? dashboardTools.find((tool) => tool.view === workspaceView)
+                  ?.title
+              : settingsPage
+                ? "Settings"
+                : accountsPage
+                  ? "Accounts"
+                  : applicationsPage
+                    ? "Staff Applications"
+                    : emailPage
+                      ? "Email"
+                      : rolesPage
+                        ? "Roles"
+                        : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
             {(settingsPage ||
               accountsPage ||
               applicationsPage ||
               emailPage ||
-              rolesPage) && <a href="/">Overview</a>}
+              rolesPage ||
+              workspaceView) && <a href="/">Overview</a>}
+            {user.todo &&
+              dashboardTools
+                .filter(
+                  (tool) =>
+                    (tool.view !== "office" ||
+                      user.capabilities["office.view"]) &&
+                    tool.view !== workspaceView,
+                )
+                .map((tool) => (
+                  <a key={tool.view} href={`/${tool.view}`}>
+                    {tool.title}
+                  </a>
+                ))}
             {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
             {user.applications && !applicationsPage && (
               <a href="/applications">Applications</a>
@@ -760,13 +806,15 @@ function App() {
         </header>
         <main
           className={
-            applicationsPage
-              ? "dashboard dashboard-applications"
-              : emailPage
-                ? "dashboard dashboard-mail"
-                : rolesPage
-                  ? "dashboard dashboard-roles"
-                  : "dashboard"
+            workspaceView
+              ? "dashboard dashboard-workspace"
+              : applicationsPage
+                ? "dashboard dashboard-applications"
+                : emailPage
+                  ? "dashboard dashboard-mail"
+                  : rolesPage
+                    ? "dashboard dashboard-roles"
+                    : "dashboard"
           }
         >
           {error && (
@@ -774,7 +822,21 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
-          {rolesPage ? (
+          {workspaceView ? (
+            user.todo &&
+            (workspaceView !== "office" || user.capabilities["office.view"]) ? (
+              <WorkspaceTools
+                view={workspaceView}
+                origin={user.workspaceOrigin}
+                accent={accent}
+                onNavigate={navigateWorkspace}
+              />
+            ) : (
+              <p className="notice">
+                Your roles do not have permission to open this workspace.
+              </p>
+            )
+          ) : rolesPage ? (
             user.rolesPanel ? (
               <Roles csrf={state.csrf} userId={user.id} />
             ) : (
@@ -831,16 +893,24 @@ function App() {
                   <h3 id="staff-tools" className="section-title">
                     Tools
                   </h3>
-                  <article className="tool-card">
-                    <div className="tool-icon">✓</div>
-                    <div className="tool-content">
-                      <h4>Huly</h4>
-                      <p>Projects and tasks for Drakora staff</p>
-                    </div>
-                    <a className="button open-tool" href="/huly">
-                      Open Huly <span aria-hidden="true">↗</span>
-                    </a>
-                  </article>
+                  {dashboardTools
+                    .filter(
+                      (tool) =>
+                        tool.view !== "office" ||
+                        user.capabilities["office.view"],
+                    )
+                    .map((tool) => (
+                      <article className="tool-card" key={tool.view}>
+                        <div className="tool-icon">{tool.icon}</div>
+                        <div className="tool-content">
+                          <h4>{tool.title}</h4>
+                          <p>{tool.description}</p>
+                        </div>
+                        <a className="button open-tool" href={`/${tool.view}`}>
+                          Open {tool.title} <span aria-hidden="true">→</span>
+                        </a>
+                      </article>
+                    ))}
                 </section>
               )}
               <section className="roles-card" aria-labelledby="your-roles">
@@ -870,8 +940,7 @@ function App() {
 createRoot(document.getElementById("root")).render(
   location.pathname === "/apply" || location.pathname.startsWith("/apply/") ? (
     <PublicApplication />
-  ) : location.pathname === "/office" ||
-    location.pathname === "/_drakora/office" ? (
+  ) : location.pathname === "/_drakora/office" ? (
     <Office />
   ) : (
     <App />
