@@ -330,7 +330,10 @@ export function PublicApplication() {
             Drakora <small>STAFF APPLICATIONS</small>
           </span>
         </a>
-        <section className="apply-card" aria-labelledby="apply-title">
+        <section
+          className={`apply-card${receipt ? " apply-receipt" : ""}`}
+          aria-labelledby="apply-title"
+        >
           {!draft ? (
             <>
               <h1 id="apply-title">Staff applications</h1>
@@ -341,38 +344,65 @@ export function PublicApplication() {
             </>
           ) : receipt ? (
             <>
-              <span className="apply-eyebrow">APPLICATION RECEIVED</span>
-              <h1 id="apply-title">
-                Thank you, {answers.displayName || "applicant"}.
-              </h1>
+              <div className="apply-receipt-heading">
+                <span className="apply-receipt-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="m5 12 4 4L19 6"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <div>
+                  <span className="apply-eyebrow">APPLICATION RECEIVED</span>
+                  <h1 id="apply-title">
+                    Thank you, {answers.displayName || "applicant"}.
+                  </h1>
+                </div>
+              </div>
               <p>
-                Your {receipt.role} application has been saved. The team will
-                use your contact details to follow up.
+                Your {receipt.role} application has been submitted for review.
               </p>
-              <p className="apply-muted">
-                If you linked Discord, we will send a confirmation and review
-                updates by DM. Keep messages from the Drakora bot enabled.
+              <div className="apply-receipt-next">
+                <h2>What happens next?</h2>
+                <p>
+                  The team will review your application and follow up using your
+                  contact details.
+                </p>
+                <p className="apply-muted">
+                  If you connected Discord, watch for a confirmation and review
+                  updates in your DMs. Make sure the Drakora bot can message
+                  you.
+                </p>
+              </div>
+              <p className="apply-receipt-reference">
+                <span>Application reference</span>
+                <code>{receipt.id}</code>
               </p>
-              <p className="apply-muted">Reference: {receipt.id}</p>
               {error && (
                 <p className="apply-notice" role="alert">
                   {error}
                 </p>
               )}
-              <button
-                type="button"
-                className="apply-secondary"
-                onClick={restart}
-                disabled={busy}
-              >
-                Start another application
-              </button>
-              <a
-                className="apply-button"
-                href="https://discord.com/channels/1405306768476864562"
-              >
-                Open Drakora Discord
-              </a>
+              <div className="apply-receipt-actions">
+                <button
+                  type="button"
+                  className="apply-secondary"
+                  onClick={restart}
+                  disabled={busy}
+                >
+                  Start another application
+                </button>
+                <a
+                  className="apply-button"
+                  href="https://discord.com/channels/1405306768476864562"
+                >
+                  Open Drakora Discord
+                </a>
+              </div>
             </>
           ) : (
             <>
