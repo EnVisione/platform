@@ -524,6 +524,12 @@ button {
 .public-application article > section {
   margin-bottom: 34px;
 }
+.public-application h2,
+.public-rule-text h2,
+.public-help-grid .public-heading,
+.public-home-grid .public-heading {
+  color: #b7a080;
+}
 .public-application h2 {
   font-size: 24px;
 }
