@@ -163,11 +163,12 @@ export function ticketService(
       discordUrl: ticket.channelId
         ? `https://discord.com/channels/${config.tickets.guildId}/${ticket.channelId}`
         : null,
-      sync: ticket.discordArchivedAt
-        ? "archived"
-        : ticket.channelId
-          ? "connected"
-          : "pending",
+      sync:
+        ticket.discordDeletedAt || ticket.discordArchivedAt
+          ? "saved"
+          : ticket.channelId
+            ? "connected"
+            : "pending",
       messages,
       hasOlder: page.total > messages.length,
       history: store
@@ -416,7 +417,8 @@ export function ticketService(
           ? "Staff recorded the resolution and closed the ticket"
           : "Player closed the ticket; staff resolution is pending",
       );
-      queue(ticket, "status");
+      if (!ticket.discordDeletedAt && !ticket.discordArchivedAt)
+        queue(ticket, "status");
     });
     announce(ticket);
     return ticket;
@@ -516,10 +518,11 @@ export function ticketService(
     });
     announce(ticket);
   }
-  function ingest(id, incoming) {
+  function ingest(id, incoming, closing = false) {
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
     const saveAttachment = (metadata) => {
+      const createdAt = closing ? Math.min(incoming.at, now()) : now();
       const file = {
         ...metadata,
         id: randomUUID(),
@@ -527,8 +530,8 @@ export function ticketService(
         uploader: incoming.actor.id,
         internal: false,
         used: true,
-        createdAt: now(),
-        expiresAt: now() + ticketMediaDays * 86400000,
+        createdAt,
+        expiresAt: createdAt + ticketMediaDays * 86400000,
       };
       put("ticket-media", file.id, file);
       return file.id;
@@ -593,7 +596,11 @@ export function ticketService(
       announce(ticket);
       return;
     }
-    if (incoming.deleted || !["pending", "claimed"].includes(ticket.status))
+    if (
+      incoming.deleted ||
+      (!["pending", "claimed"].includes(ticket.status) &&
+        !(closing && incoming.at <= ticket.closedAt))
+    )
       return;
     store.transaction(() => {
       const attachments = (incoming.attachments || []).map(saveAttachment);
@@ -634,18 +641,35 @@ export function ticketService(
               priority[a.kind] - priority[b.kind] ||
               a.ref.localeCompare(b.ref),
           )) {
-          if (job.kind === "message" && blocked.has(job.ticketId)) continue;
+          if (job.kind !== "create" && blocked.has(job.ticketId)) continue;
           if (job.after > now()) {
             if (job.kind === "message") blocked.add(job.ticketId);
             continue;
           }
           const ticket = get(job.ticketId);
-          if (job.kind !== "create" && !ticket.channelId) continue;
+          if (job.kind !== "create" && !ticket.channelId) {
+            if (ticket.discordDeletedAt || ticket.discordArchivedAt)
+              store.delete("ticket-outbox", key);
+            continue;
+          }
           if (attempts++ === 20) break;
           try {
             if (job.kind === "create") await transport.create(ticket);
-            else if (job.kind === "status") await transport.status(ticket);
-            else {
+            else if (job.kind === "status") {
+              const result = await transport.status(ticket);
+              if (result?.pending) continue;
+              if (result?.deleted)
+                store.transaction(() => {
+                  const current = get(ticket.id);
+                  if (current.channelId !== ticket.channelId)
+                    throw new Error("Ticket channel changed during closure");
+                  store.delete("ticket-channel", current.channelId);
+                  current.channelId = null;
+                  current.discordDeletedAt = now();
+                  current.revision++;
+                  put("ticket", current.id, current);
+                });
+            } else {
               const message = store.get(
                 `ticket-messages:${ticket.id}`,
                 job.ref,
@@ -719,21 +743,13 @@ export function ticketService(
         }
         for (const [, ticket] of store.entries("ticket")) {
           if (
-            ticket.status === "closed" &&
+            ["closed", "awaiting_resolution"].includes(ticket.status) &&
             ticket.channelId &&
-            ticket.closedAt + ticketMediaDays * 86400000 <= now()
-          ) {
-            try {
-              await transport.removeClosed(ticket);
-              store.delete("ticket-channel", ticket.channelId);
-              ticket.channelId = null;
-              ticket.discordArchivedAt = now();
-              put("ticket", ticket.id, ticket);
-            } catch {
-              console.error("Closed ticket channel removal is pending.");
-            }
-          }
+            !store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`)
+          )
+            queue(ticket, "status");
         }
+        await pump();
       })
       .finally(() => {
         expiring = null;
@@ -861,6 +877,7 @@ export function ticketService(
       maintenance = setInterval(() => void expire(), 60000);
       maintenance.unref();
       void pump();
+      void expire();
     },
     async stop() {
       stopped = true;

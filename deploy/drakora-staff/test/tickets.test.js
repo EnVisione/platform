@@ -495,11 +495,24 @@ test("oversized attachment batches roll back without consuming uploaded files", 
   assert.equal(service.media(owner, ticket.id, files[0].id).used, false);
 });
 
-test("closed Discord channels expire even when the ticket has no attachments", async (t) => {
-  let time = Date.now();
-  const { service } = setup(t, { now: () => time });
+test("closed channels are removed immediately while transcripts stay in staff logs", async (t) => {
+  const { service, store } = setup(t);
   const ticket = service.create(owner, input());
-  service.bind(ticket.id, "900");
+  const removed = [];
+  service.attach({
+    async create(value) {
+      service.bind(value.id, "900");
+    },
+    async message() {
+      return { id: "901" };
+    },
+    async status(value) {
+      removed.push(value.id);
+      return { deleted: true };
+    },
+  });
+  await service.pump();
+  service.reply(owner, ticket.id, message("Keep this in the transcript."));
   service.closeTicket(
     helper,
     ticket.id,
@@ -509,16 +522,83 @@ test("closed Discord channels expire even when the ticket has no attachments", a
     },
     true,
   );
-  const removed = [];
-  service.attach({
-    async removeClosed(value) {
-      removed.push(value.id);
-    },
-  });
-  time += 31 * 86400000;
-  await service.expire();
+  await service.pump();
   assert.deepEqual(removed, [ticket.id]);
   assert.equal(service.get(ticket.id).channelId, null);
-  assert.equal(service.view(owner, ticket.id).sync, "archived");
+  assert.equal(service.view(owner, ticket.id).sync, "saved");
+  assert.equal(service.view(owner, ticket.id).discordUrl, null);
+  assert.equal(service.linked("900"), null);
+  assert.equal(store.entries("ticket-outbox").length, 0);
   assert.equal(service.list(helper, { closed: true }).total, 1);
+  const html = await ticketTranscript(service, helper, ticket.id, true);
+  assert.match(html, /Keep this in the transcript/);
+  assert.match(html, /Confirmed the issue is resolved/);
+  service.rate(owner, ticket.id, 5);
+  assert.equal(service.get(ticket.id).rating, 5);
+});
+
+test("channel removal waits for queued replies including retry backoff", async (t) => {
+  let time = Date.now(),
+    failed = true,
+    removed = false;
+  const { service } = setup(t, { now: () => time });
+  const ticket = service.create(owner, input());
+  service.attach({
+    async create(value) {
+      service.bind(value.id, "900");
+    },
+    async message() {
+      if (failed) throw new Error("Offline");
+      return { id: "901" };
+    },
+    async status() {
+      removed = true;
+      return { deleted: true };
+    },
+  });
+  await service.pump();
+  service.reply(owner, ticket.id, message());
+  service.closeTicket(owner, ticket.id, {});
+  await service.pump();
+  assert.equal(removed, false);
+  await service.pump();
+  assert.equal(removed, false);
+  failed = false;
+  time += 60001;
+  await service.pump();
+  assert.equal(removed, true);
+  assert.equal(service.messages(ticket.id)[0].delivery, "delivered");
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "Added the staff resolution after the player closed the ticket.",
+      commands: "None",
+    },
+    true,
+  );
+  await service.pump();
+  assert.equal(service.get(ticket.id).status, "closed");
+  assert.equal(service.view(helper, ticket.id, true).deliveryPending, 0);
+});
+
+test("maintenance queues existing closed channels for the same safe removal", async (t) => {
+  const { service, store } = setup(t);
+  const ticket = service.create(owner, input());
+  service.bind(ticket.id, "900");
+  service.closeTicket(owner, ticket.id, {});
+  for (const [key] of store.entries("ticket-outbox"))
+    store.delete("ticket-outbox", key);
+  let removed = 0;
+  service.attach({
+    async status() {
+      removed++;
+      return { deleted: true };
+    },
+  });
+  await service.expire();
+  assert.equal(removed, 1);
+  assert.equal(service.get(ticket.id).channelId, null);
+  await service.expire();
+  assert.equal(removed, 1);
 });

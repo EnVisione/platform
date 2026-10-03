@@ -27,6 +27,16 @@ function setupDiscord(t, notices = false) {
   const client = new EventEmitter();
   client.user = { id: "bot" };
   client.isReady = () => true;
+  const dms = [];
+  client.users = {
+    async fetch() {
+      return {
+        async send(data) {
+          dms.push(data);
+        },
+      };
+    },
+  };
   const channels = new Collection([
     ["archive", { id: "archive", type: ChannelType.GuildCategory }],
   ]);
@@ -112,6 +122,16 @@ function setupDiscord(t, notices = false) {
           },
         };
         messages.set(message.id, message);
+        for (const file of data.files || []) {
+          const attachment = {
+            id: String(++nextId),
+            name: file.name,
+            size: file.attachment.length,
+            contentType: "image/png",
+            url: `https://cdn.discordapp.com/attachments/${id}/${nextId}/${file.name}`,
+          };
+          message.attachments.set(attachment.id, attachment);
+        }
         if (target.failAfterBotSend) {
           target.failAfterBotSend = false;
           throw new Error("Response lost after bot send");
@@ -232,6 +252,7 @@ function setupDiscord(t, notices = false) {
     staffMembers,
     staffChannel,
     user,
+    dms,
     get sends() {
       return sends;
     },
@@ -412,7 +433,11 @@ test("Discord transport creates private tickets, preserves webhook identity and 
     true,
   );
   await service.pump();
-  assert.equal(target.parentId, "archive");
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(service.view(user, ticket.id).sync, "saved");
+  assert.equal(context.dms.length, 1);
+  assert.equal(service.messages(ticket.id)[0].content, "Hello from the web");
   assert.ok(
     target.overwrites
       .find((value) => value.id === user.id)
@@ -668,4 +693,209 @@ test("ticket visibility follows screened staff membership and Dashboard access i
   });
   await transport.recover();
   assert.ok(!target.overwrites.some((value) => value.id === "201"));
+});
+
+test("closure saves paginated missed history and preserves Discord files before channel deletion", async (t) => {
+  const { service, transport, channels, user, dms } = setupDiscord(t);
+  const ticket = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description: "A detailed ticket with history and a screenshot to retain.",
+    },
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  for (let index = 0; index < 600; index++) {
+    const id = String(2000 + index);
+    target.savedMessages.set(id, {
+      id,
+      channelId: target.id,
+      guildId: "2",
+      author: user,
+      content: `Saved Discord reply ${index}`,
+      createdTimestamp: Date.now() - 10000,
+      attachments: new Collection(
+        index === 599
+          ? [
+              [
+                "20000",
+                {
+                  id: "20000",
+                  name: "proof.png",
+                  contentType: "image/png",
+                  size: 7,
+                  url: `https://cdn.discordapp.com/attachments/${target.id}/20000/proof.png`,
+                },
+              ],
+            ]
+          : [],
+      ),
+    });
+  }
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(Buffer.from("picture")),
+  );
+  service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
+  await service.pump();
+  assert.equal(channels.has(target.id), true);
+  assert.equal(
+    service.store.get("ticket-discord-close", ticket.id).historySaved,
+    false,
+  );
+  await service.pump();
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.messages(ticket.id).length, 600);
+  const [, file] = service.store.entries("ticket-media")[0];
+  assert.notEqual(file.channelId, target.id);
+  assert.equal(channels.get(file.channelId).name, "ticket-attachments");
+  assert.equal(file.expiresAt - file.createdAt, 30 * 86400000);
+  assert.equal((await transport.bytes(file)).toString(), "picture");
+  assert.equal(
+    dms[0].components[0].components[0].custom_id,
+    `ticket:rate:${ticket.id}`,
+  );
+  service.rate({ id: user.id, name: "Player" }, ticket.id, 4);
+  assert.equal(service.get(ticket.id).rating, 4);
+});
+
+test("closure leaves the channel intact if history permissions or ownership are unavailable", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  const ticket = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description:
+        "A detailed ticket that cannot be deleted without its history.",
+    },
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  target.readable = false;
+  service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
+  await service.pump();
+  assert.equal(channels.has(target.id), true);
+  assert.equal(service.store.get("ticket-discord-close", ticket.id), undefined);
+  target.readable = true;
+  target.topic = "Another channel";
+  await assert.rejects(transport.status(service.get(ticket.id)), /ownership/);
+  assert.equal(channels.has(target.id), true);
+  assert.ok(service.store.entries("ticket-outbox").length);
+});
+
+test("a lost channel deletion response resumes from the saved transcript checkpoint", async (t) => {
+  const { service, transport, channels, user, dms } = setupDiscord(t);
+  const ticket = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description:
+        "A detailed ticket for retrying an uncertain channel deletion.",
+    },
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  target.delete = async () => {
+    channels.delete(target.id);
+    throw new Error("Deletion response lost");
+  };
+  service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
+  await service.pump();
+  assert.equal(
+    service.store.get("ticket-discord-close", ticket.id).ready,
+    true,
+  );
+  assert.equal(service.get(ticket.id).channelId, target.id);
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    service.store.set(
+      "ticket-outbox",
+      key,
+      { ...job, after: 0 },
+      Number.MAX_SAFE_INTEGER,
+    );
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(service.view({ id: user.id }, ticket.id).discordUrl, null);
+  assert.equal(dms.length, 1);
+});
+
+test("attachment copy failure keeps the original channel and resumes without extending retention", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  const ticket = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description:
+        "A detailed ticket with a file that is initially unavailable.",
+    },
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  const at = Date.now() - 10000;
+  target.savedMessages.set("2000", {
+    id: "2000",
+    channelId: target.id,
+    guildId: "2",
+    author: user,
+    content: "Here is the screenshot.",
+    createdTimestamp: at,
+    attachments: new Collection([
+      [
+        "20000",
+        {
+          id: "20000",
+          name: "proof.png",
+          contentType: "image/png",
+          size: 7,
+          url: `https://cdn.discordapp.com/attachments/${target.id}/20000/proof.png`,
+        },
+      ],
+    ]),
+  });
+  let available = false;
+  t.mock.method(globalThis, "fetch", async () =>
+    available
+      ? new Response(Buffer.from("picture"))
+      : new Response(null, { status: 503 }),
+  );
+  service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
+  await service.pump();
+  assert.equal(channels.has(target.id), true);
+  assert.equal(
+    service.store.get("ticket-discord-close", ticket.id).ready,
+    undefined,
+  );
+  const [id, file] = service.store.entries("ticket-media")[0];
+  assert.equal(file.channelId, target.id);
+  assert.equal(file.createdAt, at);
+  available = true;
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    service.store.set(
+      "ticket-outbox",
+      key,
+      { ...job, after: 0 },
+      Number.MAX_SAFE_INTEGER,
+    );
+  await service.pump();
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.store.get("ticket-media", id).expiresAt, file.expiresAt);
+  assert.equal(service.messages(ticket.id).length, 1);
 });

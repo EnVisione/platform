@@ -407,16 +407,6 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       });
       return acknowledge(sent);
     },
-    async removeClosed(ticket) {
-      webhooks.delete(ticket.channelId);
-      try {
-        await (
-          await channel(ticket.channelId)
-        ).delete("Closed ticket retained in staff logs");
-      } catch (error) {
-        if (!absent(error)) throw error;
-      }
-    },
     async assertMember(id) {
       await (await guild()).members.fetch(id);
     },
@@ -475,6 +465,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async status(ticket) {
       await ready();
+      if (["closed", "awaiting_resolution"].includes(ticket.status))
+        return await closeChannel(ticket);
       const members = await staffMembers();
       const target = await channel(ticket.channelId),
         saved = service.store.get("ticket-discord", ticket.id);
@@ -485,14 +477,6 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         allowedMentions: { parse: [] },
       });
       await target.permissionOverwrites.set(ticketOverwrites(ticket, members));
-      // closed channels no longer consume the support category channel limit.
-      if (
-        ticket.status === "closed" &&
-        target.parentId !== settings.archiveCategoryId
-      )
-        await target.setParent(settings.archiveCategoryId, {
-          lockPermissions: false,
-        });
     },
     async message(ticket, message, attachments, { retry = false } = {}) {
       await ready();
@@ -679,7 +663,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
     },
   };
-  async function observe(message, edited = false) {
+  async function observe(message, edited = false, closing = false) {
     const ticket = service.linked(message.channelId);
     if (
       !ticket ||
@@ -695,22 +679,148 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const staff = isOwner || prior ? null : await staffUser(user.id);
     if (!isOwner && !prior)
       service.staff(staff || { roles: [] }, ticket, "tickets.reply");
-    service.ingest(ticket.id, {
-      id: message.id,
-      actor: user,
-      staff: !isOwner,
-      at: message.createdTimestamp,
-      editedAt: message.editedTimestamp,
-      content: message.content,
-      attachments: [...message.attachments.values()].map((file) => ({
-        channelId: message.channelId,
-        messageId: message.id,
-        attachmentId: file.id,
-        name: file.name.slice(0, 120),
-        type: file.contentType || "application/octet-stream",
-        size: file.size,
-      })),
-    });
+    service.ingest(
+      ticket.id,
+      {
+        id: message.id,
+        actor: user,
+        staff: !isOwner,
+        at: message.createdTimestamp,
+        editedAt: message.editedTimestamp,
+        content: message.content,
+        attachments: [...message.attachments.values()].map((file) => ({
+          channelId: message.channelId,
+          messageId: message.id,
+          attachmentId: file.id,
+          name: file.name.slice(0, 120),
+          type: file.contentType || "application/octet-stream",
+          size: file.size,
+        })),
+      },
+      closing,
+    );
+  }
+  async function closeChannel(ticket) {
+    let snapshot = service.store.get("ticket-discord-close", ticket.id);
+    const persist = () =>
+      service.store.set(
+        "ticket-discord-close",
+        ticket.id,
+        snapshot,
+        Number.MAX_SAFE_INTEGER,
+      );
+    if (snapshot && snapshot.channelId !== ticket.channelId)
+      throw new Error("Ticket closure channel does not match");
+    let target;
+    try {
+      target = await (await guild()).channels.fetch(ticket.channelId);
+    } catch (error) {
+      if (error.code !== 10003 || !snapshot?.ready) throw error;
+    }
+    if (!target) {
+      if (!snapshot?.ready)
+        throw new Error("Ticket channel missing before transcript capture");
+      webhooks.delete(ticket.channelId);
+      return { deleted: true };
+    }
+    if (
+      target.guildId !== settings.guildId ||
+      target.type !== ChannelType.GuildText ||
+      target.topic !== marker(ticket.id)
+    )
+      throw new Error("Ticket channel ownership does not match");
+    if (!snapshot?.ready) {
+      if (
+        !target
+          .permissionsFor(client.user)
+          ?.has([P.ViewChannel, P.ReadMessageHistory, P.ManageChannels])
+      )
+        throw new Error("Ticket closure permissions are missing");
+      await target.permissionOverwrites.set(
+        ticketOverwrites(ticket, await staffMembers()),
+      );
+      snapshot ||= { channelId: target.id, historySaved: false };
+      for (let page = 0; !snapshot.historySaved && page < 5; page++) {
+        snapshot.before = await reconcile(
+          ticket,
+          target,
+          snapshot.before,
+          true,
+        );
+        snapshot.historySaved = !snapshot.before;
+        persist();
+      }
+      if (!snapshot.historySaved) return { pending: true };
+      let copied = 0;
+      const needsCopy = (file) =>
+        file.ticketId === ticket.id &&
+        file.channelId === target.id &&
+        !file.purged &&
+        !file.removed &&
+        file.expiresAt > Date.now();
+      for (const [id, file] of service.store.entries("ticket-media")) {
+        if (!needsCopy(file)) continue;
+        if (copied++ === 5) return { pending: true };
+        const stored = await transport.upload(
+          await transport.bytes(file),
+          file.name,
+          file.type,
+        );
+        const current = service.store.get("ticket-media", id);
+        if (
+          !needsCopy(current) ||
+          current.messageId !== file.messageId ||
+          current.attachmentId !== file.attachmentId
+        ) {
+          await transport.removeMedia(stored);
+          continue;
+        }
+        service.store.set(
+          "ticket-media",
+          id,
+          {
+            ...current,
+            ...stored,
+            mirrorChannelId: null,
+            mirrorMessageId: null,
+          },
+          Number.MAX_SAFE_INTEGER,
+        );
+      }
+      if (
+        service.store
+          .entries("ticket-media")
+          .some(([, file]) => needsCopy(file))
+      )
+        return { pending: true };
+      snapshot.ready = true;
+      persist();
+    }
+    if (!ticket.owner.guest && !snapshot.ownerNotified) {
+      snapshot.ownerNotified = true;
+      persist();
+      try {
+        await (
+          await client.users.fetch(ticket.owner.id)
+        ).send({
+          content:
+            "Your Drakora ticket is closed. Its transcript is saved. You can optionally rate the support or request your HTML transcript below.",
+          components: controls(ticket),
+          allowedMentions: { parse: [] },
+        });
+      } catch {
+        console.error(
+          "Ticket closure DM unavailable. Private web access remains available.",
+        );
+      }
+    }
+    try {
+      await target.delete("Closed ticket transcript saved in staff logs");
+    } catch (error) {
+      if (error.code !== 10003) throw error;
+    }
+    webhooks.delete(target.id);
+    return { deleted: true };
   }
   function refreshPermissions() {
     if (stopped || refreshing) return refreshing;
@@ -828,7 +938,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       });
     return recovering;
   }
-  async function reconcile(ticket, target, before) {
+  async function reconcile(ticket, target, before, closing = false) {
     // snapshot before fetching. newer gateway messages are outside this deletion check.
     const known = service
       .messages(ticket.id)
@@ -838,11 +948,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       ...(before ? { before } : {}),
     });
     const sorted = [...batch.values()].sort(
-      (a, b) => a.createdTimestamp - b.createdTimestamp,
+      (a, b) =>
+        a.createdTimestamp - b.createdTimestamp ||
+        (BigInt(a.id) < BigInt(b.id) ? -1 : 1),
     );
     for (const message of sorted)
-      if (service.store.get("ticket-discord-message", message.id))
-        await observe(message, true);
+      if (closing || service.store.get("ticket-discord-message", message.id))
+        await observe(message, true, closing);
     const oldest = sorted[0]?.id;
     for (const message of known) {
       if (batch.size === 100 && BigInt(message.discordId) < BigInt(oldest))
@@ -1045,7 +1157,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       } else throw new AuthError("invalid_ticket_action", 400);
       return await interaction.editReply(
         action === "close"
-          ? "Ticket closed. Staff will add the resolution record. Rating and transcript buttons are available on the ticket overview."
+          ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
           : "Ticket updated.",
       );
     } catch (error) {
