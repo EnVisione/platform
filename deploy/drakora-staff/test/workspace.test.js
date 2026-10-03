@@ -226,7 +226,7 @@ test("embedded bridge checks parent and origin, preserves native navigation and 
           disconnected = true;
         }
       },
-      requestAnimationFrame: (fn) => fn(),
+      queueMicrotask: (fn) => fn(),
       URL,
     },
   );

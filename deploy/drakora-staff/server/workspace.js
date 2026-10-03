@@ -37,6 +37,10 @@ export function workspaceHtml(config, html) {
   return html.replace(/<\/head>/i, `${assets}</head>`);
 }
 
+export function workspaceFailureHtml(config, code) {
+  return `<!doctype html><html><head><title>Workspace unavailable</title><script defer src="/__staff/workspace.js" data-staff-origin="${attribute(config.staffOrigin)}" data-workspace-error="${attribute(code)}"></script></head><body>Workspace unavailable. Retry from the staff dashboard.</body></html>`;
+}
+
 export function workspaceHtmlProxy(config, options) {
   return createProxyMiddleware({
     ...options,

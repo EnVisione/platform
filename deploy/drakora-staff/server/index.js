@@ -15,8 +15,10 @@ import {
   workspaceAllowed,
   workspacePath,
   workspaceHtmlProxy,
+  workspaceFailureHtml,
   isWorkspacePage,
 } from "./workspace.js";
+import { workspaceSessions } from "./workspace-session.js";
 import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { validateConfig } from "./config.js";
@@ -77,6 +79,7 @@ const discord = discordClient(config, store, fetch, rolePolicy.apply);
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
+const workspaceSession = workspaceSessions(store);
 let workspaceAddress;
 async function workspaceConfig() {
   if (!workspaceAddress) {
@@ -435,6 +438,11 @@ const proxyOptions = {
         .filter((value) => !value.trim().startsWith("__Host-drakora_"))
         .join(";");
       proxyReq.setHeader("cookie", cookies);
+      if (req.workspaceAccountToken && req.path.startsWith("/_accounts"))
+        proxyReq.setHeader(
+          "authorization",
+          `Bearer ${req.workspaceAccountToken}`,
+        );
       fixRequestBody(proxyReq, req, res);
     },
     error(_error, _req, response) {
@@ -458,7 +466,36 @@ app.post("/_github/api/webhook", (req, res, next) => {
 
 app.use(async (req, res, next) => {
   if (req.headers.host !== todoHost) return next();
+  if (
+    req.method === "GET" &&
+    ["/__staff/workspace.js", "/__staff/workspace.css"].includes(req.path)
+  )
+    return res.sendFile(
+      resolve(
+        "server/workspace-assets",
+        req.path.endsWith(".js") ? "workspace.js" : "workspace.css",
+      ),
+    );
+  if (req.method === "GET" && req.path === "/__staff/attach") {
+    const handoff = workspaceSession.take(req.query.code);
+    let user = await discord.check(handoff.userId, true);
+    if (!user.permissions.dashboard || !workspaceAllowed(user, handoff.view))
+      throw new AuthError("staff_permission_required");
+    if (!minecraft.get(user.id))
+      throw new AuthError("minecraft_name_required", 428);
+    user = await huly.sync(user);
+    await regenerate(req);
+    Object.assign(req.session, {
+      userId: user.id,
+      staffSessionId: handoff.staffSession,
+      until: handoff.until,
+    });
+    await save(req);
+    return res.redirect(workspacePath(await workspaceConfig(), handoff.view));
+  }
   if (req.path === "/__staff/start") {
+    if (req.headers["sec-fetch-dest"] === "iframe")
+      throw new AuthError("login_required", 401);
     await regenerate(req);
     const challenge = newToken();
     req.session.challenge = hash(challenge);
@@ -512,8 +549,10 @@ app.use(async (req, res, next) => {
     if (
       error.status === 401 &&
       (isPageRequest(req) || req.path.startsWith("/__staff/open/"))
-    )
+    ) {
+      if (req.headers["sec-fetch-dest"] === "iframe") throw error;
       return res.redirect("/__staff/start");
+    }
     if (error.code === "minecraft_name_required" && isPageRequest(req))
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     throw error;
@@ -521,6 +560,11 @@ app.use(async (req, res, next) => {
   if (!user.permissions.todo) throw new AuthError("staff_permission_required");
   if (!matchingHulyIdentity(req, user))
     throw new AuthError("huly_account_mismatch");
+  if (req.path.startsWith("/_accounts"))
+    req.workspaceAccountToken = huly.accountToken(
+      user.hulyAccount,
+      req.session.until,
+    );
   if (req.method === "GET" && req.path.startsWith("/__staff/open/")) {
     const view = req.path.slice("/__staff/open/".length);
     if (!workspacePath({ workspaceUrl: "" }, view))
@@ -528,17 +572,6 @@ app.use(async (req, res, next) => {
     if (!workspaceAllowed(user, view))
       throw new AuthError("staff_permission_required");
     return res.redirect(workspacePath(await workspaceConfig(), view));
-  }
-  if (
-    req.method === "GET" &&
-    ["/__staff/workspace.js", "/__staff/workspace.css"].includes(req.path)
-  ) {
-    return res.sendFile(
-      resolve(
-        "server/workspace-assets",
-        req.path.endsWith(".js") ? "workspace.js" : "workspace.css",
-      ),
-    );
   }
   if (req.method === "GET" && req.path === "/config.json") {
     const response = await fetch(`${config.hulyUpstream}/config.json`, {
@@ -838,6 +871,20 @@ app.get(["/huly", "/todo"], async (req, res) => {
     throw error;
   }
 });
+app.post(
+  "/api/workspace-session",
+  rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+  express.json({ limit: "1kb" }),
+  async (req, res) => {
+    requireMutation(req);
+    const user = await signedIn(req);
+    const view = req.body?.view;
+    if (!workspaceAllowed(user, view))
+      throw new AuthError("staff_permission_required");
+    const code = workspaceSession.issue(req.sessionID, user.id, view);
+    res.json({ url: `${config.todoOrigin}/__staff/attach?code=${code}` });
+  },
+);
 app.get("/huly/authorize", async (req, res) => {
   if (typeof req.query.challenge !== "string")
     throw new AuthError("invalid_handoff");
@@ -1200,6 +1247,16 @@ app.use((error, req, res, _next) => {
   )
     return res.status(status).json({ error: code });
   if (req.headers.host === todoHost) {
+    if (req.headers["sec-fetch-dest"] === "iframe") {
+      res.set(
+        "Content-Security-Policy",
+        `default-src 'none'; script-src 'self'; frame-ancestors ${config.staffOrigin}; base-uri 'none'`,
+      );
+      return res
+        .status(status)
+        .type("html")
+        .send(workspaceFailureHtml(config, code));
+    }
     if (code === "minecraft_name_required")
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     const message =

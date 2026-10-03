@@ -8,6 +8,7 @@ import { Roles } from "./roles.jsx";
 import { WorkspaceTools, dashboardTools } from "./workspace-tools.jsx";
 import logo from "./assets/drakora-logo.png";
 import { accentForeground } from "../shared/accent.js";
+import { dashboardDestination } from "../shared/dashboard-navigation.js";
 import {
   DashboardClock,
   LocalClock,
@@ -565,25 +566,37 @@ function App() {
       active = false;
     };
   }, [state.user?.id, state.csrf, preferences.timeZone, timeZone, updateTime]);
-  const [workspaceView, setWorkspaceView] = useState(
-    () =>
-      dashboardTools.find((tool) => location.pathname === `/${tool.view}`)
-        ?.view ?? null,
+  const [route, setRoute] = useState(
+    () => `${location.pathname}${location.search}`,
   );
-  const navigateWorkspace = useCallback((view) => {
-    setWorkspaceView(view);
-    if (location.pathname !== `/${view}`)
-      history.replaceState(null, "", `/${view}`);
+  const page = new URL(route, location.origin).pathname;
+  const [mailOpened, setMailOpened] = useState(page === "/email");
+  const navigateDashboard = useCallback((target) => {
+    const path = dashboardDestination(target, location.origin);
+    if (!path) return;
+    if (path !== `${location.pathname}${location.search}${location.hash}`)
+      history.pushState(null, "", path);
+    setRoute(`${location.pathname}${location.search}`);
+    if (location.pathname === "/email") setMailOpened(true);
   }, []);
+  useEffect(() => {
+    const receive = () => {
+      setRoute(`${location.pathname}${location.search}`);
+      if (location.pathname === "/email") setMailOpened(true);
+    };
+    window.addEventListener("popstate", receive);
+    return () => window.removeEventListener("popstate", receive);
+  }, []);
+  const workspaceView =
+    dashboardTools.find((tool) => page === `/${tool.view}`)?.view ?? null;
   const params = new URLSearchParams(location.search);
-  const loginPage = location.pathname === "/login";
-  const settingsPage = location.pathname === "/settings";
-  const accountsPage = location.pathname === "/accounts";
-  const emailPage = location.pathname === "/email";
-  const rolesPage = location.pathname === "/roles";
+  const loginPage = page === "/login";
+  const settingsPage = page === "/settings";
+  const accountsPage = page === "/accounts";
+  const emailPage = page === "/email";
+  const rolesPage = page === "/roles";
   const applicationsPage =
-    location.pathname === "/applications" ||
-    location.pathname.startsWith("/applications/");
+    page === "/applications" || page.startsWith("/applications/");
   useEffect(() => {
     let active = true;
     fetch("/api/me")
@@ -687,6 +700,25 @@ function App() {
     <div
       className={`workspace${workspaceView ? " workspace-tools-page" : ""}`}
       style={{ "--accent": accent, "--accent-text": accentForeground(accent) }}
+      onClick={(event) => {
+        const link = event.target.closest?.("a[href]");
+        if (
+          !link ||
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey ||
+          link.target ||
+          link.hasAttribute("download")
+        )
+          return;
+        const target = dashboardDestination(link.href, location.origin);
+        if (!target) return;
+        event.preventDefault();
+        navigateDashboard(target);
+      }}
     >
       <aside className="sidebar">
         <a className="sidebar-heading" href="/">
@@ -853,16 +885,24 @@ function App() {
               {messages[error] || messages.service_unavailable}
             </p>
           )}
+          {user.todo && (
+            <WorkspaceTools
+              key={user.id}
+              view={workspaceView}
+              origin={user.workspaceOrigin}
+              accent={accent}
+              timeFormat={preferences.format}
+              csrf={state.csrf}
+              onNavigate={navigateDashboard}
+            />
+          )}
+          {user.mail && mailOpened && (
+            <div hidden={!emailPage}>
+              <Mail csrf={state.csrf} capabilities={user.capabilities} />
+            </div>
+          )}
           {workspaceView ? (
-            user.todo ? (
-              <WorkspaceTools
-                view={workspaceView}
-                origin={user.workspaceOrigin}
-                accent={accent}
-                timeFormat={preferences.format}
-                onNavigate={navigateWorkspace}
-              />
-            ) : (
+            !user.todo && (
               <p className="notice">
                 Your roles do not have permission to open this workspace.
               </p>
@@ -877,9 +917,7 @@ function App() {
               </p>
             )
           ) : emailPage ? (
-            user.mail ? (
-              <Mail csrf={state.csrf} capabilities={user.capabilities} />
-            ) : (
+            !user.mail && (
               <p className="notice">
                 Your roles do not have permission to open Email.
               </p>
@@ -887,6 +925,7 @@ function App() {
           ) : applicationsPage ? (
             user.applications ? (
               <StaffApplications
+                key={route}
                 csrf={state.csrf}
                 capabilities={user.capabilities}
               />

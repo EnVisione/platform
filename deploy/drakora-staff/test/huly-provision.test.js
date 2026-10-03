@@ -10,6 +10,29 @@ const identity = {
   email: "staff@example.invalid",
   name: "Staff",
 };
+test("dashboard account tokens have no service privileges and expire with the parent session", () => {
+  const fixture = clientFixture();
+  const until = Date.now() + 60000;
+  const token = fixture.client.accountToken("account-42", until);
+  const [header, body, signature] = token.split(".");
+  const claims = JSON.parse(Buffer.from(body, "base64url"));
+  assert.equal(claims.account, "account-42");
+  assert.equal(claims.workspace, undefined);
+  assert.deepEqual(claims.extra, {});
+  assert.equal(claims.exp, Math.floor(until / 1000));
+  assert.equal(
+    signature,
+    createHmac("sha256", "test")
+      .update(`${header}.${body}`)
+      .digest("base64url"),
+  );
+  for (const expiry of [0, Date.now() - 1, NaN, Infinity])
+    assert.throws(
+      () => fixture.client.accountToken("account-42", expiry),
+      /expired/,
+    );
+  assert.throws(() => fixture.client.accountToken(undefined, until), /expired/);
+});
 test("native author tokens retain workspace scope, signature and short expiry", () => {
   const fixture = clientFixture();
   for (const [token, expected] of [

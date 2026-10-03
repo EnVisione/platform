@@ -1,6 +1,14 @@
 (() => {
   if (window.parent === window) return;
-  const { staffOrigin, workspace } = document.currentScript.dataset;
+  const { staffOrigin, workspace, workspaceError } =
+    document.currentScript.dataset;
+  if (workspaceError) {
+    window.parent.postMessage(
+      { type: "drakora-workspace-error", code: workspaceError },
+      staffOrigin,
+    );
+    return;
+  }
   const base = `/workbench/${encodeURIComponent(workspace)}/`;
   const views = { tracker: "tracker", calendar: "time" };
   document.documentElement.setAttribute("data-drakora-embedded", "");
@@ -39,6 +47,13 @@
   };
   const report = () => {
     scheduled = false;
+    if (location.pathname.startsWith("/login")) {
+      window.parent.postMessage(
+        { type: "drakora-workspace-error", code: "login_required" },
+        staffOrigin,
+      );
+      return;
+    }
     const ready =
       location.pathname.startsWith(base) &&
       Boolean(document.querySelector(".workbench-container"));
@@ -126,7 +141,7 @@
   const observer = new MutationObserver(() => {
     if (!scheduled) {
       scheduled = true;
-      requestAnimationFrame(report);
+      queueMicrotask(report);
     }
   });
   observer.observe(document.documentElement, {

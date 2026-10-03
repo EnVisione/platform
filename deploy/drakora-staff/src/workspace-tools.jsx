@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./workspace-tools.css";
 import { accentForeground } from "../shared/accent.js";
 
@@ -22,70 +22,111 @@ export function WorkspaceTools({
   origin,
   accent,
   timeFormat,
+  csrf,
   onNavigate,
 }) {
-  const frame = useRef(null);
-  const initialView = useRef(view);
-  const opened = useRef(false);
-  const [ready, setReady] = useState(false);
+  const frames = useRef({});
+  const activeView = useRef(view);
+  activeView.current = view;
+  const initialView = useRef(view ?? "tracker");
+  const recovering = useRef(false);
+  const pending = useRef(false);
+  const [urls, setUrls] = useState({});
+  const [ready, setReady] = useState({});
+  const [failures, setFailures] = useState({});
+  const failure = failures[view];
   const [slow, setSlow] = useState(false);
-  const [attempt, setAttempt] = useState(0);
   const title =
     dashboardTools.find((tool) => tool.view === view)?.title ?? "Workspace";
+
+  const start = useCallback(
+    async (target, signal) => {
+      if (pending.current) return;
+      pending.current = true;
+      setFailures((current) => ({ ...current, [target]: undefined }));
+      setSlow(false);
+      setReady((current) => ({ ...current, [target]: false }));
+      try {
+        const response = await fetch("/api/workspace-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+          body: JSON.stringify({ view: target }),
+          signal,
+        });
+        const result = await response.json();
+        if (!response.ok)
+          throw new Error(result.error ?? "service_unavailable");
+        const url = new URL(result.url);
+        if (url.origin !== origin || url.pathname !== "/__staff/attach")
+          throw new Error("service_unavailable");
+        if (!signal?.aborted)
+          setUrls((current) => ({ ...current, [target]: url.href }));
+      } catch (error) {
+        if (!signal?.aborted)
+          setFailures((current) => ({ ...current, [target]: error.message }));
+      } finally {
+        pending.current = false;
+      }
+    },
+    [csrf, origin],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void start(initialView.current, controller.signal);
+    return () => controller.abort();
+  }, [start]);
+
   useEffect(() => {
     const receive = (event) => {
-      if (
-        event.origin !== origin ||
-        event.source !== frame.current?.contentWindow
-      )
+      if (event.origin !== origin) return;
+      const tool = dashboardTools.find(
+        (item) => frames.current[item.view]?.contentWindow === event.source,
+      );
+      if (!tool) return;
+      if (event.data?.type === "drakora-workspace-error") {
+        const code = event.data.code;
+        if (
+          ["login_required", "huly_account_mismatch"].includes(code) &&
+          !recovering.current
+        ) {
+          recovering.current = true;
+          void start(tool.view);
+        } else
+          setFailures((current) => ({
+            ...current,
+            [tool.view]:
+              code === "login_required"
+                ? "workspace_session_unavailable"
+                : (code ?? "service_unavailable"),
+          }));
+        setReady((current) => ({ ...current, [tool.view]: false }));
         return;
-      if (
-        event.data?.type === "drakora-dashboard-open" &&
-        [
-          "/",
-          "/tracker",
-          "/calendar",
-          "/settings",
-          "/accounts",
-          "/applications",
-          "/email",
-          "/roles",
-        ].includes(event.data.path)
-      ) {
-        location.assign(event.data.path);
+      }
+      if (event.data?.type === "drakora-dashboard-open") {
+        if (activeView.current === tool.view) onNavigate(event.data.path);
         return;
       }
       if (event.data?.type !== "drakora-workspace-ready") return;
-      const send = (data) =>
-        frame.current.contentWindow.postMessage(data, origin);
-      send({
-        type: "drakora-workspace-theme",
-        accent,
-        foreground: accentForeground(accent),
+      setReady((current) => ({ ...current, [tool.view]: true }));
+      setUrls((current) => {
+        const next = { ...current };
+        for (const item of dashboardTools)
+          next[item.view] ??= `${origin}/__staff/open/${item.view}`;
+        return next;
       });
-      send({ type: "drakora-workspace-time", format: timeFormat });
-      if (!opened.current) {
-        opened.current = true;
-        if (event.data.view !== view) {
-          send({ type: "drakora-workspace-open", view });
-          return;
-        }
-      }
-      setReady(true);
+      setFailures((current) => ({ ...current, [tool.view]: undefined }));
       setSlow(false);
-      if (dashboardTools.some((tool) => tool.view === event.data.view))
-        onNavigate(event.data.view);
     };
     window.addEventListener("message", receive);
-    const timer = setTimeout(() => setSlow(true), 20000);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("message", receive);
-    };
-  }, [origin, view, accent, timeFormat, onNavigate, attempt]);
+    return () => window.removeEventListener("message", receive);
+  }, [origin, start, onNavigate]);
+
   useEffect(() => {
-    if (ready)
-      frame.current?.contentWindow.postMessage(
+    for (const tool of dashboardTools) {
+      if (!ready[tool.view]) continue;
+      const target = frames.current[tool.view]?.contentWindow;
+      target?.postMessage(
         {
           type: "drakora-workspace-theme",
           accent,
@@ -93,59 +134,76 @@ export function WorkspaceTools({
         },
         origin,
       );
-  }, [accent, origin, ready]);
-  useEffect(() => {
-    if (ready)
-      frame.current?.contentWindow.postMessage(
+      target?.postMessage(
         { type: "drakora-workspace-time", format: timeFormat },
         origin,
       );
-  }, [timeFormat, origin, ready]);
-  function retry() {
-    initialView.current = view;
-    opened.current = false;
-    setReady(false);
-    setSlow(false);
-    setAttempt((value) => value + 1);
-  }
+    }
+  }, [accent, timeFormat, origin, ready]);
+
+  useEffect(() => {
+    if (view && ready[view]) return;
+    const timer = setTimeout(() => setSlow(true), 20000);
+    return () => clearTimeout(timer);
+  }, [view, ready, urls]);
+
   return (
-    <section className="workspace-tool" aria-label={`${title} workspace`}>
-      {!ready && (
+    <section
+      className={`workspace-tool${view ? "" : " inactive"}`}
+      aria-label={`${title} workspace`}
+      aria-hidden={!view}
+    >
+      {view && (!ready[view] || failure) && (
         <div className="workspace-tool-loading" role="status">
           <span className="workspace-tool-symbol" aria-hidden="true">
             {dashboardTools.find((tool) => tool.view === view)?.icon}
           </span>
-          <h2>Opening {title}…</h2>
-          <p>Your existing workspace and tools are loading.</p>
-          {slow && (
-            <>
-              <p>
-                Taking longer than expected. Retry, or open the workspace to
-                finish signing in.
-              </p>
-              <div className="workspace-tool-actions">
-                <button onClick={retry}>Retry</button>
-                <a
-                  className="button"
-                  href={`${origin}/__staff/open/${view}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Open workspace
-                </a>
-              </div>
-            </>
+          <h2>{failure ? `${title} is unavailable` : `Opening ${title}…`}</h2>
+          <p>
+            {failure === "login_required"
+              ? "Your dashboard session has expired. Sign in to continue."
+              : failure === "staff_permission_required"
+                ? "Your current staff permissions do not allow workspace access."
+                : failure || slow
+                  ? "The workspace could not connect. You can retry here."
+                  : "Your workspace is loading."}
+          </p>
+          {failure === "login_required" ? (
+            <a className="button" href={`/login?next=/${view}`}>
+              Sign in to dashboard
+            </a>
+          ) : (
+            (failure || slow) && (
+              <button
+                onClick={() => {
+                  recovering.current = false;
+                  void start(view);
+                }}
+              >
+                Retry
+              </button>
+            )
           )}
         </div>
       )}
-      <iframe
-        key={attempt}
-        ref={frame}
-        title={`${title} workspace`}
-        src={`${origin}/__staff/open/${initialView.current}`}
-        className={ready ? "ready" : ""}
-        allow="clipboard-write; microphone; camera; display-capture; fullscreen"
-      />
+      {dashboardTools
+        .filter((tool) => urls[tool.view])
+        .map((tool) => (
+          <iframe
+            key={tool.view}
+            ref={(element) => {
+              frames.current[tool.view] = element;
+            }}
+            title={`${tool.title} workspace`}
+            src={urls[tool.view]}
+            className={
+              view === tool.view && ready[tool.view] && !failure ? "ready" : ""
+            }
+            aria-hidden={view !== tool.view}
+            tabIndex={view === tool.view ? 0 : -1}
+            allow="clipboard-write; microphone; camera; display-capture; fullscreen"
+          />
+        ))}
     </section>
   );
 }

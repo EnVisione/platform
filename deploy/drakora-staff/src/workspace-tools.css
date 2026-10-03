@@ -28,6 +28,16 @@
   position: relative;
   overflow: hidden;
 }
+.workspace-tool.inactive {
+  position: absolute;
+  inset: 0;
+  height: calc(100svh - 72px);
+  visibility: hidden;
+  pointer-events: none;
+}
+.main-area > .dashboard {
+  position: relative;
+}
 .workspace-tool iframe {
   border: 0;
   width: 100%;
@@ -35,6 +45,8 @@
   display: block;
   visibility: hidden;
   background: #313338;
+  position: absolute;
+  inset: 0;
 }
 .workspace-tool iframe.ready {
   visibility: visible;
@@ -71,8 +83,8 @@
   flex-wrap: wrap;
   justify-content: center;
 }
-.workspace-tool-actions button {
-  border: 1px solid #555862;
+.workspace-tool-loading button {
+  border: 0;
   border-radius: 6px;
   padding: 12px;
   color: #f2f3f5;

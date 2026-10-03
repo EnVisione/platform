@@ -3,6 +3,18 @@ import { syncProjectRoles } from "./project-roles.js";
 import { syncAvatar } from "./profile.js";
 
 export function hulyClient(config, store, fetcher = fetch) {
+  function accountToken(account, until) {
+    if (!account || !Number.isFinite(until) || until <= Date.now())
+      throw new Error("Workspace session expired");
+    const encode = (value) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    const body = `${encode({ typ: "JWT", alg: "HS256" })}.${encode({
+      account,
+      extra: {},
+      exp: Math.floor(until / 1000),
+    })}`;
+    return `${body}.${createHmac("sha256", config.hulySecret).update(body).digest("base64url")}`;
+  }
   function serviceToken(account = config.hulyOwner) {
     const encode = (value) =>
       Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -118,5 +130,5 @@ export function hulyClient(config, store, fetcher = fetch) {
       role: user.permissions.hulyRole,
     });
   }
-  return { rpc, sync, invite, serviceToken };
+  return { rpc, sync, invite, serviceToken, accountToken };
 }
