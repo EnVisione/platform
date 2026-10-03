@@ -10,6 +10,7 @@ export function hulyClient(config, store, fetcher = fetch) {
       Buffer.from(JSON.stringify(value)).toString("base64url");
     const body = `${encode({ typ: "JWT", alg: "HS256" })}.${encode({
       account,
+      workspace: config.hulyWorkspace,
       extra: {},
       exp: Math.floor(until / 1000),
     })}`;

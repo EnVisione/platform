@@ -10,14 +10,14 @@ const identity = {
   email: "staff@example.invalid",
   name: "Staff",
 };
-test("dashboard account tokens have no service privileges and expire with the parent session", () => {
+test("dashboard account tokens retain workspace scope without service privileges and expire with the parent session", () => {
   const fixture = clientFixture();
   const until = Date.now() + 60000;
   const token = fixture.client.accountToken("account-42", until);
   const [header, body, signature] = token.split(".");
   const claims = JSON.parse(Buffer.from(body, "base64url"));
   assert.equal(claims.account, "account-42");
-  assert.equal(claims.workspace, undefined);
+  assert.equal(claims.workspace, "workspace");
   assert.deepEqual(claims.extra, {});
   assert.equal(claims.exp, Math.floor(until / 1000));
   assert.equal(
