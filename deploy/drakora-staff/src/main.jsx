@@ -713,7 +713,7 @@ function App() {
   const user = state.user;
   return (
     <div
-      className={`workspace${workspaceView ? " workspace-tools-page" : ""}`}
+      className={`workspace${workspaceView ? " workspace-tools-page" : ""}${ticketsPage || logsPage ? " workspace-tickets-page" : ""}`}
       style={{ "--accent": accent, "--accent-text": accentForeground(accent) }}
       onClick={(event) => {
         const link = event.target.closest?.("a[href]");
@@ -930,17 +930,15 @@ function App() {
               ? "dashboard dashboard-workspace"
               : applicationsPage
                 ? "dashboard dashboard-applications"
-                : emailPage
-                  ? "dashboard dashboard-mail"
-                  : rolesPage
-                    ? "dashboard dashboard-roles"
-                    : settingsPage ||
-                        accountsPage ||
-                        websitePage ||
-                        ticketsPage ||
-                        logsPage
-                      ? "dashboard"
-                      : "dashboard dashboard-overview"
+                : ticketsPage || logsPage
+                  ? "dashboard dashboard-tickets"
+                  : emailPage
+                    ? "dashboard dashboard-mail"
+                    : rolesPage
+                      ? "dashboard dashboard-roles"
+                      : settingsPage || accountsPage || websitePage
+                        ? "dashboard"
+                        : "dashboard dashboard-overview"
           }
         >
           {error && (

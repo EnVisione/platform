@@ -690,7 +690,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
   }, [id, refresh]);
   if (id)
     return (
-      <div className="ticket-page">
+      <div className="ticket-page ticket-detail">
         <a className="ticket-back" href="/tickets">
           ← Tickets
         </a>
