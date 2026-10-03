@@ -46,12 +46,14 @@
 </script>
 
 {#if value}
-  <DueDatePresenter
-    kind={'link'}
-    value={value.dueDate ?? null}
-    {width}
-    {editable}
-    onChange={(e) => handleDueDateChanged(e)}
-    {shouldIgnoreOverdue}
-  />
+  {#key value.dueDate}
+    <DueDatePresenter
+      kind={'link'}
+      value={value.dueDate ?? null}
+      {width}
+      {editable}
+      onChange={(e) => handleDueDateChanged(e)}
+      {shouldIgnoreOverdue}
+    />
+  {/key}
 {/if}
