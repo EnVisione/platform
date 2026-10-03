@@ -1,0 +1,11 @@
+[Unit]
+Description=Private Minecraft status relay for port %i
+
+[Socket]
+ListenStream=%h/.local/share/drakora-status/%i.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

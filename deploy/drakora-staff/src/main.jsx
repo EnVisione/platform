@@ -9,6 +9,7 @@ import { WorkspaceTools, dashboardTools } from "./workspace-tools.jsx";
 import logo from "./assets/drakora-logo.png";
 import { accentForeground } from "../shared/accent.js";
 import { dashboardDestination } from "../shared/dashboard-navigation.js";
+import { Overview } from "./overview.jsx";
 import {
   DashboardClock,
   LocalClock,
@@ -877,7 +878,9 @@ function App() {
                   ? "dashboard dashboard-mail"
                   : rolesPage
                     ? "dashboard dashboard-roles"
-                    : "dashboard"
+                    : settingsPage || accountsPage
+                      ? "dashboard"
+                      : "dashboard dashboard-overview"
           }
         >
           {error && (
@@ -962,48 +965,7 @@ function App() {
               timeZone={timeZone}
             />
           ) : (
-            <>
-              <div className="welcome">
-                <h2>Welcome, {user.name}</h2>
-                <p>Your staff space for the Drakora Network.</p>
-              </div>
-              {user.todo && (
-                <section className="tools" aria-labelledby="staff-tools">
-                  <h3 id="staff-tools" className="section-title">
-                    Tools
-                  </h3>
-                  {dashboardTools.map((tool) => (
-                    <article className="tool-card" key={tool.view}>
-                      <div className="tool-icon">{tool.icon}</div>
-                      <div className="tool-content">
-                        <h4>{tool.title}</h4>
-                        <p>{tool.description}</p>
-                      </div>
-                      <a className="button open-tool" href={`/${tool.view}`}>
-                        Open {tool.title} <span aria-hidden="true">→</span>
-                      </a>
-                    </article>
-                  ))}
-                </section>
-              )}
-              <section className="roles-card" aria-labelledby="your-roles">
-                <div className="roles-heading">
-                  <h3 id="your-roles">Your roles</h3>
-                  <span>Managed in Discord</span>
-                </div>
-                <div className="chips">
-                  {user.dashboardRanks.length ? (
-                    user.dashboardRanks.map((rank) => (
-                      <span className="chip" key={rank}>
-                        {rank}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="chip">Staff</span>
-                  )}
-                </div>
-              </section>
-            </>
+            <Overview user={user} timeFormat={preferences.format} />
           )}
         </main>
       </div>

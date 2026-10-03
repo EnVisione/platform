@@ -497,6 +497,19 @@ button:disabled {
   font-size: 14px;
 }
 
+.roles-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.roles-heading > span {
+  color: #949ba4;
+  font-size: 11px;
+}
+
 .section-title,
 .roles-heading h3 {
   font-size: 12px;
@@ -508,56 +521,6 @@ button:disabled {
   color: #b5bac1;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-.tool-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 104px;
-  padding: 20px;
-  border: 1px solid #42444a;
-  border-radius: 9px;
-  background: #2b2d31;
-}
-
-.tool-icon {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  flex: none;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 25%, #2b2d31);
-  color: var(--accent);
-  font-size: 22px;
-}
-
-.tool-content {
-  min-width: 0;
-}
-
-.tool-content h4 {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.tool-content p {
-  margin-top: 3px;
-  color: #b5bac1;
-  font-size: 13px;
-}
-
-.open-tool {
-  margin-left: auto;
-  padding: 0 16px;
-  flex: none;
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
-.open-tool:hover {
-  background: color-mix(in srgb, var(--accent) 80%, #000);
 }
 
 .settings-card {
@@ -853,27 +816,6 @@ button:disabled {
   font-size: 12px;
 }
 
-.roles-card {
-  margin-top: 24px;
-  padding: 20px;
-  border: 1px solid #42444a;
-  border-radius: 9px;
-  background: #2b2d31;
-}
-
-.roles-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.roles-heading > span {
-  color: #949ba4;
-  font-size: 11px;
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -895,14 +837,6 @@ button:disabled {
 
   .dashboard {
     padding: 38px 28px;
-  }
-
-  .tool-card {
-    flex-wrap: wrap;
-  }
-
-  .open-tool {
-    margin-left: 60px;
   }
 }
 
@@ -969,20 +903,6 @@ button:disabled {
 
   .welcome {
     margin-bottom: 32px;
-  }
-
-  .tool-card {
-    gap: 12px;
-    padding: 16px;
-  }
-
-  .tool-content {
-    flex: 1;
-  }
-
-  .open-tool {
-    width: 100%;
-    margin-left: 0;
   }
 
   .login-card {

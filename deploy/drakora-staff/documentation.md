@@ -34,6 +34,31 @@ Embedded views fill the remaining page and hide the duplicate app rail, global h
 
 The `time-preferences` encrypted record stores each Discord account’s 12 or 24 hour format and browser-reported IANA timezone independently of the expiring Discord identity cache. `POST /api/preferences/time` requires a current staff session, matching staff origin and session CSRF token; it can update only the session owner. Zone-only updates preserve the saved format. Settings saves the format to the account. The header uses the current browser timezone, while Accounts shows each known member timezone using the viewer’s format. Unknown zones are labeled unavailable, never inferred from Discord presence. `Intl.DateTimeFormat` handles daylight saving transitions and 24 hour midnight as 00:00. The embedded bridge formats Calendar hour labels and its current-time marker to match the saved preference. It changes only their displayed text and retains native event times, scheduling and browser-local timezone calculations. Native Calendar opened separately continues to follow the browser locale. Clock intervals are owned by the displayed clock or account list and cleared on unmount.
 
+## Overview
+
+`GET /api/overview` requires the existing Dashboard session and Minecraft setup. It returns endpoint readings and only the application, email and Discord queue counts the current member is authorized to see. It does not return server addresses, mailbox content, applicants or ticket messages. Overview uses the existing Discord gray surfaces and the saved dashboard accent, with a browser-local greeting and last-check time in the selected clock format.
+
+Configure `overview.servers` as an array of up to thirty unique endpoints. Each entry requires `id` (lowercase letters, digits and hyphens), `name`, `group`, `kind` (`server` or `proxy`), `host` and integer `port`. Enable Minecraft status queries on each endpoint and permit the staff service to reach it privately. Hosts are operator configuration, never browser input. Each TCP status request has a four-second deadline and a bounded response size. Probes share a fifteen-second cache and concurrent refreshes share one request. Totals sum game servers only; list a shared backend once even when multiple proxies route to it. Unreachable status means no valid response, which can also indicate a firewall or status-query setting. A total is complete only when every monitored game server reports its count.
+
+For backends reachable only from the host, each server may also specify an absolute `socketPath` ending in `.sock`. The status handshake still uses its configured host and port. The optional `minecraft-status@.socket` and `minecraft-status@.service` user units provide a private Unix relay per backend port through systemd socket activation. Install them in the service user's systemd unit directory, set `STATUS_HOST` in that user's private `.config/drakora-status.conf` when the backend binds somewhere other than loopback, and enable only the required instances, such as `minecraft-status@25565.socket`. Set `STAFF_STATUS_SOCKET_PATH` to `.local/share/drakora-status` in the private Compose environment; the supplied Compose file mounts it read-only at `/run/status`. Use that container socket path in configuration. The service UID must match the socket owner. This route exposes no public listener and retains existing container and firewall isolation. The relay itself forwards TCP and is restricted to the service user by its socket permissions; enable it only for trusted private Minecraft endpoints.
+
+Configure `overview.queues` with up to four entries:
+
+```json
+{
+  "kind": "tickets",
+  "name": "Community tickets",
+  "guildId": "REPLACE_GUILD_ID",
+  "channelId": "REPLACE_CATEGORY_ID",
+  "mode": "category",
+  "excludedChannelIds": ["REPLACE_LOG_CHANNEL_ID"]
+}
+```
+
+`kind` is `tickets` or `appeals`. Category mode counts readable text channels directly inside the configured category; exclude logs and permanent utility channels with `excludedChannelIds`. Keep closed tickets outside that category. Forum mode counts readable, unarchived posts and excludes posts carrying any configured `closedTagIds`. Use the forum ID as `channelId` and `mode: "forum"`. The existing Discord bot must belong to that guild and be able to list channels and active threads. Metadata refreshes at most once every fifteen seconds per guild, while member permissions are checked for each viewer. No queue messages are read and no Discord objects are changed.
+
+Applications awaiting review include Received and Reviewing, excluding Approved and Denied. Email awaiting a reply includes incoming messages in the shared INBOX even after they are read, excluding staff-originated messages, IMAP Answered messages, recorded accepted dashboard replies and messages referenced by shared-identity replies in Sent. Mail without a Message-ID relies on the Answered flag. Archiving removes a message from this count. Unread is shown separately. Header-only scans leave read flags untouched and never download bodies or attachments. Accepted dashboard replies retain a permanent encrypted hash of the original Message-ID and a send timestamp; the identifier and mail content are not stored in that receipt. Counts share a thirty-second cache, including connection failures. A slow mailbox scan continues in the background after two seconds so it cannot hold up Overview; its result appears on the next refresh. Missing mappings and failed sources are labeled unavailable, and a failed Overview update preserves the prior readings with a stale notice.
+
 ## Discord channels
 
 Create one private Staff Office category containing:

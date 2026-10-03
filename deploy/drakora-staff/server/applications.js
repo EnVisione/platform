@@ -824,6 +824,18 @@ export function applicationService(
     decide,
     minecraftProfile,
     list,
+    attention() {
+      const items = store
+        .entries("application-summary")
+        .map(([, item]) => item);
+      const received = items.filter(
+        (item) => item.status === "Received",
+      ).length;
+      const reviewing = items.filter(
+        (item) => item.status === "Reviewing",
+      ).length;
+      return { received, reviewing, pending: received + reviewing };
+    },
     history,
     previousApplications,
     get: (id) => applicationView(store.get("application", id)),

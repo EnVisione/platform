@@ -1,0 +1,13 @@
+[Unit]
+Description=Private Minecraft status relay for port %i
+Requires=minecraft-status@%i.socket
+
+[Service]
+Environment=STATUS_HOST=127.0.0.1
+EnvironmentFile=-%h/.config/drakora-status.conf
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd ${STATUS_HOST}:%i
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only

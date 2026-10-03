@@ -8,6 +8,7 @@ import {
 import { meetingService } from "./meetings.js";
 import { AuthError } from "./discord.js";
 import { canHost, permissions } from "./roles.js";
+import { discordOverview } from "./discord-overview.js";
 import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
 import { discordRoleTransport, staffRoleSync } from "./role-sync.js";
@@ -372,8 +373,8 @@ export function discordOffice(config, store, dependencies = {}) {
           joinUrl: voiceLink(room.id),
           joinable: Boolean(
             available &&
-            allowed &&
-            (room.kind === "voice" || state.status === "live"),
+              allowed &&
+              (room.kind === "voice" || state.status === "live"),
           ),
           startedAt: state.status === "live" ? state.startedAt : undefined,
           hostId: state.status === "live" ? state.hostId : undefined,
@@ -388,6 +389,7 @@ export function discordOffice(config, store, dependencies = {}) {
   }
   return {
     snapshot,
+    overviewQueues: discordOverview(config, client, () => ready),
     meetings,
     roleSync,
     emailAlerts,

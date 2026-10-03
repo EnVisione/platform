@@ -42,6 +42,7 @@ import { applicationFormRouter } from "./application-form-routes.js";
 import { mailboxService } from "./mailbox.js";
 import { mailRouter } from "./mail-routes.js";
 import { timePreferences, timePreferenceRouter } from "./time-preferences.js";
+import { overviewService } from "./overview.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -104,6 +105,11 @@ async function workspaceConfig() {
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
+const overview = overviewService(config, {
+  applications,
+  mail,
+  queues: office?.overviewQueues,
+});
 const assignments =
   office && config.roleSync
     ? roleAssignments(
@@ -734,6 +740,10 @@ app.get("/auth/discord/callback", async (req, res) => {
 app.get("/api/me", async (req, res) => {
   const user = await signedIn(req, { allowUnlinked: true });
   res.json({ user: publicUser(user), csrf: req.session.csrf });
+});
+app.get("/api/overview", async (req, res) => {
+  const user = await signedIn(req, { syncHuly: false });
+  res.json(await overview.snapshot(user));
 });
 app.use(
   "/api/preferences/time",

@@ -9,3 +9,4 @@ config.json
 secrets
 
 applications-data/
+status-socket/

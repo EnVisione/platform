@@ -6,6 +6,27 @@
   "discordBotToken": "REPLACE_BOT_TOKEN",
   "guildId": "REPLACE_GUILD_ID",
   "activityGuildIds": ["REPLACE_COMMUNITY_GUILD_ID"],
+  "overview": {
+    "servers": [
+      {
+        "id": "proxy",
+        "name": "Network proxy",
+        "group": "Drakora",
+        "kind": "proxy",
+        "host": "proxy.example.com",
+        "port": 25565
+      },
+      {
+        "id": "hub",
+        "name": "Hub",
+        "group": "Drakora",
+        "kind": "server",
+        "host": "hub.example.com",
+        "port": 25565
+      }
+    ],
+    "queues": []
+  },
   "sessionSecret": "REPLACE_RANDOM_SECRET",
   "databaseKey": "REPLACE_32_RANDOM_BYTES_BASE64",
   "oidcClientSecret": "REPLACE_RANDOM_SECRET",

@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
 import { bridgeMailTransport } from "./bridge-mail.js";
 import { validMailAddress } from "./mail-address.js";
+import { hash } from "./store.js";
 
 const bodyLimit = 1024 * 1024;
 const attachmentLimit = 10 * 1024 * 1024;
@@ -433,6 +434,111 @@ export function mailboxService(config, store, dependencies = {}) {
             specialUse: entry.specialUse ?? null,
           }));
       }),
+    attention: () =>
+      connection(async (client) => {
+        const folders = selectableFolders(
+          await client.list({ listOnly: true }),
+        );
+        const inbox = folders.find((entry) => entry.specialUse === "\\Inbox");
+        if (!inbox) throw new AuthError("mail_unavailable", 503);
+        const pending = new Map();
+        let withoutMessageId = 0;
+        const unread = await mailbox(
+          client,
+          inbox.path,
+          undefined,
+          true,
+          async () => {
+            const uids =
+              (await client.search(identityScope, { uid: true })) || [];
+            let unread = 0;
+            for (let offset = 0; offset < uids.length; offset += 100) {
+              const records = await client.fetchAll(
+                uids.slice(offset, offset + 100),
+                {
+                  envelope: true,
+                  flags: true,
+                  headers: ["message-id"],
+                },
+                { uid: true },
+              );
+              for (const record of records) {
+                if (matchesIdentity(record.envelope?.from)) continue;
+                if (!record.flags?.has("\\Seen")) unread++;
+                const parsed = await simpleParser(
+                  record.headers ?? Buffer.alloc(0),
+                  {
+                    skipHtmlToText: true,
+                    skipTextToHtml: true,
+                  },
+                );
+                if (
+                  !record.flags?.has("\\Answered") &&
+                  !(
+                    parsed.messageId &&
+                    store.get("mail-response", hash(parsed.messageId))
+                  )
+                ) {
+                  if (parsed.messageId)
+                    pending.set(
+                      parsed.messageId,
+                      (pending.get(parsed.messageId) ?? 0) + 1,
+                    );
+                  else withoutMessageId++;
+                }
+              }
+            }
+            return unread;
+          },
+        );
+        const sent = folders.find((entry) => entry.specialUse === "\\Sent");
+        if (sent && pending.size)
+          await mailbox(client, sent.path, undefined, true, async () => {
+            const uids =
+              (await client.search(
+                {
+                  or: identities.map((identity) => ({
+                    from: identity.address,
+                  })),
+                },
+                { uid: true },
+              )) || [];
+            for (
+              let offset = 0;
+              offset < uids.length && pending.size;
+              offset += 100
+            ) {
+              const records = await client.fetchAll(
+                uids.slice(offset, offset + 100),
+                {
+                  headers: ["in-reply-to", "references"],
+                },
+                { uid: true },
+              );
+              for (const record of records) {
+                const parsed = await simpleParser(
+                  record.headers ?? Buffer.alloc(0),
+                  {
+                    skipHtmlToText: true,
+                    skipTextToHtml: true,
+                  },
+                );
+                for (const reference of [
+                  parsed.inReplyTo,
+                  ...[].concat(parsed.references ?? []),
+                ])
+                  pending.delete(reference);
+              }
+            }
+          });
+        return {
+          unanswered:
+            withoutMessageId +
+            [...pending.values()].reduce((total, count) => total + count, 0),
+          unread,
+          folder: inbox.path,
+        };
+      }),
     list(input) {
       folderPath(input.folder);
       if (
@@ -630,6 +736,7 @@ export function mailboxService(config, store, dependencies = {}) {
       }
       sending.add(key);
       try {
+        let repliedMessageId;
         if (input.reply?.kind === "reply") {
           const headers = await inMessage(input.reply, true, async (client) => {
             const original = await scopedMessage(client, input.reply, {
@@ -644,6 +751,7 @@ export function mailboxService(config, store, dependencies = {}) {
           const validId = (value) =>
             typeof value === "string" && /^<[^<>\s\r\n]{1,250}>$/.test(value);
           if (validId(messageId)) {
+            repliedMessageId = messageId;
             mail.inReplyTo = messageId;
             mail.references = [
               ...(Array.isArray(headers.references)
@@ -689,6 +797,13 @@ export function mailboxService(config, store, dependencies = {}) {
           { digest, messageId, result },
           Date.now() + 30 * 86400000,
         );
+        if (repliedMessageId)
+          store.set(
+            "mail-response",
+            hash(repliedMessageId),
+            { sentAt: Date.now() },
+            Number.MAX_SAFE_INTEGER,
+          );
         return result;
       } finally {
         sending.delete(key);

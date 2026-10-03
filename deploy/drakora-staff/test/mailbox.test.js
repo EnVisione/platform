@@ -13,7 +13,7 @@ import {
 import { mailRouter } from "../server/mail-routes.js";
 import { mailAccess, permissions } from "../server/roles.js";
 import { AuthError } from "../server/discord.js";
-import { openStore } from "../server/store.js";
+import { openStore, hash } from "../server/store.js";
 import { config as fixture } from "./fixture.js";
 
 const settings = {
@@ -121,6 +121,8 @@ function harness(t, overrides = {}) {
     }
     async search(query) {
       state.searches.push(query);
+      if (this.folder === "Sent")
+        return (state.sentRecords ?? []).map((record) => record.uid);
       if (query.uid?.includes(":")) {
         const [start, end] = query.uid.split(":").map(Number);
         return state.records
@@ -136,7 +138,9 @@ function harness(t, overrides = {}) {
       state.fetches.push(uids);
       state.fetchQueries ??= [];
       state.fetchQueries.push(query);
-      return state.records.filter((record) => uids.includes(record.uid));
+      return (
+        this.folder === "Sent" ? (state.sentRecords ?? []) : state.records
+      ).filter((record) => uids.includes(record.uid));
     }
     async fetchOne(uid, query, options) {
       if (state.fetchError) throw new Error("private message detail");
@@ -193,6 +197,54 @@ function harness(t, overrides = {}) {
   });
   return { service, store, state };
 }
+
+test("attention includes read unanswered mail and excludes replies and staff messages", async (t) => {
+  const records = [
+    { uid: 1, flags: new Set(["\\Seen"]) },
+    { uid: 2, flags: new Set(["\\Answered"]) },
+    {
+      uid: 3,
+      flags: new Set(),
+      headers: Buffer.from("Message-ID: <replied@example.invalid>\r\n\r\n"),
+    },
+    {
+      uid: 4,
+      flags: new Set(),
+      headers: Buffer.from(
+        "Message-ID: <sent-replied@example.invalid>\r\n\r\n",
+      ),
+    },
+    {
+      uid: 5,
+      flags: new Set(),
+      envelope: { from: [{ address: "support@drakora.org" }] },
+    },
+  ];
+  const { service, state, store } = harness(t, {
+    records,
+    sentRecords: [
+      {
+        uid: 101,
+        headers: Buffer.from(
+          "In-Reply-To: <sent-replied@example.invalid>\r\nReferences: <prior@example.invalid> <sent-replied@example.invalid>\r\n\r\n",
+        ),
+      },
+    ],
+  });
+  store.set(
+    "mail-response",
+    hash("<replied@example.invalid>"),
+    { sentAt: Date.now() },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.deepEqual(await service.attention(), {
+    unanswered: 1,
+    unread: 3,
+    folder: "INBOX",
+  });
+  assert.equal(state.downloads?.length ?? 0, 0);
+  assert.equal(state.clients.at(-1).readOnly, true);
+});
 
 test("new mail baseline, UID reset and empty polling never replay old mail", async (t) => {
   const { service, state } = harness(t);
@@ -387,7 +439,7 @@ test("stale UID validity and out-of-scope direct reads cannot bypass mailbox che
 });
 
 test("direct reads verify configured addresses without scanning the mailbox", async (t) => {
-  const { service, state } = harness(t);
+  const { service, state, store } = harness(t);
   const record = state.records.find((record) => record.uid === key.uid);
   for (const field of ["from", "to", "cc", "bcc"]) {
     record.envelope = { [field]: [{ address: "SUPPORT@DRAKORA.ORG" }] };
@@ -420,6 +472,11 @@ test("direct reads verify configured addresses without scanning the mailbox", as
     assert.equal(fetch.query.headers.includes("delivered-to"), true);
   }
   assert.equal(state.sends[0].inReplyTo, "<original@example.invalid>");
+  assert.equal(
+    typeof store.get("mail-response", hash("<original@example.invalid>"))
+      .sentAt,
+    "number",
+  );
   state.deliveryHeaders =
     "Delivered-To: support@drakora.org.attacker.invalid\r\n";
   await assert.rejects(service.detail(key), { code: "mail_not_found" });

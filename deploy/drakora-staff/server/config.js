@@ -1,4 +1,5 @@
 import { validMailAddress } from "./mail-address.js";
+import { isIP } from "node:net";
 
 export function validateConfig(config) {
   for (const key of ["staffOrigin", "todoOrigin"]) {
@@ -28,6 +29,76 @@ export function validateConfig(config) {
     );
   const snowflake = (value) =>
     typeof value === "string" && /^\d{1,20}$/.test(value);
+  if (config.overview !== undefined) {
+    if (
+      !config.overview ||
+      typeof config.overview !== "object" ||
+      Array.isArray(config.overview)
+    )
+      throw new Error("Configure an Overview settings object");
+    const { servers = [], queues = [] } = config.overview ?? {};
+    if (
+      !Array.isArray(servers) ||
+      servers.length > 30 ||
+      servers.some(
+        (server) =>
+          !server ||
+          typeof server.id !== "string" ||
+          !/^[a-z0-9-]{1,60}$/.test(server.id) ||
+          typeof server.name !== "string" ||
+          !server.name.trim() ||
+          server.name.length > 60 ||
+          typeof server.group !== "string" ||
+          !server.group.trim() ||
+          server.group.length > 40 ||
+          !["proxy", "server"].includes(server.kind) ||
+          typeof server.host !== "string" ||
+          server.host.length > 253 ||
+          !(
+            isIP(server.host) ||
+            /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(server.host)
+          ) ||
+          !Number.isInteger(server.port) ||
+          server.port < 1 ||
+          server.port > 65535 ||
+          (server.socketPath !== undefined &&
+            (typeof server.socketPath !== "string" ||
+              server.socketPath.length > 250 ||
+              !server.socketPath.startsWith("/") ||
+              !server.socketPath.endsWith(".sock") ||
+              /[\r\n\0]/.test(server.socketPath))),
+      ) ||
+      new Set(servers.map((server) => server.id)).size !== servers.length ||
+      new Set(
+        servers.map((server) => `${server.host.toLowerCase()}:${server.port}`),
+      ).size !== servers.length
+    )
+      throw new Error("Configure distinct named Minecraft status endpoints");
+    if (
+      !Array.isArray(queues) ||
+      queues.length > 4 ||
+      queues.some(
+        (queue) =>
+          !queue ||
+          !["tickets", "appeals"].includes(queue.kind) ||
+          !snowflake(queue.guildId) ||
+          !snowflake(queue.channelId) ||
+          !["category", "forum"].includes(queue.mode) ||
+          typeof queue.name !== "string" ||
+          !queue.name.trim() ||
+          queue.name.length > 60 ||
+          !Array.isArray(queue.closedTagIds ?? []) ||
+          !(queue.closedTagIds ?? []).every(snowflake) ||
+          !Array.isArray(queue.excludedChannelIds ?? []) ||
+          !(queue.excludedChannelIds ?? []).every(snowflake),
+      ) ||
+      new Set(queues.map((queue) => queue.channelId)).size !== queues.length ||
+      (queues.length && !config.office)
+    )
+      throw new Error(
+        "Configure Discord ticket and appeal queues with Office enabled",
+      );
+  }
   const ids = [
     config.guildId,
     config.discordClientId,

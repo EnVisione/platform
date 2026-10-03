@@ -55,6 +55,22 @@ function setup(
   });
   return { service, store: database.store };
 }
+
+test("Overview counts pending applications and excludes completed decisions", (t) => {
+  const { service, store } = setup(t);
+  for (const [id, status] of Object.entries({
+    a: "Received",
+    b: "Reviewing",
+    c: "Approved",
+    d: "Denied",
+  }))
+    store.set("application-summary", id, { status });
+  assert.deepEqual(service.attention(), {
+    received: 1,
+    reviewing: 1,
+    pending: 2,
+  });
+});
 function answers(role = "community", communities = ["prom2"]) {
   return {
     displayName: "Application fixture",
