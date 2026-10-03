@@ -77,6 +77,52 @@ function ServerCard({ server }) {
     </article>
   );
 }
+function HomePage({ home }) {
+  return (
+    <>
+      <section className="public-welcome">
+        <div>
+          <h1>{home.title}</h1>
+          <p>{home.introduction}</p>
+        </div>
+        <a href="/servers" className="public-button">
+          View servers <span aria-hidden="true">→</span>
+        </a>
+      </section>
+      <section
+        className="public-announcements"
+        aria-labelledby="announcements-title"
+      >
+        <h2 id="announcements-title">{home.announcementsTitle}</h2>
+        {home.announcements.length ? (
+          home.announcements.map((entry) => (
+            <article
+              className="public-panel public-announcement"
+              key={entry.id}
+            >
+              {entry.date && (
+                <time className="public-eyebrow" dateTime={entry.date}>
+                  {new Date(`${entry.date}T12:00:00`).toLocaleDateString(
+                    undefined,
+                    {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    },
+                  )}
+                </time>
+              )}
+              <h3>{entry.title}</h3>
+              <Paragraphs text={entry.body} />
+            </article>
+          ))
+        ) : (
+          <p>{home.emptyMessage}</p>
+        )}
+      </section>
+    </>
+  );
+}
 function PublicSite() {
   const [content, setContent] = useState(null),
     [error, setError] = useState(false),
@@ -226,58 +272,7 @@ function PublicSite() {
             Opening Drakora…
           </p>
         ) : home ? (
-          <>
-            <section className="public-welcome">
-              <div>
-                <h1>Welcome to Drakora</h1>
-                <p>
-                  Modded Minecraft, shared adventures and a place to call home.
-                </p>
-              </div>
-              <a href={content.discordInvite} className="public-button">
-                Join the community <span aria-hidden="true">↗</span>
-              </a>
-            </section>
-            <div className="public-home-grid">
-              <div>
-                <div className="public-section-heading">
-                  <h2>Our servers</h2>
-                  <a href="/servers">View all →</a>
-                </div>
-                <div className="public-server-list">
-                  {content.servers.slice(0, 2).map((server) => (
-                    <ServerCard key={server.slug} server={server} />
-                  ))}
-                </div>
-                {!content.servers.length && (
-                  <p className="public-panel">
-                    New worlds are on the way. Join Discord for updates.
-                  </p>
-                )}
-              </div>
-              <aside className="public-home-aside">
-                <a className="public-shop" href={storeUrl}>
-                  <span className="public-eyebrow">SUPPORT DRAKORA</span>
-                  <h2>Store</h2>
-                  <p>Visit our community store.</p>
-                  <span>Shop now →</span>
-                </a>
-                <section className="public-panel">
-                  <h2>Before you play</h2>
-                  <p>A few simple rules help keep our worlds welcoming.</p>
-                  <a href="/rules">Read the rules →</a>
-                </section>
-                <section className="public-panel">
-                  <h2>Join the staff</h2>
-                  <p>
-                    Want to help the community? Take a look at our staff
-                    applications.
-                  </p>
-                  <a href="/apply">Apply →</a>
-                </section>
-              </aside>
-            </div>
-          </>
+          <HomePage home={content.home} />
         ) : serversPage ? (
           <>
             <div className="public-page-title">
@@ -393,9 +388,7 @@ function PublicSite() {
                 <Paragraphs text={content.rules[section.id]} />
                 <p className="public-rule-help">
                   Need help?{" "}
-                  <a href={content.discordInvite}>
-                    Open a ticket in Discord ↗
-                  </a>
+                  <a href={content.discordInvite}>Open a ticket in Discord ↗</a>
                 </p>
               </article>
             </div>

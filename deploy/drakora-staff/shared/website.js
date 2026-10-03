@@ -25,7 +25,26 @@ export function newServer() {
   };
 }
 
+export function newAnnouncement() {
+  return {
+    id: crypto.randomUUID(),
+    title: "",
+    body: "",
+    date: "",
+    published: false,
+  };
+}
+
 export const initialWebsite = {
+  home: {
+    title: "Welcome to Drakora",
+    introduction:
+      "Modded Minecraft, shared adventures and a place to call home.",
+    announcementsTitle: "Announcements",
+    emptyMessage:
+      "Community news and events will appear here. Join Discord for the latest updates.",
+    announcements: [],
+  },
   rules: {
     home: "Harassment, bullying and discrimination are strictly prohibited.\n\nDo not post explicit or inflammatory media. Hateful or explicit profiles, usernames and skins are forbidden.\n\nKeep public chats in English so staff can moderate. Other languages are welcome in private messages. Contact staff if you need help with a translator.\n\nDo not spam, use excessive caps, beg for items or bring excessive negativity into chat. Advertising is prohibited.\n\nDo not impersonate staff or other players. Evading bans, warnings or mutes is strictly forbidden.\n\nStaff decisions are final. Do not argue about staff decisions in public. Open a Discord support ticket to discuss staff actions, appeal or report an issue. Do not DM staff about issues without direct permission.",
     prom2:

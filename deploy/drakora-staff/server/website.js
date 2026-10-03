@@ -4,11 +4,11 @@ import { initialWebsite, ruleSections } from "../shared/website.js";
 export function websiteAccess(config, user) {
   return Boolean(
     user.permissions?.dashboard &&
-      config.ranks.some(
-        (rank) =>
-          ["Founder", "Manager", "Admin"].includes(rank.name) &&
-          user.roles?.includes(rank.id),
-      ),
+    config.ranks.some(
+      (rank) =>
+        ["Founder", "Manager", "Admin"].includes(rank.name) &&
+        user.roles?.includes(rank.id),
+    ),
   );
 }
 
@@ -30,6 +30,45 @@ export function validateWebsite(input) {
     !input.rules ||
     !Array.isArray(input.servers) ||
     input.servers.length > 20
+  )
+    throw new AuthError("invalid_website_content", 400);
+  const homeInput = input.home;
+  if (
+    !homeInput ||
+    !Array.isArray(homeInput.announcements) ||
+    homeInput.announcements.length > 30
+  )
+    throw new AuthError("invalid_website_content", 400);
+  const home = {
+    title: text(homeInput.title, 100, true),
+    introduction: text(homeInput.introduction, 500, true),
+    announcementsTitle: text(homeInput.announcementsTitle, 100, true),
+    emptyMessage: text(homeInput.emptyMessage, 500, true),
+    announcements: homeInput.announcements.map((entry) => {
+      if (!entry || typeof entry.published !== "boolean")
+        throw new AuthError("invalid_website_content", 400);
+      const announcement = {
+        id: text(entry.id, 80, true),
+        title: text(entry.title, 100, true),
+        body: text(entry.body, 6000, true),
+        date: text(entry.date, 10),
+        published: entry.published,
+      };
+      if (
+        !/^[a-zA-Z0-9-]+$/.test(announcement.id) ||
+        (announcement.date &&
+          (!/^\d{4}-\d{2}-\d{2}$/.test(announcement.date) ||
+            !Number.isFinite(Date.parse(announcement.date)) ||
+            new Date(announcement.date).toISOString().slice(0, 10) !==
+              announcement.date))
+      )
+        throw new AuthError("invalid_website_content", 400);
+      return announcement;
+    }),
+  };
+  if (
+    new Set(home.announcements.map((entry) => entry.id)).size !==
+    home.announcements.length
   )
     throw new AuthError("invalid_website_content", 400);
   const rules = Object.fromEntries(
@@ -83,15 +122,20 @@ export function validateWebsite(input) {
   });
   if (new Set(servers.map((server) => server.slug)).size !== servers.length)
     throw new AuthError("duplicate_server_slug", 400);
-  return { rules, servers };
+  return { home, rules, servers };
 }
 
 export function websiteService(config, store) {
-  const read = () =>
-    store.get("website-content", "current") ?? {
+  const read = () => {
+    const saved = store.get("website-content", "current") ?? {
       revision: 0,
       ...structuredClone(initialWebsite),
     };
+    return {
+      ...saved,
+      home: saved.home ?? structuredClone(initialWebsite.home),
+    };
+  };
   const authorize = (user) => {
     if (!websiteAccess(config, user))
       throw new AuthError("website_role_required");
@@ -102,8 +146,12 @@ export function websiteService(config, store) {
       return read();
     },
     publicContent() {
-      const { rules, servers } = read();
+      const { home, rules, servers } = read();
       return {
+        home: {
+          ...home,
+          announcements: home.announcements.filter((entry) => entry.published),
+        },
         rules,
         servers: servers.filter((server) => server.published),
         address: "play.drakora.org",
@@ -112,11 +160,16 @@ export function websiteService(config, store) {
     },
     save(user, input) {
       authorize(user);
-      const content = validateWebsite(input);
+      if (!input || !Number.isSafeInteger(input.revision) || input.revision < 0)
+        throw new AuthError("invalid_website_content", 400);
       return store.transaction(() => {
         const previous = read();
-        if (input.revision !== previous.revision)
+        if (input?.revision !== previous.revision)
           throw new AuthError("website_content_changed", 409);
+        const content = validateWebsite({
+          ...input,
+          home: input.home ?? previous.home,
+        });
         const next = {
           ...content,
           revision: previous.revision + 1,

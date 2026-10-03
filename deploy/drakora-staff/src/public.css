@@ -219,6 +219,13 @@ button {
   margin: 0;
   font-size: 14px;
 }
+.public-welcome > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.public-welcome .public-button {
+  flex-shrink: 0;
+}
 .public-button {
   display: inline-flex;
   justify-content: center;
@@ -240,36 +247,13 @@ button {
   background: #31342d;
   width: 100%;
 }
-.public-home-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 28px;
-}
-.public-section-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 18px;
-}
-.public-section-heading h2 {
-  margin: 0;
-}
-.public-section-heading a,
 .public-back {
   color: var(--gold);
   font-size: 13px;
 }
-.public-server-list {
-  display: grid;
-  gap: 24px;
-}
 .public-server {
   background: #222321;
   min-width: 0;
-}
-.public-server-list .public-server {
-  display: grid;
-  grid-template-columns: 40% minmax(0, 1fr);
 }
 .public-server-art {
   display: block;
@@ -321,30 +305,19 @@ button {
   color: var(--gold);
   font-size: 14px;
 }
-.public-home-aside h2 {
-  font-size: 25px;
+.public-announcement h3 {
+  margin: 0 0 14px;
+  font:
+    bold 24px Georgia,
+    "Times New Roman",
+    serif;
+  color: #e6dac0;
 }
-.public-home-aside p {
-  font-size: 13px;
+.public-announcement p {
+  white-space: pre-line;
 }
-.public-shop {
-  display: block;
-  padding: 30px 28px;
-  background: #63342b;
-  margin-bottom: 24px;
-  border-bottom: 4px solid #a75842;
-}
-.public-site .public-shop h2 {
-  font-size: 36px;
-  color: #f1e5c8;
-}
-.public-site .public-shop p {
-  color: #d4c4b5;
-}
-.public-shop > span:last-child {
-  color: #f1e5c8;
-  font-weight: 700;
-  font-size: 14px;
+.public-announcements {
+  overflow-wrap: anywhere;
 }
 .public-page-title {
   margin: 14px 0 32px;
@@ -473,16 +446,6 @@ button {
   .public-discord strong {
     font-size: 16px;
   }
-  .public-home-grid {
-    grid-template-columns: minmax(0, 1fr) 250px;
-    gap: 20px;
-  }
-  .public-server-list .public-server {
-    grid-template-columns: 1fr;
-  }
-  .public-server-list .public-server-art {
-    max-height: 200px;
-  }
   .public-footer {
     margin: 0 20px;
   }
@@ -563,16 +526,11 @@ button {
   .public-welcome .public-button {
     margin-top: 20px;
   }
-  .public-home-grid,
   .public-server-grid,
   .public-detail-grid,
   .public-rules-grid {
     grid-template-columns: 1fr;
     gap: 22px;
-  }
-  .public-home-aside {
-    display: grid;
-    grid-template-columns: 1fr;
   }
   .public-rules-nav {
     grid-template-columns: 1fr 1fr;

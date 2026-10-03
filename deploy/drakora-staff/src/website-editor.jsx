@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { ruleSections, newServer } from "../shared/website.js";
+import { ruleSections, newServer, newAnnouncement } from "../shared/website.js";
 import "./website-editor.css";
 const messages = {
   website_content_too_large:
-    "The website content is too large. Shorten the rules or server descriptions, then save again.",
+    "The website content is too large. Shorten announcements, rules or server descriptions, then save again.",
   website_content_changed:
     "Another staff member saved changes. Your draft is still here. Reload the published content before editing again.",
   invalid_website_content:
-    "Check every server’s name, URL slug, summary, description, address and joining instructions. Download links must use HTTPS. Rules cannot be empty.",
+    "Check the Home fields and announcement titles, text and dates. Check each server’s required fields and use HTTPS download links. Rules cannot be empty.",
   duplicate_server_slug: "Each server needs a different URL slug.",
   website_role_required:
     "Only Admin, Manager and Founder staff can edit the public website.",
@@ -18,7 +18,7 @@ const messages = {
 export function WebsiteEditor({ csrf }) {
   const [document, setDocument] = useState(null),
     [baseline, setBaseline] = useState(""),
-    [tab, setTab] = useState("rules"),
+    [tab, setTab] = useState("home"),
     [section, setSection] = useState("home"),
     [serverIndex, setServerIndex] = useState(0),
     [busy, setBusy] = useState(false),
@@ -96,6 +96,22 @@ export function WebsiteEditor({ csrf }) {
     setNotice("");
     setError("");
   }
+  function updateHome(field, value) {
+    setDocument((previous) => ({
+      ...previous,
+      home: { ...previous.home, [field]: value },
+    }));
+    setNotice("");
+    setError("");
+  }
+  function updateAnnouncement(id, field, value) {
+    updateHome(
+      "announcements",
+      document.home.announcements.map((entry) =>
+        entry.id === id ? { ...entry, [field]: value } : entry,
+      ),
+    );
+  }
   async function save(event) {
     event.preventDefault();
     setBusy(true);
@@ -127,7 +143,7 @@ export function WebsiteEditor({ csrf }) {
       <header className="website-heading">
         <div>
           <h2 id="website-title">Website</h2>
-          <p>Edit the public Rules and Servers pages.</p>
+          <p>Edit the public Home, Rules and Servers pages.</p>
         </div>
         <a href="https://drakora.org" target="_blank" rel="noopener noreferrer">
           View website ↗
@@ -165,6 +181,13 @@ export function WebsiteEditor({ csrf }) {
               >
                 <button
                   type="button"
+                  aria-pressed={tab === "home"}
+                  onClick={() => setTab("home")}
+                >
+                  Home
+                </button>
+                <button
+                  type="button"
                   aria-pressed={tab === "rules"}
                   onClick={() => setTab("rules")}
                 >
@@ -184,7 +207,138 @@ export function WebsiteEditor({ csrf }) {
                   : `Saved revision ${document.revision}`}
               </span>
             </div>
-            {tab === "rules" ? (
+            {tab === "home" ? (
+              <>
+                {[
+                  ["title", "Welcome title", 100],
+                  ["introduction", "Welcome text", 500],
+                  ["announcementsTitle", "Announcements heading", 100],
+                  ["emptyMessage", "Text when there are no announcements", 500],
+                ].map(([field, label, maxLength]) => (
+                  <label className="website-field" key={field}>
+                    {label}
+                    <input
+                      value={document.home[field]}
+                      maxLength={maxLength}
+                      required
+                      onChange={(event) =>
+                        updateHome(field, event.target.value)
+                      }
+                    />
+                  </label>
+                ))}
+                <div className="website-announcements-heading">
+                  <h3>Announcements</h3>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={document.home.announcements.length >= 30}
+                    onClick={() =>
+                      updateHome("announcements", [
+                        newAnnouncement(),
+                        ...document.home.announcements,
+                      ])
+                    }
+                  >
+                    Add announcement
+                  </button>
+                </div>
+                <p className="website-help">
+                  New announcements appear first. Hidden announcements stay in
+                  this editor. Save the website to publish your changes.
+                </p>
+                {document.home.announcements.map((entry, index) => (
+                  <section
+                    className="website-announcement"
+                    key={entry.id}
+                    aria-label={`Announcement ${index + 1}`}
+                  >
+                    <label className="website-field">
+                      Announcement title
+                      <input
+                        value={entry.title}
+                        maxLength={100}
+                        required
+                        onChange={(event) =>
+                          updateAnnouncement(
+                            entry.id,
+                            "title",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="website-field">
+                      Announcement text
+                      <textarea
+                        value={entry.body}
+                        rows={6}
+                        maxLength={6000}
+                        required
+                        onChange={(event) =>
+                          updateAnnouncement(
+                            entry.id,
+                            "body",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="website-field">
+                      Date (optional)
+                      <input
+                        type="date"
+                        value={entry.date}
+                        onChange={(event) =>
+                          updateAnnouncement(
+                            entry.id,
+                            "date",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="website-publish">
+                      <input
+                        type="checkbox"
+                        checked={entry.published}
+                        onChange={(event) =>
+                          updateAnnouncement(
+                            entry.id,
+                            "published",
+                            event.target.checked,
+                          )
+                        }
+                      />
+                      Show this announcement on Home
+                    </label>
+                    <button
+                      type="button"
+                      className="website-remove"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Remove ${entry.title || "this announcement"}? It will disappear after you save.`,
+                          )
+                        )
+                          updateHome(
+                            "announcements",
+                            document.home.announcements.filter(
+                              (item) => item.id !== entry.id,
+                            ),
+                          );
+                      }}
+                    >
+                      Remove announcement
+                    </button>
+                  </section>
+                ))}
+                <p className="website-help">
+                  Use a blank line between paragraphs. HTML is displayed as
+                  text. Server details are managed on the Servers tab.
+                </p>
+              </>
+            ) : tab === "rules" ? (
               <>
                 <nav
                   className="website-rule-tabs"

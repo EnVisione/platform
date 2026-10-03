@@ -139,6 +139,18 @@
   color: #9bdbb5;
   font-size: 14px;
 }
+.website-announcements-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.website-announcement {
+  background: #282a2e;
+  padding: 20px;
+  margin: 20px 0;
+}
 @media (max-width: 700px) {
   .website-heading,
   .website-toolbar {

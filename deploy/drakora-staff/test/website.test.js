@@ -19,7 +19,7 @@ import {
   websiteEditorRouter,
 } from "../server/website-routes.js";
 import { applicationRouter } from "../server/application-routes.js";
-import { initialWebsite } from "../shared/website.js";
+import { initialWebsite, newAnnouncement } from "../shared/website.js";
 import { config as fixture } from "./fixture.js";
 import { validateConfig } from "../server/config.js";
 
@@ -181,6 +181,111 @@ test("content validation rejects unsafe downloads, duplicate URLs and invalid ad
     "https://example.com/download",
   );
   assert.equal("privateField" in validateWebsite(accepted).servers[0], false);
+});
+
+test("Home announcements migrate existing content, persist and publish only visible entries", (t) => {
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => database.store.close());
+  const legacy = draft();
+  delete legacy.home;
+  legacy.revision = 7;
+  legacy.rules.home = "Keep the existing rules.";
+  legacy.servers[0].summary = "Keep the existing server description.";
+  database.store.set(
+    "website-content",
+    "current",
+    legacy,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const service = websiteService(config, database.store);
+  const edit = service.read(admin);
+  assert.deepEqual(edit.home, initialWebsite.home);
+  assert.deepEqual(service.publicContent().home, initialWebsite.home);
+  assert.equal(service.read(admin).revision, 7);
+  edit.home.title = "Our community";
+  edit.home.announcements = [
+    {
+      ...newAnnouncement(),
+      title: "Community event",
+      body: "First paragraph.\n\n<script>Escaped text.</script>",
+      date: "2026-10-03",
+      published: true,
+    },
+    {
+      ...newAnnouncement(),
+      title: "Private draft",
+      body: "Not ready to share.",
+    },
+  ];
+  const saved = service.save(admin, edit);
+  assert.equal(saved.revision, 8);
+  assert.equal(service.publicContent().home.announcements.length, 1);
+  assert.deepEqual(
+    service.publicContent().home.announcements[0],
+    saved.home.announcements[0],
+  );
+  assert.deepEqual(saved.rules, legacy.rules);
+  assert.deepEqual(saved.servers, legacy.servers);
+  assert.deepEqual(service.read(admin), saved);
+  const oldEditor = { ...saved };
+  delete oldEditor.home;
+  assert.deepEqual(service.save(admin, oldEditor).home, saved.home);
+  const current = service.read(admin);
+  current.home.announcements = [];
+  service.save(admin, current);
+  assert.deepEqual(service.publicContent().home.announcements, []);
+  assert.throws(() => service.save(admin, saved), {
+    code: "website_content_changed",
+  });
+  assert.deepEqual(service.publicContent().home.announcements, []);
+});
+
+test("announcement validation bounds content and rejects malformed dates and duplicate identifiers", () => {
+  const base = draft();
+  base.home.announcements = [
+    { ...newAnnouncement(), title: "News", body: "Community news." },
+  ];
+  assert.equal(validateWebsite(base).home.announcements[0].date, "");
+  for (const [field, value] of [
+    ["title", " "],
+    ["body", "a".repeat(6001)],
+    ["date", "2026-02-30"],
+    ["date", "invalid"],
+    ["published", "yes"],
+    ["id", "../news"],
+  ]) {
+    const edit = structuredClone(base);
+    edit.home.announcements[0][field] = value;
+    assert.throws(
+      () => validateWebsite(edit),
+      { code: "invalid_website_content" },
+      field,
+    );
+  }
+  const duplicate = structuredClone(base);
+  duplicate.home.announcements.push({ ...duplicate.home.announcements[0] });
+  assert.throws(() => validateWebsite(duplicate), {
+    code: "invalid_website_content",
+  });
+  const oversized = structuredClone(base);
+  oversized.home.announcements = Array.from({ length: 31 }, () => ({
+    ...newAnnouncement(),
+    title: "News",
+    body: "Text",
+  }));
+  assert.throws(() => validateWebsite(oversized), {
+    code: "invalid_website_content",
+  });
+  const invalidHome = structuredClone(base);
+  invalidHome.home.title = "";
+  assert.throws(() => validateWebsite(invalidHome), {
+    code: "invalid_website_content",
+  });
+  base.home.announcements[0].privateField = "Exclude me";
+  assert.equal(
+    "privateField" in validateWebsite(base).home.announcements[0],
+    false,
+  );
 });
 
 test("Discord counts share requests, respect rate limits and expire stale readings while players stay zero", async () => {
