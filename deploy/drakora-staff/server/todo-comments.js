@@ -82,6 +82,7 @@ export async function trackerDocs(client, cls, query) {
 
 export async function syncComments({
   client,
+  authorClient,
   issue,
   thread,
   discord,
@@ -191,12 +192,14 @@ export async function syncComments({
     const pair = state.pairs[id];
     if (pair?.deleted) continue;
     const person = identities.byDiscord.get(message.author?.id);
-    const attributed = person
+    const linked = person?.account && person.socialId;
+    const attributed = linked
       ? text
-      : `${message.author?.global_name ?? message.author?.username ?? "Discord member"} (Discord)\n\n${text}`;
+      : `${person?.name ?? message.author?.global_name ?? message.author?.username ?? "Discord member"} (Discord)\n\n${text}`;
     const markup = commentMarkup(attributed);
     if (!byComment.has(id)) {
-      await client.addCollection(
+      const author = await authorClient(person);
+      await author.addCollection(
         commentClass,
         issue.space,
         issue._id,
@@ -205,10 +208,11 @@ export async function syncComments({
         { message: markup, attachments: 0 },
         id,
         Date.parse(message.timestamp),
-        person?.socialId,
+        linked ? person.socialId : undefined,
       );
     } else if (byComment.get(id).message !== markup) {
-      await client.updateDoc(commentClass, issue.space, id, {
+      const author = await authorClient(person);
+      await author.updateDoc(commentClass, issue.space, id, {
         message: markup,
         editedOn: Date.now(),
       });

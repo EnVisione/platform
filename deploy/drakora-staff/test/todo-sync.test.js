@@ -245,6 +245,7 @@ function fixture(t) {
       );
       assert.ok(doc);
       Object.assign(doc, update);
+      if (cls === commentClass) doc.modifiedAccount = this.account;
       writes.push({ id, update });
     },
     async addCollection(
@@ -260,6 +261,17 @@ function fixture(t) {
     ) {
       const docs = cls === issueClass ? issues : comments;
       assert.ok(!docs.some((doc) => doc._id === id));
+      if (cls === commentClass && createdBy) {
+        const identity = social.find((entry) => entry._id === createdBy);
+        const person = people.find(
+          (entry) => entry._id === identity?.attachedTo,
+        );
+        assert.equal(
+          this.account,
+          person?.personUuid,
+          "Comment author must belong to the authenticated account",
+        );
+      }
       docs.push({
         ...data,
         _id: id,
@@ -270,6 +282,7 @@ function fixture(t) {
         collection,
         createdOn,
         createdBy,
+        createdAccount: this.account,
       });
     },
     async removeCollection(cls, _space, id) {
@@ -291,8 +304,12 @@ function fixture(t) {
   const sync = discordTodoSync(
     config,
     store,
-    { serviceToken: () => "test" },
-    { fetcher, openClient: async () => client },
+    { serviceToken: (account = "owner") => account },
+    {
+      fetcher,
+      openClient: async (_endpoint, _workspace, account) =>
+        Object.assign(Object.create(client), { account }),
+    },
   );
   t.after(() => sync.close());
   const nativeComment = (id = "native-comment", text = "Tracker reply") => {
@@ -431,6 +448,7 @@ test("comments mirror both ways once with author attribution and native source e
     comment._id.startsWith("drakora:"),
   );
   assert.equal(incoming.createdBy, "envy-social");
+  assert.equal(incoming.createdAccount, "envy-account");
   assert.equal(incoming.message, commentMarkup("Discord reply"));
   const outgoing = [...s.messages.values()].find(
     (message) => message.author.id === "bot",
@@ -441,10 +459,38 @@ test("comments mirror both ways once with author attribution and native source e
   s.comments[0].message = commentMarkup("Edited Tracker reply");
   await s.sync.sync();
   assert.equal(incoming.message, commentMarkup("Edited Discord reply"));
+  assert.equal(incoming.modifiedAccount, "envy-account");
   assert.equal(outgoing.embeds[0].description, "Edited Tracker reply");
   await s.sync.sync();
   assert.equal(s.comments.length, 2);
   assert.equal(s.messages.size, 3);
+});
+
+test("each linked Discord author uses their own native account and unknown authors retain their name", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.discordComment();
+  const first = s.messages.get("110");
+  s.messages.set("111", {
+    ...first,
+    id: "111",
+    author: { id: "102", username: "Hampe" },
+  });
+  s.messages.set("112", {
+    ...first,
+    id: "112",
+    author: { id: "103", username: "Guest" },
+  });
+  await s.sync.sync();
+  const hampe = s.comments.find((comment) => comment._id.endsWith(":111"));
+  assert.equal(hampe.createdBy, "hampe-social");
+  assert.equal(hampe.createdAccount, "hampe-account");
+  const guest = s.comments.find((comment) => comment._id.endsWith(":112"));
+  assert.equal(guest.createdAccount, "owner");
+  assert.equal(
+    guest.message,
+    commentMarkup("Guest (Discord)\n\nDiscord reply"),
+  );
 });
 
 test("lost Discord reply response recovers its marker after a restart without reposting", async (t) => {

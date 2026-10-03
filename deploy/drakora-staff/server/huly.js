@@ -3,11 +3,11 @@ import { syncProjectRoles } from "./project-roles.js";
 import { syncAvatar } from "./profile.js";
 
 export function hulyClient(config, store, fetcher = fetch) {
-  function serviceToken() {
+  function serviceToken(account = config.hulyOwner) {
     const encode = (value) =>
       Buffer.from(JSON.stringify(value)).toString("base64url");
     const body = `${encode({ typ: "JWT", alg: "HS256" })}.${encode({
-      account: config.hulyOwner,
+      account,
       workspace: config.hulyWorkspace,
       extra: { service: "tool" },
       exp: Math.floor(Date.now() / 1000) + 120,

@@ -137,6 +137,7 @@ export function discordTodoSync(
           user?.name ?? person.name.split(",").toReversed().join(" ").trim(),
         discordId: id,
         socialId: identity?._id,
+        account: identity ? person.personUuid : undefined,
         names: [person.name, user?.name, user?.username].flatMap(aliases),
       };
       if (id) byDiscord.set(id, info);
@@ -348,6 +349,19 @@ export function discordTodoSync(
       huly.serviceToken(),
     );
     const failures = [];
+    const authorClients = new Map();
+    const authorClient = async (person) => {
+      if (!person?.account || !person.socialId) return client;
+      if (!authorClients.has(person.account)) {
+        const author = await openClient(
+          "http://transactor:3333",
+          config.hulyWorkspace,
+          huly.serviceToken(person.account),
+        );
+        authorClients.set(person.account, author);
+      }
+      return authorClients.get(person.account);
+    };
     const attempt = async (action) => {
       try {
         await action();
@@ -543,6 +557,7 @@ export function discordTodoSync(
           store.set("huly-todo", issue._id, { threadId: thread.id }, expiry);
           await syncComments({
             client,
+            authorClient,
             issue,
             thread,
             discord,
@@ -625,6 +640,7 @@ export function discordTodoSync(
             );
             await syncComments({
               client,
+              authorClient,
               issue,
               thread: post,
               discord,
@@ -640,7 +656,11 @@ export function discordTodoSync(
           `${failures.length} Tracker task syncs are pending. ${failures[0].message}`,
         );
     } finally {
-      await client.close();
+      await Promise.all(
+        [client, ...authorClients.values()].map((connection) =>
+          connection.close(),
+        ),
+      );
     }
   }
 

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import accountMethod from "../huly-staff-account.cjs";
 import { patchAccount } from "../patch-huly-account.cjs";
 import { hulyClient } from "../server/huly.js";
@@ -9,6 +10,28 @@ const identity = {
   email: "staff@example.invalid",
   name: "Staff",
 };
+test("native author tokens retain workspace scope, signature and short expiry", () => {
+  const fixture = clientFixture();
+  for (const [token, expected] of [
+    [fixture.client.serviceToken(), "recovery"],
+    [fixture.client.serviceToken("account-42"), "account-42"],
+  ]) {
+    const [header, body, signature] = token.split(".");
+    assert.equal(
+      signature,
+      createHmac("sha256", "test")
+        .update(`${header}.${body}`)
+        .digest("base64url"),
+    );
+    const claims = JSON.parse(Buffer.from(body, "base64url"));
+    assert.equal(claims.account, expected);
+    assert.equal(claims.workspace, "workspace");
+    assert.deepEqual(claims.extra, { service: "tool" });
+    assert.ok(
+      claims.exp > Date.now() / 1000 && claims.exp <= Date.now() / 1000 + 120,
+    );
+  }
+});
 function accountFixture(identities = []) {
   const records = [...identities];
   let writes = 0;
