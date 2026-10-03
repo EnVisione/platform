@@ -26,7 +26,7 @@
   padding-left: 14px;
 }
 .mail-brand > span {
-  color: #bac1ff;
+  color: var(--accent-ink);
   font-size: 32px;
 }
 .mail-heading h2 {
@@ -102,7 +102,7 @@
 .mail-text-button {
   background: none;
   border: none;
-  color: #bac1ff;
+  color: var(--accent-ink);
   cursor: pointer;
   font: inherit;
   text-decoration: underline;
@@ -434,11 +434,11 @@ button.mail-row-star:hover {
   margin: 0 0 14px;
 }
 .mail-html a {
-  color: #aeb6ff;
+  color: var(--accent-ink);
   text-decoration: underline;
 }
 .mail-html blockquote {
-  border-left: 3px solid #5865f2;
+  border-left: 3px solid var(--accent);
   margin: 16px 0;
   padding-left: 16px;
   color: #b5bac1;
@@ -479,7 +479,7 @@ button.mail-row-star:hover {
   gap: 10px;
 }
 .mail-empty-state > span {
-  color: #8c97ff;
+  color: var(--accent-ink);
   font-size: 48px;
 }
 .mail-empty-state h3 {
@@ -575,7 +575,11 @@ button.mail-row-star:hover {
   border-radius: 14px;
 }
 .mail-composer > header {
-  background: linear-gradient(105deg, #393c65, #303448);
+  background: linear-gradient(
+    105deg,
+    var(--accent-soft-hover),
+    var(--accent-soft)
+  );
   padding: 12px 16px;
   display: flex;
   align-items: center;
@@ -585,14 +589,14 @@ button.mail-row-star:hover {
 .mail-composer h2 {
   font-size: 15px;
   margin: 0;
-  color: #f0f1ff;
+  color: #f2f3f5;
 }
 .mail-composer h2 > span {
-  color: #bec6ff;
+  color: var(--accent-ink);
 }
 .mail-page .mail-reply-mode {
   width: auto;
-  color: #f0f1ff;
+  color: #f2f3f5;
   background: #000;
   border: 0;
   padding: 4px 6px;
@@ -614,7 +618,7 @@ button.mail-row-star:hover {
 }
 .mail-window-controls button {
   background: transparent;
-  color: #d8dcf5;
+  color: #dbdee1;
   border: 0;
   border-radius: 4px;
   cursor: pointer;
@@ -623,7 +627,7 @@ button.mail-row-star:hover {
   font-size: 18px;
 }
 .mail-window-controls button:hover {
-  background: #7e87bc40;
+  background: var(--accent-soft-hover);
 }
 .mail-composer form {
   padding: 0 18px;
@@ -649,7 +653,7 @@ button.mail-row-star:hover {
   min-height: 44px;
   border-bottom: 1px solid #414550;
   font-size: 12px;
-  color: #a8b3c7;
+  color: #b5bac1;
   margin: 0;
 }
 .mail-compose-line > span {
@@ -661,7 +665,7 @@ button.mail-row-star:hover {
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: #e8ebf6;
+  color: #f2f3f5;
   padding: 8px 0;
   font-size: 13px;
   flex: 1;
@@ -687,7 +691,7 @@ button.mail-row-star:hover {
 .mail-recipient-toggles button,
 .mail-reply-subject button,
 .mail-quoted-history button {
-  color: #a8b9ff;
+  color: var(--accent-ink);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -697,7 +701,7 @@ button.mail-row-star:hover {
 .mail-recipient-toggles button:hover,
 .mail-reply-subject button:hover,
 .mail-quoted-history button:hover {
-  color: #e2e8ff;
+  color: #f2f3f5;
   text-decoration: underline;
 }
 .mail-reply-subject {
@@ -705,7 +709,7 @@ button.mail-row-star:hover {
   gap: 12px;
   align-items: center;
   border-bottom: 1px solid #414550;
-  color: #aab4ce;
+  color: #b5bac1;
   min-height: 38px;
   font-size: 12px;
 }
@@ -722,7 +726,7 @@ button.mail-row-star:hover {
   margin: 0;
 }
 .mail-message-label {
-  color: #a8b3c7;
+  color: #b5bac1;
   font-size: 11px;
   padding-top: 10px;
 }
@@ -744,23 +748,23 @@ button.mail-row-star:hover {
 }
 .mail-quoted-history {
   margin: 0 0 14px;
-  color: #aab4c9;
+  color: #b5bac1;
   font-size: 12px;
 }
 .mail-quoted-history summary {
   cursor: pointer;
   width: fit-content;
   padding: 5px 10px;
-  background: #353845;
+  background: #383a40;
   border-radius: 5px;
-  color: #c3cef3;
+  color: #dbdee1;
 }
 .mail-quoted-history pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 180px;
   overflow-y: auto;
-  border-left: 3px solid #8591e8;
+  border-left: 3px solid var(--accent);
   padding-left: 14px;
   margin-top: 12px;
   font-family: inherit;
@@ -781,8 +785,8 @@ button.mail-row-star:hover {
   padding: 6px 10px;
   margin-top: 6px;
   border-radius: 5px;
-  background: #34415d;
-  color: #c3d7ff;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font-size: 12px;
 }
 .mail-compose-attachments li > span {
@@ -805,13 +809,13 @@ button.mail-row-star:hover {
 .mail-page .mail-send-button {
   border-radius: 22px;
   padding: 11px 22px;
-  color: #fff;
-  background: #5369e8;
-  box-shadow: 0 3px 12px #5369e833;
+  color: var(--accent-text);
+  background: var(--accent);
+  box-shadow: 0 3px 12px var(--accent-shadow);
 }
 .mail-send-button > span {
   margin-left: 10px;
-  color: #dbe2ff;
+  color: var(--accent-text);
 }
 .mail-attach-button,
 .mail-discard {
@@ -821,11 +825,11 @@ button.mail-row-star:hover {
   cursor: pointer;
   padding: 7px;
   font-size: 22px;
-  color: #b8c4dd;
+  color: #b5bac1;
 }
 .mail-attach-button:hover {
-  color: #cbd8ff;
-  background: #384361;
+  color: var(--accent-ink);
+  background: var(--accent-soft-hover);
 }
 .mail-discard {
   margin-left: auto;
@@ -847,7 +851,7 @@ button.mail-row-star:hover {
   width: min(360px, calc(100vw - 40px));
   display: flex;
   align-items: center;
-  background: #333954;
+  background: var(--accent-soft);
   border: 0;
   border-radius: 10px 10px 0 0;
   box-shadow: 0 5px 30px #0007;
@@ -858,7 +862,7 @@ button.mail-row-star:hover {
   align-items: center;
   gap: 10px;
   background: transparent;
-  color: #e3e7ff;
+  color: #f2f3f5;
   border: 0;
   padding: 14px;
   cursor: pointer;
@@ -910,8 +914,8 @@ button.mail-row-star:hover {
   height: 42px;
   flex-shrink: 0;
   border-radius: 50%;
-  color: #edf0ff;
-  background: linear-gradient(135deg, #637ceb, #8464c9);
+  color: var(--accent-text);
+  background: var(--accent);
   font-size: 20px;
   font-weight: 700;
 }
@@ -924,15 +928,15 @@ button.mail-row-star:hover {
   overflow-wrap: anywhere;
 }
 .mail-sender-identity strong {
-  color: #e8ebfa;
+  color: #f2f3f5;
   font-size: 14px;
 }
 .mail-sender-identity > span {
-  color: #a2b3d0;
+  color: #b5bac1;
   font-size: 12px;
 }
 .mail-envelope-details {
-  color: #acb6ca;
+  color: #b5bac1;
   font-size: 12px;
 }
 .mail-envelope-details summary {
@@ -945,10 +949,10 @@ button.mail-row-star:hover {
   border: 0;
   border-radius: 8px;
   padding: 10px 14px;
-  background: #2c3241;
+  background: #2b2d31;
 }
 .mail-reader-date {
-  color: #a3aec2;
+  color: #949ba4;
   font-size: 11px;
   white-space: nowrap;
   margin-top: 5px;
@@ -985,23 +989,15 @@ button.mail-row-star:hover {
   font-size: 13px;
   font-weight: 650;
   border: 0;
-  background: #333e65;
-  color: #d1dcff;
-}
-.mail-page .mail-reply-actions .mail-reply-all-action {
-  background: #423457;
-  color: #dcc7f5;
-}
-.mail-page .mail-reply-actions .mail-forward-action {
-  background: #2b4846;
-  color: #abe2d3;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 .mail-reply-actions button:hover {
   filter: brightness(1.18);
 }
 .mail-reader-back {
-  color: #cad5ff;
-  background: #354367;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
   border: 0;
 }
 .mail-reply-host:empty {

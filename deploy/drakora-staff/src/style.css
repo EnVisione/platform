@@ -1,4 +1,6 @@
 :root {
+  --accent: #5865f2;
+  --accent-text: #fff;
   font-family:
     Inter,
     ui-sans-serif,
@@ -11,6 +13,14 @@
   background: #1e1f22;
   font-synthesis: none;
   line-height: 1.45;
+}
+
+:root,
+.workspace {
+  --accent-ink: color-mix(in srgb, var(--accent) 35%, #f2f3f5);
+  --accent-soft: color-mix(in srgb, var(--accent) 22%, #2b2d31);
+  --accent-soft-hover: color-mix(in srgb, var(--accent) 32%, #2b2d31);
+  --accent-shadow: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 * {
@@ -46,7 +56,7 @@ button {
 a:focus-visible,
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid #c1c7ff;
+  outline: 2px solid var(--accent-ink);
   outline-offset: 3px;
 }
 
@@ -219,14 +229,14 @@ button:disabled {
   width: 17px;
   height: 17px;
   margin: 1px 0 0;
-  accent-color: #5865f2;
+  accent-color: var(--accent);
 }
 
 .submit-name {
   width: 100%;
   margin-top: 20px;
-  background: #5865f2;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
 }
 
@@ -243,7 +253,7 @@ button:disabled {
 .text-link {
   display: block;
   margin-top: 20px;
-  color: #c1c7ff;
+  color: var(--accent-ink);
   font-size: 12px;
   text-align: center;
 }

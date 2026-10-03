@@ -28,7 +28,7 @@ html[data-drakora-embedded].theme-dark * {
   --theme-caption-color: #f2f3f5;
   --theme-content-color: #dbdee1;
   --theme-dark-color: #b5bac1;
-  --theme-link-color: #a3aaff;
+  --theme-link-color: color-mix(in srgb, var(--staff-accent) 35%, #f2f3f5);
   --theme-dialog-background-color: #2b2d31;
   --theme-popup-color: #2b2d31;
   --theme-table-row-color: #313338;
@@ -47,8 +47,16 @@ html[data-drakora-embedded].theme-dark * {
 html[data-drakora-embedded].theme-dark body,
 html[data-drakora-embedded].theme-dark body * {
   --global-accent-BackgroundColor: var(--staff-accent);
-  --global-accent-TextColor: color-mix(in srgb, var(--staff-accent), white 55%);
-  --global-accent-IconColor: color-mix(in srgb, var(--staff-accent), white 55%);
+  --global-accent-TextColor: color-mix(
+    in srgb,
+    var(--staff-accent) 35%,
+    #f2f3f5
+  );
+  --global-accent-IconColor: color-mix(
+    in srgb,
+    var(--staff-accent) 35%,
+    #f2f3f5
+  );
   --global-on-accent-TextColor: var(--staff-accent-text, #fff);
   --button-primary-BackgroundColor: var(--staff-accent);
   --button-primary-hover-BackgroundColor: color-mix(

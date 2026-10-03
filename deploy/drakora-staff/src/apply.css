@@ -141,7 +141,7 @@
 .apply-history-current {
   display: block;
   font-size: 12px;
-  color: #a8b0ff;
+  color: var(--accent-ink);
   margin: 4px 0;
 }
 .apply-history-pagination {
@@ -172,7 +172,7 @@
   flex: 1;
   height: 7px;
   border: 0;
-  accent-color: #5865f2;
+  accent-color: var(--accent);
 }
 .apply-field {
   display: flex;
@@ -202,7 +202,7 @@
 .apply-field input:focus,
 .apply-field select:focus,
 .apply-field textarea:focus {
-  outline: 2px solid #8790ff;
+  outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
 }
 .apply-field [aria-invalid="true"] {
@@ -219,7 +219,7 @@
   line-height: 1.7;
 }
 .apply-evidence-links a {
-  color: #a8b0ff;
+  color: var(--accent-ink);
   overflow-wrap: anywhere;
 }
 .apply-roles {
@@ -240,8 +240,8 @@
   cursor: pointer;
 }
 .apply-roles button:hover {
-  border-color: #8790ff;
-  background: #35384a;
+  border-color: var(--accent-ink);
+  background: var(--accent-soft);
 }
 .apply-roles strong {
   font-size: 18px;
@@ -269,8 +269,8 @@
 .apply-button,
 .apply-card
   button:not(.apply-link):not(.apply-secondary):not(.apply-roles button) {
-  background: #5865f2;
-  color: white;
+  background: var(--accent);
+  color: var(--accent-text);
   border: 0;
   border-radius: 6px;
   padding: 12px 20px;
@@ -304,7 +304,7 @@
   flex-shrink: 0;
   width: 17px;
   height: 17px;
-  accent-color: #5865f2;
+  accent-color: var(--accent);
 }
 .apply-radios {
   display: flex;
@@ -350,7 +350,7 @@
 .apply-link {
   border: 0;
   background: transparent;
-  color: #a8b0ff;
+  color: var(--accent-ink);
   padding: 8px 0;
   text-align: left;
   text-decoration: underline;
@@ -360,7 +360,7 @@
   padding: 20px;
   margin: 24px 0;
   background: #25262b;
-  border-left: 3px solid #8790ff;
+  border-left: 3px solid var(--accent-ink);
   line-height: 1.7;
   color: #e1e4e8;
 }
@@ -453,8 +453,8 @@
   height: 40px;
   overflow: hidden;
   border-radius: 50%;
-  background: #5865f2;
-  color: white;
+  background: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 .application-feedback-avatar img {
@@ -528,7 +528,7 @@
   background: #2b2d31;
 }
 .application-row:hover {
-  border-color: var(--accent, #5865f2);
+  border-color: var(--accent);
 }
 .application-row > div {
   display: flex;
@@ -559,7 +559,7 @@
   margin-bottom: 28px;
 }
 .application-back {
-  color: #a8b0ff;
+  color: var(--accent-ink);
 }
 .application-header h2 {
   margin: 14px 0 10px;
@@ -648,13 +648,13 @@
   background: #313338;
 }
 .staff-applications button.apply-button {
-  background: #5865f2;
-  border-color: #5865f2;
-  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .staff-applications button.application-review-start {
-  background: #4a57cc;
-  border-color: #4a57cc;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .staff-applications button.application-approve {
   background: #237d50;
@@ -675,7 +675,7 @@
 .application-filters select:focus-visible,
 .application-filters input:focus-visible,
 .staff-applications a:focus-visible {
-  outline: 2px solid #a8b0ff;
+  outline: 2px solid var(--accent-ink);
   outline-offset: 3px;
 }
 .application-player {
@@ -778,7 +778,7 @@
   overflow-wrap: anywhere;
 }
 .application-previous-list a:hover {
-  border-color: #7d88ff;
+  border-color: var(--accent-ink);
   background: #30323a;
 }
 .application-previous-list time,
@@ -789,7 +789,7 @@
   color: #b5bac1;
 }
 .application-previous-open {
-  color: #a8b0ff;
+  color: var(--accent-ink);
   font-size: 13px;
 }
 .application-previous-pages {
@@ -877,9 +877,9 @@
   margin: 1rem 0;
 }
 .form-editor-tabs button[aria-pressed="true"] {
-  background: #5865f2;
-  border-color: #5865f2;
-  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .form-editor-fields {
   border: 0;
@@ -949,7 +949,7 @@
   border-radius: 12px;
 }
 .form-editor-question:focus-visible {
-  outline: 2px solid #a1a6ff;
+  outline: 2px solid var(--accent-ink);
   outline-offset: 3px;
 }
 @media (max-width: 650px) {
@@ -986,13 +986,13 @@
   cursor: pointer;
 }
 .apply-notification-option:has(input:checked) {
-  border-color: #5865f2;
-  background: #5865f215;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .apply-notification-option input {
   flex: 0 0 auto;
   margin-top: 5px;
-  accent-color: #5865f2;
+  accent-color: var(--accent);
 }
 .apply-notification-option small {
   display: block;
@@ -1008,7 +1008,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-left: 3px solid #5865f2;
+  border-left: 3px solid var(--accent);
   padding: 10px 16px;
   margin: 14px 0;
 }

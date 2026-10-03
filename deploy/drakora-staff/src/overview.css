@@ -192,20 +192,8 @@ a.overview-attention-card:hover {
   flex: none;
   border-radius: 12px;
   font-size: 22px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, #2b2d31);
-}
-.overview-icon.purple {
-  background: #3e3652;
-  color: #c5b4ec;
-}
-.overview-icon.blue {
-  background: #2d4054;
-  color: #9dc8f6;
-}
-.overview-icon.amber {
-  background: #4a3e2e;
-  color: #e7bf81;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
 }
 .overview-card-content {
   flex: 1;

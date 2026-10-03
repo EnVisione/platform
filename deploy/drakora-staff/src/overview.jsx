@@ -2,10 +2,10 @@ import React, { useEffect, useState } from "react";
 import { dashboardTools } from "./workspace-tools.jsx";
 import "./overview.css";
 
-function AttentionCard({ icon, title, count, detail, href, tone = "accent" }) {
+function AttentionCard({ icon, title, count, detail, href }) {
   const content = (
     <>
-      <span className={`overview-icon ${tone}`} aria-hidden="true">
+      <span className="overview-icon" aria-hidden="true">
         {icon}
       </span>
       <span className="overview-card-content">
@@ -240,7 +240,6 @@ export function Overview({ user, timeFormat }) {
             <AttentionCard
               icon="▤"
               title="Staff applications"
-              tone="purple"
               count={data?.applications?.pending}
               detail={
                 data?.applications
@@ -256,7 +255,6 @@ export function Overview({ user, timeFormat }) {
             <AttentionCard
               icon="✉"
               title="Emails awaiting a reply"
-              tone="blue"
               count={data?.email?.available ? data.email.unanswered : undefined}
               detail={
                 data?.email?.available
@@ -277,7 +275,6 @@ export function Overview({ user, timeFormat }) {
               title={
                 queue.name ?? (queue.kind === "tickets" ? "Tickets" : "Appeals")
               }
-              tone="amber"
               count={queue.available ? queue.count : undefined}
               detail={
                 queue.available

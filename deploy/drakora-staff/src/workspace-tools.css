@@ -73,8 +73,8 @@
   width: 64px;
   height: 64px;
   border-radius: 18px;
-  color: #b4baff;
-  background: #343753;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
   font-size: 32px;
 }
 .workspace-tool-actions {
