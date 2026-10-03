@@ -116,7 +116,7 @@ function ServerCard({ server }) {
           {server.packVersion && <span>Pack {server.packVersion}</span>}
         </div>
         <div className="public-server-actions">
-          <a className="public-button" href={`/servers/${server.slug}`}>
+          <a className="public-button beige" href={`/servers/${server.slug}`}>
             View server <span aria-hidden="true">→</span>
           </a>
           {server.downloadUrl && (
@@ -145,7 +145,7 @@ function HomePage({ home, discordInvite }) {
           </span>
           <h1>{home.title}</h1>
           <p>{home.introduction}</p>
-          <a href="/servers" className="public-button">
+          <a href="/servers" className="public-button beige">
             View servers <span aria-hidden="true">→</span>
           </a>
         </div>
@@ -238,12 +238,14 @@ function HelpPage({ help, discordInvite }) {
         <span className="public-eyebrow">DRAKORA SUPPORT</span>
         <h1>{help.title}</h1>
         <p>{help.introduction}</p>
-        <a className="public-button" href="/help/new">
-          Open a ticket <span aria-hidden="true">→</span>
-        </a>
-        <a className="public-button" href={discordInvite}>
-          Open Discord <span aria-hidden="true">↗</span>
-        </a>
+        <div className="public-help-actions">
+          <a className="public-button" href="/help/new">
+            Open a ticket <span aria-hidden="true">→</span>
+          </a>
+          <a className="public-button secondary" href={discordInvite}>
+            Open Discord <span aria-hidden="true">↗</span>
+          </a>
+        </div>
       </div>
       <div className="public-help-grid">
         {helpSections.map(({ id, name, list }) => (

@@ -264,7 +264,7 @@ The staff database retains encrypted `role-permissions` revisions, `role-assignm
 
 ## Public website content
 
-Home uses a dragon-red welcome panel with a gold server link and decorative pixel castle artwork. Forest-green announcement panels and a warm-gold support panel distinguish the news and help areas. The welcome panel stacks its text and artwork on narrow screens. These styles preserve the staff-editable title, introduction, announcements and empty-state message.
+Public pages use red headings, white body text and neutral gray panels with rounded corners. Home retains its decorative pixel castle artwork, with the welcome text and artwork stacked on narrow screens. The View servers and View server buttons use beige fills with dark text; secondary actions use gray fills. Help separates Open a ticket and Open Discord with a wrapping action row and a 16-pixel gap. These styles preserve the staff-editable title, introduction, announcements and empty-state message.
 
 `src/public.css` places the header scenery in a separate decorative layer. Blur applies only to that background, with a continuous dark overlay fading gently into the page background. Navigation, pixel branding and network status remain in the foreground. The decorative layers ignore pointer events and are clipped to the header. The current page's navigation tab uses a solid red fill and white text, including on nested pages and in the mobile menu. Hover preserves the red treatment. Store stands out with gold text and uses the normal navigation background on hover, keeping it distinct from the selected page. Panels and buttons use flat fills without decorative borders or gradients. Keyboard focus uses an underline instead of an outline.
 

@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
   font-family: Arial, Helvetica, sans-serif;
-  color: #eee7d8;
-  background: #171815;
+  color: #f2f3f5;
+  background: #1c1e21;
   font-size: 16px;
 }
 * {
@@ -29,7 +29,11 @@ button {
 }
 .public-site {
   --red: #a6382b;
+  --heading-red: #ed746a;
   --gold: #d3bd91;
+  --panel: #2b2d31;
+  --muted: #c0c3cb;
+  --radius: 10px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -37,6 +41,7 @@ button {
 .public-site h1,
 .public-site h2 {
   margin: 0 0 14px;
+  color: var(--heading-red);
   font-family: Georgia, "Times New Roman", serif;
   font-weight: 700;
 }
@@ -49,7 +54,7 @@ button {
   line-height: 1.25;
 }
 .public-site p {
-  color: #c4c1b7;
+  color: #f2f3f5;
   line-height: 1.65;
   margin: 0 0 20px;
 }
@@ -57,7 +62,15 @@ button {
   text-decoration: none;
 }
 .public-site a:hover {
-  color: var(--gold);
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.public-site h2 a {
+  color: inherit;
+}
+.public-site h2 a:hover {
+  color: #ff938a;
 }
 .public-site a:focus-visible,
 .public-site button:focus-visible {
@@ -71,7 +84,7 @@ button {
   top: -100px;
   left: 16px;
   padding: 12px;
-  background: #171715;
+  background: #1c1e21;
   z-index: 5;
 }
 .public-skip:focus {
@@ -81,7 +94,7 @@ button {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background: #171815;
+  background: #1c1e21;
   padding-bottom: 36px;
 }
 .public-header::before,
@@ -100,7 +113,7 @@ button {
 .public-header::after {
   inset: 0;
   z-index: -1;
-  background: linear-gradient(rgba(12, 16, 13, 0.62), #171815);
+  background: linear-gradient(rgba(12, 16, 13, 0.62), #1c1e21);
 }
 .public-nav {
   padding: 14px 20px;
@@ -115,7 +128,8 @@ button {
   font-size: 16px;
   font-weight: 700;
   padding: 12px 22px;
-  color: #c9ccbd;
+  color: #f2f3f5;
+  border-radius: 6px;
 }
 .public-nav a[aria-current="page"] {
   background: var(--red);
@@ -123,7 +137,7 @@ button {
 }
 .public-nav a:hover {
   color: #fff;
-  background: rgba(52, 60, 54, 0.65);
+  background: rgba(55, 58, 64, 0.65);
 }
 .public-nav a[aria-current="page"]:hover {
   background: #c14b38;
@@ -173,12 +187,12 @@ button {
   display: block;
   margin-top: 8px;
   text-align: center;
-  color: #babbaa;
+  color: var(--muted);
 }
 .public-eyebrow {
   font-size: 11px;
   letter-spacing: 1.4px;
-  color: #c4b593;
+  color: var(--muted);
   font-weight: 700;
   display: block;
   margin-bottom: 10px;
@@ -199,7 +213,7 @@ button {
 .public-address button {
   border: 0;
   background: none;
-  color: #dfd5b9;
+  color: #f2f3f5;
   padding: 0;
   text-align: left;
 }
@@ -208,7 +222,7 @@ button {
   display: block;
 }
 .public-address span {
-  color: #a7a99d;
+  color: var(--muted);
   display: block;
   font-size: 11px;
   margin-top: 6px;
@@ -223,11 +237,11 @@ button {
   font-size: 19px;
   display: block;
   margin-bottom: 6px;
-  color: #e2d5b4;
+  color: #f2f3f5;
 }
 .public-discord > span:last-child {
   font-size: 11px;
-  color: #b4b8a9;
+  color: var(--muted);
 }
 .public-content {
   max-width: 1180px;
@@ -240,22 +254,18 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   align-items: center;
-  background: #542b25;
+  background: var(--panel);
   overflow: hidden;
   margin-bottom: 36px;
 }
 .public-welcome-copy {
   padding: 38px;
 }
-.public-welcome .public-eyebrow {
-  color: #e6c77f;
-}
 .public-welcome h1 {
   font-size: clamp(34px, 4vw, 50px);
   margin-bottom: 14px;
 }
 .public-welcome p {
-  color: #efdfcd;
   margin: 0;
   font-size: 17px;
   max-width: 650px;
@@ -266,18 +276,12 @@ button {
 }
 .public-welcome .public-button {
   margin-top: 24px;
-  background: #d3ad63;
-  color: #271b12;
-}
-.public-site .public-welcome .public-button:hover {
-  background: #ecc781;
-  color: #271b12;
 }
 .public-welcome-art {
   align-self: stretch;
   min-height: 280px;
   overflow: hidden;
-  background: #2f3932;
+  background: #25272b;
 }
 .public-welcome-art img {
   display: block;
@@ -286,7 +290,6 @@ button {
   object-fit: cover;
   object-position: 75% center;
   image-rendering: pixelated;
-  filter: brightness(1.5) saturate(1.8);
 }
 .public-button {
   display: inline-flex;
@@ -296,6 +299,7 @@ button {
   min-height: 46px;
   padding: 14px 20px;
   border: 0;
+  border-radius: 6px;
   background: var(--red);
   color: #fff;
   font-size: 14px;
@@ -307,16 +311,28 @@ button {
   color: #fff;
 }
 .public-button.secondary {
-  background: #31342d;
+  background: #3b3e45;
   width: 100%;
 }
+.public-site .public-button.secondary:hover {
+  background: #4b4f57;
+}
+.public-site .public-button.beige {
+  background: var(--gold);
+  color: #25211a;
+}
+.public-site .public-button.beige:hover {
+  background: #e7d7b8;
+  color: #25211a;
+}
 .public-back {
-  color: var(--gold);
+  color: #f2f3f5;
   font-size: 13px;
 }
 .public-server {
-  background: #222321;
+  background: var(--panel);
   min-width: 0;
+  overflow: hidden;
 }
 .public-server-art {
   display: block;
@@ -331,9 +347,6 @@ button {
 .public-server-body {
   padding: 28px;
 }
-.public-server-body h2 a {
-  color: #e6dac0;
-}
 .public-server-body p {
   font-size: 16px;
   margin-bottom: 18px;
@@ -342,7 +355,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 20px;
-  color: #9faaa0;
+  color: var(--muted);
   font-size: 13px;
   padding-bottom: 20px;
 }
@@ -361,10 +374,11 @@ button {
 .public-server-actions .public-address {
   flex-basis: 100%;
   padding: 16px 18px;
-  background: #191c17;
+  background: #202226;
+  border-radius: 6px;
 }
 .public-panel {
-  background: #242620;
+  background: var(--panel);
   padding: 32px;
   margin-bottom: 24px;
 }
@@ -372,7 +386,7 @@ button {
   margin-bottom: 0;
 }
 .public-panel a {
-  color: var(--gold);
+  color: #f2f3f5;
 }
 .public-panel .public-button {
   color: #fff;
@@ -384,19 +398,9 @@ button {
   align-items: start;
 }
 .public-announcements > h2 {
-  color: #e6c77f;
   margin-bottom: 22px;
 }
-.public-news-empty,
-.public-announcement {
-  background: #243a32;
-}
-.public-news-empty p,
-.public-announcement p {
-  color: #d9e4d7;
-}
 .public-news-empty a {
-  color: #f0d29a;
   font-weight: 700;
 }
 .public-news-empty {
@@ -404,20 +408,12 @@ button {
 }
 .public-home-help {
   padding: 28px;
-  background: #453827;
-}
-.public-home-help h2 {
-  color: #f4d28b;
-}
-.public-home-help .public-eyebrow {
-  color: #d9b67a;
+  background: var(--panel);
 }
 .public-home-help p {
-  color: #e0d4bc;
   font-size: 15px;
 }
 .public-home-help > a {
-  color: #ffe1a6;
   font-weight: 700;
   font-size: 14px;
 }
@@ -427,7 +423,7 @@ button {
     bold 24px Georgia,
     "Times New Roman",
     serif;
-  color: #f0d29a;
+  color: var(--heading-red);
 }
 .public-announcement p {
   white-space: pre-line;
@@ -460,7 +456,7 @@ button {
 .public-application ul,
 .public-help-page ul {
   padding-left: 22px;
-  color: #c4c1b7;
+  color: #f2f3f5;
   line-height: 1.65;
 }
 .public-application li + li,
@@ -476,8 +472,15 @@ button {
 .public-help-page {
   overflow-wrap: anywhere;
 }
-.public-help-page .public-page-title .public-button {
+.public-help-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
   margin-top: 24px;
+}
+.public-help-actions .public-button.secondary {
+  width: auto;
 }
 .public-help-grid {
   display: grid;
@@ -510,7 +513,9 @@ button {
 .public-detail-art {
   width: 100%;
   height: 300px;
-  background: #222321;
+  background: #25272b;
+  overflow: hidden;
+  margin-bottom: 24px;
 }
 .public-detail-art img {
   width: 100%;
@@ -519,7 +524,7 @@ button {
   display: block;
 }
 .public-server-art {
-  background: #1e221c;
+  background: #25272b;
 }
 .public-server-art .public-pack-logo,
 .public-detail-art .public-pack-logo {
@@ -536,7 +541,7 @@ button {
   padding: 12px 0;
 }
 .public-detail-grid dt {
-  color: #a2a498;
+  color: var(--muted);
   font-size: 12px;
   margin-bottom: 6px;
 }
@@ -556,13 +561,22 @@ button {
 }
 .public-rules-nav {
   display: grid;
-  background: #222321;
+  background: var(--panel);
   padding: 8px;
   gap: 4px;
 }
 .public-rules-nav a {
   padding: 16px;
   font-size: 15px;
+  border-radius: 6px;
+}
+.public-welcome,
+.public-server,
+.public-panel,
+.public-home-help,
+.public-detail-art,
+.public-rules-nav {
+  border-radius: var(--radius);
 }
 .public-rules-nav a[aria-current="page"] {
   background: var(--red);
@@ -582,16 +596,16 @@ button {
   width: 100%;
   margin: 0;
   padding: 32px max(20px, calc((100% - 1140px) / 2));
-  background: #131611;
+  background: #17181b;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  color: #a5a69b;
+  color: var(--muted);
   font-size: 12px;
 }
 .public-footer strong {
-  color: #d3c6a8;
+  color: var(--heading-red);
   font-family: Georgia, serif;
   font-size: 18px;
 }
@@ -655,9 +669,10 @@ button {
   .public-menu {
     display: block;
     border: 0;
-    background: #313831;
+    background: #3b3e45;
     color: #fff;
     padding: 10px 14px;
+    border-radius: 6px;
   }
   .public-nav #public-links {
     display: none;
