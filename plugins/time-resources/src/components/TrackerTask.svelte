@@ -48,8 +48,8 @@
 
 <style lang="scss">
   .tracker-task {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--spacing-1);
     padding: var(--spacing-2);
@@ -67,8 +67,8 @@
   .task-link {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: var(--spacing-2);
-    flex: 1 1 14rem;
     min-width: 0;
     text-align: left;
   }
@@ -85,6 +85,6 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-1);
-    margin-left: auto;
+    justify-self: end;
   }
 </style>
