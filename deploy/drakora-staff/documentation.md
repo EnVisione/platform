@@ -144,6 +144,8 @@ The forum tag `In Progress` maps to Huly In Progress, `Complete` to Completed, a
 
 ## Backups and recovery
 
+See [Discord honeypot](#discord-honeypot) for its moderation checkpoints and retention rules.
+
 Back up the private configuration, SQLite database, and `oidc-jwks.json` together using a consistent SQLite backup or a stopped service. The database key is required to recover encrypted records. Keep backups encrypted or access-restricted and outside Git. Back up Huly's databases and object storage using its deployment procedures as well; a source fork is not a data backup.
 
 Retain the previous staff and Huly front image identifiers before deployment. To roll back, restore those images and their matching source and configuration. Restoring an older meeting database can disagree with current Discord permissions, so inspect and reconcile managed rooms before reopening Office access.
@@ -337,3 +339,27 @@ Add the existing `partners@drakora.org` Proton address to `mail.identities` with
 Partnership communication uses the applicant’s selected email or verified Discord account. Discord requires joining the main server, connecting the account and confirming that bot direct messages are allowed. A blocked DM falls back to the supplied email and the staff view shows that fallback. Saved outgoing messages, claim updates and closure notices use a durable contact outbox. Internal resolution notes, commands and proof stay in the staff record. DM sends split long text and recover acknowledged parts after interrupted responses. Email sends preserve a deterministic message reference and stop automatic resends when SMTP acceptance is uncertain; the dashboard displays the delivery issue so staff can reconcile it in the inbox before sending again.
 
 Replies to partnership emails are matched through saved Message-ID references and the original contact address. Unmatched or differently addressed messages remain in the mailbox. Incoming bot DMs are accepted only from the verified owner of one active partnership request. Email and DM replies enter the same staff conversation with duplicate prevention. Inbox and DM history recovery poll every thirty seconds; outgoing work starts immediately and pending deliveries retry with bounded backoff. Text and staff resolution history remain in the ticket database, while imported attachments use category-restricted Discord storage and the existing thirty-day retention. The shared mailbox itself does not copy unrelated email into the ticket database.
+
+## Discord honeypot
+
+Create a separate community text channel with `do-not-chat` or `honeypot` in its name. Add its exact identifiers to private configuration:
+
+```json
+{
+  "honeypot": {
+    "enabled": true,
+    "guildId": "COMMUNITY_GUILD_ID",
+    "channelId": "HONEYPOT_CHANNEL_ID"
+  }
+}
+```
+
+Office and the community guild in `roleSync` must be configured. The bot needs Moderate Members, Ban Members, View Channel, Read Message History, Send Messages, Embed Links and Manage Messages. It also needs Manage Channels in the staff guild to create a private `honeypot-alerts` channel. Keep its highest role above the ordinary members it must moderate. Missing permissions or a missing warning panel pause automatic moderation. The service only observes its configured channel; it never scans old channel history for violations or edits another bot's warning. Disable any other bot's trap before reusing an existing channel.
+
+The bot posts one pinned warning with a caught counter. The first ordinary member post receives a 24 hour timeout. A repeat after that action, within 365 days, receives a permanent ban. Duplicate events and delayed messages from the initial burst do not escalate the first action. Bot messages, webhooks, Discord system messages, the server owner, configured staff ranks and members with administrative or moderation permissions are exempt. Member roles, bot hierarchy and moderation permissions are checked again immediately before acting. Moderation failures are recorded without counting a successful catch. Bans do not delete unrelated message history. The triggering trap message is removed separately when possible.
+
+`/honeypot status`, `/honeypot logs`, `/honeypot pause`, `/honeypot resume` and `/honeypot reset member confirm` return private replies. Discord restricts the command to Manage Server permission; the service additionally checks current staff guild membership, Dashboard access and a Manager or Founder rank. Reset requires explicit confirmation and clears only the stored repeat marker. Existing timeouts or bans require a separate Discord review. Pause persists through restart, discards unsent queued actions and permits an action already sent to Discord to finish. No additional messages are moderated until resume passes the setup checks.
+
+Counters are anonymous aggregates. Encrypted audit entries contain identifiers, timestamps and action outcomes, never message text or attachments, and expire after 90 days. Private Discord alerts are removed after 90 days; failed deletion is retried while keeping only the necessary delivery reference. Repeat markers use keyed subject hashes and expire 365 days after a successful action. Pending work and duplicate detection expire, and timeout or ban requests retain their original intent across a short restart. A permanent Discord ban remains until explicitly lifted, independently of the local marker's expiry. Discord audit records and backups follow their separate operator and provider policies.
+
+Before inviting normal users to the replacement channel, verify the pinned warning, private alert access, `/honeypot status` and the bot's hierarchy. Verify real moderation only with an ordinary consenting test account; owner or staff messages intentionally cannot prove the timeout path.

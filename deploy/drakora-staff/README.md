@@ -4,6 +4,8 @@ A React staff portal and Discord identity provider for Huly 0.7.426. The Dashboa
 
 The Discord service supplies staff ranks, activity, role synchronization and notifications. Office and its Discord controls are no longer exposed in the dashboard; existing Discord channels and stored records are preserved.
 
+An optional Discord honeypot applies a 24 hour timeout for the first post in a clearly marked spam trap and a permanent ban for a repeat within 365 days. Its pinned warning shows a caught counter. Private moderation alerts and Manager or Founder commands provide status, logs, pause, resume and reviewed marker resets. See [honeypot configuration](documentation.md#discord-honeypot).
+
 The dashboard places the Drakora logo beside the staff name in its sidebar heading, with the same branding above navigation on mobile. There is no separate Discord server rail.
 
 With `tickets` configured, players open private support tickets at `/help/new` or with `/ticket` in the community Discord. Both entry points collect the support category, Minecraft username, affected server or service, and a detailed description before opening a ticket. The website verifies Discord identity without creating another account. Staff use Tickets to claim and reply, then record the work, commands and optional proof when resolving the ticket. Live web updates and a persistent Discord delivery queue keep both conversations connected. Managers and Founders alone can review staff reports.

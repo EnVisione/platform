@@ -51,6 +51,7 @@ import { partnershipContact } from "./partnership-contact.js";
 import { ticketMail } from "./ticket-mail.js";
 import { ticketNotices } from "./ticket-notices.js";
 import { ticketRouter } from "./ticket-routes.js";
+import { discordHoneypot } from "./honeypot-discord.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -134,6 +135,9 @@ async function workspaceConfig() {
 }
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
+  : undefined;
+const honeypot = config.honeypot
+  ? discordHoneypot(config, store, office.gateway, rolePolicy)
   : undefined;
 const ticketTransport = tickets
   ? ticketDiscord(config, tickets, office.gateway, rolePolicy)
@@ -1560,6 +1564,7 @@ async function stop() {
   await ticketStaffNotices?.close();
   await tickets?.stop();
   await ticketTransport?.close();
+  await honeypot?.close();
   await office?.close();
   await mail?.close();
   for (const socket of sockets) socket.destroy();

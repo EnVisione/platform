@@ -399,5 +399,20 @@ export function validateConfig(config) {
         "Configure a separate ticket database key, community guild, archive category, optional staff notice channel and disabled Minecraft ticket integration",
       );
   }
+  if (config.honeypot !== undefined) {
+    const settings = config.honeypot;
+    if (
+      !config.office ||
+      !settings ||
+      typeof settings !== "object" ||
+      Array.isArray(settings) ||
+      typeof settings.enabled !== "boolean" ||
+      ![settings.guildId, settings.channelId].every(snowflake) ||
+      settings.guildId !== config.roleSync?.guildId
+    )
+      throw new Error(
+        "Configure the community honeypot channel and explicit enabled flag with Office enabled",
+      );
+  }
   return config;
 }
