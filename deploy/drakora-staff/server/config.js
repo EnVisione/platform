@@ -388,13 +388,15 @@ export function validateConfig(config) {
       !snowflake(settings.guildId) ||
       settings.guildId !== config.roleSync.guildId ||
       !snowflake(settings.archiveCategoryId) ||
+      (settings.staffChannelId !== undefined &&
+        !snowflake(settings.staffChannelId)) ||
       Buffer.from(settings.databaseKey ?? "", "base64").length !== 32 ||
       settings.minecraftEnabled !== false ||
       settings.databaseKey === config.databaseKey ||
       settings.databaseKey === config.applications.databaseKey
     )
       throw new Error(
-        "Configure a separate ticket database key, community guild, archive category and disabled Minecraft ticket integration",
+        "Configure a separate ticket database key, community guild, archive category, optional staff notice channel and disabled Minecraft ticket integration",
       );
   }
   return config;

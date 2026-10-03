@@ -48,6 +48,7 @@ import { publicWebsiteRouter, websiteEditorRouter } from "./website-routes.js";
 import { ticketService } from "./tickets.js";
 import { ticketDiscord } from "./ticket-discord.js";
 import { ticketMail } from "./ticket-mail.js";
+import { ticketNotices } from "./ticket-notices.js";
 import { ticketRouter } from "./ticket-routes.js";
 
 const config = validateConfig(
@@ -135,6 +136,9 @@ const office = config.office
   : undefined;
 const ticketTransport = tickets
   ? ticketDiscord(config, tickets, office.gateway, rolePolicy)
+  : undefined;
+const ticketStaffNotices = tickets
+  ? ticketNotices(config, tickets, ticketTransport)
   : undefined;
 office?.onAccessChanged((packet) => {
   const access = discord.observe(packet);
@@ -1538,6 +1542,7 @@ todoSync?.start();
 applications?.start();
 tickets?.start();
 ticketEmails?.start();
+ticketStaffNotices?.start();
 async function stop() {
   clearInterval(sweep);
   clearInterval(assignmentTimer);
@@ -1545,6 +1550,7 @@ async function stop() {
   await todoSync?.close();
   await applications?.close();
   await ticketEmails?.close();
+  await ticketStaffNotices?.close();
   await tickets?.stop();
   await ticketTransport?.close();
   await office?.close();

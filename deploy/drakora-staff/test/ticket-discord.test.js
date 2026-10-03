@@ -9,9 +9,10 @@ import { ticketDiscord } from "../server/ticket-discord.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
-function setupDiscord(t) {
+function setupDiscord(t, notices = false) {
   const config = {
     ...fixture,
+    staffOrigin: "https://staff.example.invalid",
     applications: { publicOrigin: "https://example.invalid" },
     tickets: { guildId: "2", archiveCategoryId: "archive" },
     roleSync: {
@@ -111,6 +112,10 @@ function setupDiscord(t) {
           },
         };
         messages.set(message.id, message);
+        if (target.failAfterBotSend) {
+          target.failAfterBotSend = false;
+          throw new Error("Response lost after bot send");
+        }
         return message;
       },
       messages: {
@@ -180,7 +185,15 @@ function setupDiscord(t) {
     ]),
   );
   const staffGuild = {
+    channels: {
+      async fetch(id) {
+        return id === staffChannel?.id ? staffChannel : undefined;
+      },
+    },
     members: {
+      async fetchMe() {
+        return { id: client.user.id };
+      },
       async fetch(query) {
         if (!query) return staffMembers;
         const member = staffMembers.get(query.user);
@@ -190,6 +203,14 @@ function setupDiscord(t) {
       },
     },
   };
+  const staffChannel = notices
+    ? createChannel({ name: "staff-tickets", type: ChannelType.GuildText })
+    : undefined;
+  if (staffChannel) {
+    channels.delete(staffChannel.id);
+    staffChannel.guildId = config.guildId;
+    config.tickets.staffChannelId = staffChannel.id;
+  }
   client.guilds = {
     async fetch(id) {
       return id === "2" ? main : staffGuild;
@@ -209,12 +230,121 @@ function setupDiscord(t) {
     client,
     channels,
     staffMembers,
+    staffChannel,
     user,
     get sends() {
       return sends;
     },
   };
 }
+
+test("staff notices link both interfaces and recover an uncertain send across restart", async (t) => {
+  const app = setupDiscord(t, true);
+  const ticket = app.service.create(
+    { id: app.user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description:
+        "PRIVATE detailed issue with enough information for staff to help.",
+    },
+  );
+  await app.transport.create(ticket);
+  await app.service.pump();
+  const current = app.service.get(ticket.id);
+  const job = { event: "opened", channelId: app.staffChannel.id };
+  const key = `${ticket.id}:opened`;
+  app.staffChannel.failAfterBotSend = true;
+  await assert.rejects(
+    app.transport.notice(current, job, key),
+    /Response lost/,
+  );
+  const notice = app.staffChannel.savedMessages.first();
+  assert.match(notice.data.embeds[0].description, /Jojo/);
+  assert.equal(JSON.stringify(notice.data).includes("PRIVATE"), false);
+  assert.equal(
+    notice.data.components[0].components[0].url,
+    `https://discord.com/channels/2/${current.channelId}`,
+  );
+  assert.equal(
+    notice.data.components[0].components[1].url,
+    `https://staff.example.invalid/tickets/${ticket.id}`,
+  );
+  assert.deepEqual(notice.data.allowedMentions, { parse: [] });
+  assert.equal(notice.data.enforceNonce, true);
+  assert.equal(notice.data.nonce.length, 25);
+  for (let i = 0; i < 620; i++)
+    await app.staffChannel.send({ content: "Other staff chat" });
+  await app.transport.close();
+  const restarted = ticketDiscord(
+    app.config,
+    app.service,
+    app.client,
+    app.policy,
+  );
+  t.after(() => restarted.close());
+  assert.deepEqual(await restarted.notice(current, job, key), {
+    pending: true,
+  });
+  assert.equal((await restarted.notice(current, job, key)).id, notice.id);
+  assert.equal((await restarted.notice(current, job, key)).id, notice.id);
+  assert.equal(app.staffChannel.savedMessages.size, 621);
+  app.staffChannel.readable = false;
+  await assert.rejects(restarted.notice(current, job, key), /permissions/);
+  app.staffChannel.readable = true;
+  app.staffChannel.guildId = "2";
+  await assert.rejects(restarted.notice(current, job, key), /unavailable/);
+});
+
+test("restricted notices stay generic and a claim during delivery cancels the reminder", async (t) => {
+  const app = setupDiscord(t, true);
+  const ticket = app.service.create(
+    { id: app.user.id, name: "PrivatePlayer" },
+    {
+      requestId: randomUUID(),
+      ign: "SecretIgn",
+      type: "staff",
+      location: "PrivateLocation",
+      description:
+        "PRIVATE detailed issue with enough information for staff to help.",
+    },
+  );
+  await app.transport.create(ticket);
+  await app.service.pump();
+  const current = app.service.get(ticket.id);
+  await app.transport.notice(
+    current,
+    { event: "opened", channelId: app.staffChannel.id },
+    `${ticket.id}:opened`,
+  );
+  const data = JSON.stringify(app.staffChannel.savedMessages.first().data);
+  for (const text of [
+    "SecretIgn",
+    "PrivatePlayer",
+    "PrivateLocation",
+    "PRIVATE",
+  ])
+    assert.equal(data.includes(text), false);
+  const fetch = app.staffChannel.messages.fetch;
+  app.staffChannel.messages.fetch = async (options) => {
+    app.service.claim(
+      { id: "200", name: "Manager", roles: ["10", "28"] },
+      ticket.id,
+    );
+    return fetch(options);
+  };
+  assert.deepEqual(
+    await app.transport.notice(
+      current,
+      { event: "unclaimed", channelId: app.staffChannel.id },
+      `${ticket.id}:unclaimed`,
+    ),
+    { cancelled: true },
+  );
+  assert.equal(app.staffChannel.savedMessages.size, 1);
+});
 
 test("Discord transport creates private tickets, preserves webhook identity and recovers ambiguous sends", async (t) => {
   const context = setupDiscord(t);

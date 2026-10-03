@@ -291,6 +291,7 @@ Support is optional and uses the existing Discord bot connection. Configure it o
   "tickets": {
     "guildId": "COMMUNITY_GUILD_ID",
     "archiveCategoryId": "ARCHIVE_CATEGORY_ID",
+    "staffChannelId": "STAFF_TICKET_NOTICE_CHANNEL_ID",
     "databaseKey": "SEPARATE_32_BYTE_BASE64_KEY",
     "minecraftEnabled": false
   }
@@ -308,6 +309,8 @@ Ticket permissions in Roles separate viewing, replying, claiming, resolving and 
 The support portal reuses a valid staff sign-in for player identity. Ticket staff actions check the current staff-guild membership through the existing bot connection, avoiding repeated calls to Discord's low-volume user OAuth membership endpoint.
 
 Ticket conversations fill the available dashboard or browser width and height. Messages and player details scroll independently, with the reply box kept visible. On narrow screens, player details follow the conversation.
+
+The optional `tickets.staffChannelId` selects a text channel in the staff guild for ticket notices. Grant the bot View Channel, Send Messages, Embed Links and Read Message History there. Each new ticket posts links to its private Discord channel and staff panel once Discord channel creation succeeds. If it remains unclaimed for one hour after creation, one further notice is sent; claiming or closing cancels that reminder. Notices persist across restarts and retry independently of ticket replies, with at most twenty failed delivery attempts. Failed jobs remain saved and log a delivery error. Send checkpoints and history recovery prevent duplicate notices after an uncertain response. Staff-report notices reveal no player or report details, and links retain the ticket's normal permissions. Notices do not ping users or roles. Enabling notices applies to new tickets only.
 
 Tickets begin Waiting for staff and become Being helped when claimed. Claims cannot overwrite another staff member's claim. A player closure stops replies and leaves a staff resolution outstanding. Staff closure requires an explanation of the work and outcome, plus the commands used or None. Staff can paste or select proof attachments. Private resolution text, commands and proof never appear in the player transcript. Closed tickets disappear from the active list and remain in Logs. Players may rate the support once, from one to five, and request a downloadable HTML transcript. Discord transcript requests use a DM, with a private web download if DMs are closed. Staff can regenerate either transcript type.
 

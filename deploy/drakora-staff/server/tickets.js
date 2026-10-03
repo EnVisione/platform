@@ -275,6 +275,15 @@ export function ticketService(
         throw new AuthError("ticket_ip_limit", 409);
       audit(ticket, user, "opened", "Ticket opened");
       queue(ticket, "create");
+      if (config.tickets.staffChannelId)
+        for (const event of ["opened", "unclaimed"])
+          put("ticket-notice-outbox", `${ticket.id}:${event}`, {
+            ticketId: ticket.id,
+            event,
+            channelId: config.tickets.staffChannelId,
+            after: ticket.createdAt + (event === "unclaimed" ? 3600000 : 0),
+            attempts: 0,
+          });
       put("ticket-request", `${user.id}:${requestId}`, { id: ticket.id });
     });
     announce(ticket);

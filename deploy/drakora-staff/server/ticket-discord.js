@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ChannelType,
   PermissionFlagsBits as P,
@@ -287,6 +287,126 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     };
   }
   const transport = {
+    async notice(ticket, job, key) {
+      if (!client.isReady()) throw new Error("Discord is not ready");
+      const staffGuild = await client.guilds.fetch(config.guildId);
+      const target = await staffGuild.channels.fetch(job.channelId);
+      if (
+        target?.guildId !== config.guildId ||
+        target.type !== ChannelType.GuildText
+      )
+        throw new Error("Ticket staff notice channel is unavailable");
+      const permissions = target.permissionsFor(
+        await staffGuild.members.fetchMe(),
+      );
+      if (
+        !permissions?.has([
+          P.ViewChannel,
+          P.SendMessages,
+          P.EmbedLinks,
+          P.ReadMessageHistory,
+        ])
+      )
+        throw new Error("Ticket staff notice channel permissions are missing");
+      const footer = `Ticket ${ticket.id} · ${job.event}`;
+      const put = (value) =>
+        service.store.set(
+          "ticket-notice-send",
+          key,
+          value,
+          Number.MAX_SAFE_INTEGER,
+        );
+      let intent = service.store.get("ticket-notice-send", key);
+      function acknowledge(sent) {
+        put({ ...intent, acknowledgedId: sent.id });
+        return { id: sent.id };
+      }
+      if (intent?.acknowledgedId) return { id: intent.acknowledgedId };
+      if (intent) {
+        // Recover a send whose response was lost, including after a restart.
+        for (let page = 0; page < 5; page++) {
+          const recent = await target.messages.fetch({
+            limit: 100,
+            ...(intent.before ? { before: intent.before } : {}),
+          });
+          const existing = recent.find(
+            (message) =>
+              message.author.id === client.user.id &&
+              message.embeds?.some((embed) => embed.footer?.text === footer),
+          );
+          if (existing) return acknowledge(existing);
+          const oldest = [...recent.keys()].sort((a, b) =>
+            BigInt(a) < BigInt(b) ? -1 : 1,
+          )[0];
+          if (recent.size < 100 || BigInt(oldest) <= BigInt(intent.after)) {
+            delete intent.before;
+            put(intent);
+            break;
+          }
+          intent.before = oldest;
+          put(intent);
+          if (page === 4) return { pending: true };
+        }
+      } else {
+        const latest = await target.messages.fetch({ limit: 1 });
+        intent = { channelId: target.id, after: latest.first()?.id || "0" };
+        put(intent);
+      }
+      const current = service.get(ticket.id);
+      if (
+        ["closed", "awaiting_resolution"].includes(current.status) ||
+        (job.event === "unclaimed" &&
+          (current.status !== "pending" || current.claimedBy))
+      )
+        return { cancelled: true };
+      const restricted = ticket.type === "staff";
+      const sent = await target.send({
+        embeds: [
+          {
+            title:
+              job.event === "opened"
+                ? "New support ticket"
+                : "Ticket still waiting for staff",
+            description: restricted
+              ? job.event === "opened"
+                ? "A restricted ticket has opened. Authorized staff can review it."
+                : "A restricted ticket has been unclaimed for at least one hour. Authorized staff can review it."
+              : job.event === "opened"
+                ? `**${ticket.ign}** opened a ${ticketTypes.find((type) => type.id === ticket.type).name.toLowerCase()} ticket.`
+                : `**${ticket.ign}** has been waiting for at least one hour. This ticket still needs a staff member.`,
+            color: 0xb92323,
+            footer: { text: footer },
+            timestamp: new Date(ticket.createdAt).toISOString(),
+          },
+        ],
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 5,
+                label: "Open Discord ticket",
+                url: `https://discord.com/channels/${settings.guildId}/${ticket.channelId}`,
+              },
+              {
+                type: 2,
+                style: 5,
+                label: "Open staff panel",
+                url: `${config.staffOrigin}/tickets/${ticket.id}`,
+              },
+            ],
+          },
+        ],
+        allowedMentions: { parse: [] },
+        nonce: createHash("sha256")
+          .update(`${job.channelId}:${key}`)
+          .digest("hex")
+          .slice(0, 25),
+        enforceNonce: true,
+      });
+      return acknowledge(sent);
+    },
     async removeClosed(ticket) {
       webhooks.delete(ticket.channelId);
       try {
