@@ -264,7 +264,7 @@ The staff database retains encrypted `role-permissions` revisions, `role-assignm
 
 ## Public website content
 
-`src/public.css` places the header scenery in a separate decorative layer. Blur applies only to that background, with a dark overlay fading into the page background. Navigation, branding and network status remain in the foreground. The decorative layers ignore pointer events and are clipped to the header.
+`src/public.css` places the header scenery in a separate decorative layer. Blur applies only to that background, with a continuous dark overlay fading gently into the page background. Navigation, pixel branding and network status remain in the foreground. The decorative layers ignore pointer events and are clipped to the header. Panels and buttons use flat fills without decorative borders or gradients. Keyboard focus uses an underline instead of an outline.
 
 `public.html` and `src/public-main.jsx` provide a separate public entry point. `server/website-routes.js` serves its pages and `/site/api/content` and `/site/api/status` on the configured public application host before the application router. Other paths retain the public router's 404 boundary. Public browsing does not create a session. `/apply` serves the public staff information page. `/apply/start` retains the independent application session and identity flow; Discord completion and errors return directly there. Legacy `/apply?error=...` callbacks redirect to the form with the error preserved. Without website configuration, `/apply` remains a form entry point. The staff entry point and existing Huly integration are unchanged.
 

@@ -194,7 +194,7 @@ Permission revisions and role-change requests are recorded in encrypted storage.
 
 The optional `website` settings serve the public Home, Servers, Rules, Apply, Help and server detail pages on `applications.publicOrigin`. The navigation links Store to `https://store.drakora.org` and Apply to a staff information page. Its **Continue application** button opens the existing form at `/apply/start`. The public website has no accounts or forums. Discord remains the community hub.
 
-Public pages share a blurred, darkened medieval backdrop that fades into the page. Navigation, branding and status links stay sharp and readable above the scenery.
+Public pages use square, flat panels and solid buttons without decorative borders. A blurred, darkened medieval backdrop fades gently into the page. Navigation, pixel branding and status links stay sharp and readable above the scenery. Keyboard focus uses an underline instead of an outline.
 
 Set `website.discordGuildId` to the main community guild and `website.discordInvite` to its permanent HTTPS invite. The bot must belong to that guild. The header shows Discord's approximate online member count, refreshed once a minute. Temporary failures retain a recent count with a last-check label; unavailable counts display the community link without a number. The network address is `play.drakora.org`. Public player counts remain 0 until Minecraft integration is connected.
 
