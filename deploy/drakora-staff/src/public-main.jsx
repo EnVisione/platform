@@ -12,6 +12,7 @@ import prominence from "./assets/prominence-logo.png";
 import restlessHorizons from "./assets/restless-horizons-logo.png";
 import "./public.css";
 import { PublicTickets } from "./tickets.jsx";
+import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 
 const artwork = {
   castle,
@@ -41,10 +42,22 @@ function CopyAddress({ address = "play.drakora.org", large = false }) {
             setFailed(true);
           }
         }}
-        aria-label={`Copy ${address}`}
+        aria-label={`${large ? "0 players online. " : ""}Copy ${address}`}
       >
-        <strong>{address}</strong>
-        <span>{copied ? "Copied!" : "Click to copy IP"}</span>
+        <span className="public-address-copy">
+          {large && <span className="public-eyebrow">0 PLAYERS ONLINE</span>}
+          <strong>{address}</strong>
+          <span className="public-address-hint">
+            {copied ? "Copied!" : "Click to copy IP"}
+          </span>
+        </span>
+        {large ? (
+          <span className="public-status-icon play">
+            <PublicIcon name="play" />
+          </span>
+        ) : (
+          <PublicIcon name={copied ? "check" : "copy"} />
+        )}
       </button>
       {failed && <p role="status">Copy this address: {address}</p>}
     </div>
@@ -107,17 +120,19 @@ function ServerCard({ server }) {
         <span className="public-eyebrow">
           {server.worlds || "DRAKORA NETWORK"}
         </span>
-        <h2>
+        <PublicHeading icon="servers">
           <a href={`/servers/${server.slug}`}>{server.name}</a>
-        </h2>
+        </PublicHeading>
         <p>{server.summary}</p>
         <div className="public-server-meta">
-          <span>0 players online</span>
+          <span className="public-icon-label">
+            <PublicIcon name="users" />0 players online
+          </span>
           {server.packVersion && <span>Pack {server.packVersion}</span>}
         </div>
         <div className="public-server-actions">
           <a className="public-button beige" href={`/servers/${server.slug}`}>
-            View server <span aria-hidden="true">→</span>
+            View server <PublicIcon name="arrow" />
           </a>
           {server.downloadUrl && (
             <a
@@ -126,7 +141,7 @@ function ServerCard({ server }) {
               target="_blank"
               rel="noopener noreferrer"
             >
-              Download pack <span aria-hidden="true">↗</span>
+              Download pack <PublicIcon name="download" />
             </a>
           )}
           <CopyAddress address={server.address} />
@@ -143,10 +158,12 @@ function HomePage({ home, discordInvite }) {
           <span className="public-eyebrow">
             YOUR NEXT ADVENTURE STARTS HERE
           </span>
-          <h1>{home.title}</h1>
+          <PublicHeading as="h1" icon="crest">
+            {home.title}
+          </PublicHeading>
           <p>{home.introduction}</p>
           <a href="/servers" className="public-button beige">
-            View servers <span aria-hidden="true">→</span>
+            View servers <PublicIcon name="arrow" />
           </a>
         </div>
         <div className="public-welcome-art" aria-hidden="true">
@@ -158,7 +175,9 @@ function HomePage({ home, discordInvite }) {
           className="public-announcements"
           aria-labelledby="announcements-title"
         >
-          <h2 id="announcements-title">{home.announcementsTitle}</h2>
+          <PublicHeading icon="news" id="announcements-title">
+            {home.announcementsTitle}
+          </PublicHeading>
           {home.announcements.length ? (
             home.announcements.map((entry) => (
               <article
@@ -177,7 +196,9 @@ function HomePage({ home, discordInvite }) {
                     )}
                   </time>
                 )}
-                <h3>{entry.title}</h3>
+                <PublicHeading as="h3" icon="news">
+                  {entry.title}
+                </PublicHeading>
                 <Paragraphs text={entry.body} />
               </article>
             ))
@@ -185,17 +206,18 @@ function HomePage({ home, discordInvite }) {
             <div className="public-panel public-news-empty">
               <p>{home.emptyMessage}</p>
               <a href={discordInvite}>
-                Catch up in Discord <span aria-hidden="true">↗</span>
+                <PublicIcon name="discord" /> Catch up in Discord
+                <PublicIcon name="external" />
               </a>
             </div>
           )}
         </section>
         <aside className="public-home-help">
           <span className="public-eyebrow">WE ARE HERE TO HELP</span>
-          <h2>Need a hand?</h2>
+          <PublicHeading icon="help">Need a hand?</PublicHeading>
           <p>New to the network, stuck in a world or need to reach staff?</p>
           <a href="/help">
-            Find support <span aria-hidden="true">→</span>
+            Find support <PublicIcon name="arrow" />
           </a>
         </aside>
       </div>
@@ -207,24 +229,31 @@ function ApplicationInformation({ apply }) {
     <div className="public-application">
       <div className="public-page-title">
         <span className="public-eyebrow">JOIN THE TEAM</span>
-        <h1>{apply.title}</h1>
+        <PublicHeading as="h1" icon="apply">
+          {apply.title}
+        </PublicHeading>
         <p>{apply.introduction}</p>
       </div>
       <article className="public-panel">
         {applicationSections.map(({ id, name, list }) => (
           <section key={id} aria-labelledby={`apply-${id}`}>
-            <h2 id={`apply-${id}`}>{name}</h2>
+            <PublicHeading
+              icon={id === "role" || id === "note" ? "users" : "apply"}
+              id={`apply-${id}`}
+            >
+              {name}
+            </PublicHeading>
             <SectionContent text={apply[id]} list={list} />
           </section>
         ))}
         <div className="public-application-actions">
-          <h2>Ready to apply?</h2>
+          <PublicHeading icon="apply">Ready to apply?</PublicHeading>
           <p>
             Take your time. You can save your progress and return in this
             browser.
           </p>
           <a href="/apply/start" className="public-button">
-            Continue application <span aria-hidden="true">→</span>
+            Continue application <PublicIcon name="arrow" />
           </a>
         </div>
       </article>
@@ -236,14 +265,18 @@ function HelpPage({ help, discordInvite }) {
     <div className="public-help-page">
       <div className="public-page-title">
         <span className="public-eyebrow">DRAKORA SUPPORT</span>
-        <h1>{help.title}</h1>
+        <PublicHeading as="h1" icon="help">
+          {help.title}
+        </PublicHeading>
         <p>{help.introduction}</p>
         <div className="public-help-actions">
           <a className="public-button" href="/help/new">
-            Open a ticket <span aria-hidden="true">→</span>
+            <PublicIcon name="ticket" /> Open a ticket{" "}
+            <PublicIcon name="arrow" />
           </a>
           <a className="public-button secondary" href={discordInvite}>
-            Open Discord <span aria-hidden="true">↗</span>
+            <PublicIcon name="discord" /> Open Discord{" "}
+            <PublicIcon name="external" />
           </a>
         </div>
       </div>
@@ -254,11 +287,22 @@ function HelpPage({ help, discordInvite }) {
             key={id}
             aria-labelledby={`help-${id}`}
           >
-            <h2 id={`help-${id}`}>{name}</h2>
+            <PublicHeading
+              icon={
+                id === "tickets"
+                  ? "ticket"
+                  : id === "joining"
+                    ? "servers"
+                    : "info"
+              }
+              id={`help-${id}`}
+            >
+              {name}
+            </PublicHeading>
             <SectionContent text={help[id]} list={list} />
             {id === "joining" && (
               <a href="/servers">
-                Find your server <span aria-hidden="true">→</span>
+                Find your server <PublicIcon name="arrow" />
               </a>
             )}
           </section>
@@ -352,17 +396,17 @@ function PublicSite() {
             aria-controls="public-links"
             onClick={() => setMenu(!menu)}
           >
-            Menu <span aria-hidden="true">☰</span>
+            <PublicIcon name="menu" /> Menu
           </button>
           <div id="public-links" className={menu ? "open" : ""}>
             {[
-              ["Home", "/"],
-              ["Servers", "/servers"],
-              ["Store", storeUrl],
-              ["Rules", "/rules"],
-              ["Apply", "/apply"],
-              ["Need help?", "/help"],
-            ].map(([name, href]) => (
+              ["Home", "/", "home"],
+              ["Servers", "/servers", "servers"],
+              ["Store", storeUrl, "store"],
+              ["Rules", "/rules", "rules"],
+              ["Apply", "/apply", "apply"],
+              ["Need help?", "/help", "help"],
+            ].map(([name, href, icon]) => (
               <a
                 key={name}
                 href={href}
@@ -377,6 +421,7 @@ function PublicSite() {
                     : undefined
                 }
               >
+                <PublicIcon name={icon} />
                 {name}
               </a>
             ))}
@@ -384,7 +429,6 @@ function PublicSite() {
         </nav>
         <div className="public-masthead">
           <div className="public-join">
-            <span className="public-eyebrow">0 PLAYERS ONLINE</span>
             <CopyAddress large />
           </div>
           <a href="/" className="public-brand" aria-label="Drakora Home">
@@ -397,22 +441,29 @@ function PublicSite() {
             href={content?.discordInvite || "/discord"}
             className="public-discord"
           >
-            <span className="public-eyebrow">
-              {status?.discord.active == null
-                ? "OUR COMMUNITY"
-                : `${status.discord.active} MEMBERS ONLINE${status.discord.stale ? " · LAST CHECK" : ""}`}
+            <span className="public-status-icon">
+              <PublicIcon name="discord" />
             </span>
-            <strong>
-              Join our Discord <span aria-hidden="true">↗</span>
-            </strong>
-            <span>Chat, updates & support</span>
+            <span className="public-status-copy">
+              <span className="public-eyebrow">
+                {status?.discord.active == null
+                  ? "OUR COMMUNITY"
+                  : `${status.discord.active} MEMBERS ONLINE${status.discord.stale ? " · LAST CHECK" : ""}`}
+              </span>
+              <strong>
+                Join our Discord <PublicIcon name="external" />
+              </strong>
+              <span>Chat, updates & support</span>
+            </span>
           </a>
         </div>
       </header>
       <main id="main" className="public-content">
         {error ? (
           <section className="public-panel">
-            <h1>We couldn’t load this page.</h1>
+            <PublicHeading as="h1" icon="info">
+              We couldn’t load this page.
+            </PublicHeading>
             <p>Please try again in a moment.</p>
             <button className="public-button" onClick={() => location.reload()}>
               Try again
@@ -432,7 +483,9 @@ function PublicSite() {
           <>
             <div className="public-page-title">
               <span className="public-eyebrow">EXPLORE DRAKORA</span>
-              <h1>Our servers</h1>
+              <PublicHeading as="h1" icon="servers">
+                Our servers
+              </PublicHeading>
               <p>Pick your adventure. Bring your friends.</p>
             </div>
             <div className="public-server-grid">
@@ -449,11 +502,13 @@ function PublicSite() {
         ) : server ? (
           <>
             <a className="public-back" href="/servers">
-              ← All servers
+              <PublicIcon name="back" /> All servers
             </a>
             <div className="public-page-title">
               <span className="public-eyebrow">{server.worlds}</span>
-              <h1>{server.name}</h1>
+              <PublicHeading as="h1" icon="servers">
+                {server.name}
+              </PublicHeading>
               <p>{server.summary}</p>
             </div>
             <div className="public-detail-grid">
@@ -462,18 +517,20 @@ function PublicSite() {
                   <ServerArtwork server={server} />
                 </div>
                 <section className="public-panel">
-                  <h2>About the server</h2>
+                  <PublicHeading icon="info">About the server</PublicHeading>
                   <Paragraphs text={server.description} />
                 </section>
                 <section className="public-panel">
-                  <h2>How to join</h2>
+                  <PublicHeading icon="play">How to join</PublicHeading>
                   <Paragraphs text={server.joining} />
                 </section>
               </article>
               <aside>
                 <section className="public-panel">
-                  <h2>Play {server.name}</h2>
-                  <p className="public-player-count">0 players online</p>
+                  <PublicHeading icon="play">Play {server.name}</PublicHeading>
+                  <p className="public-player-count public-icon-label">
+                    <PublicIcon name="users" />0 players online
+                  </p>
                   <CopyAddress address={server.address} />
                   <dl>
                     {[
@@ -497,23 +554,26 @@ function PublicSite() {
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      Download pack ↗
+                      Download pack <PublicIcon name="download" />
                     </a>
                   )}
                 </section>
                 <section className="public-panel">
-                  <h2>Need a hand?</h2>
+                  <PublicHeading icon="help">Need a hand?</PublicHeading>
                   <p>
                     Find joining help or reach our staff through a Discord
                     ticket.
                   </p>
-                  <a href="/help">Find support →</a>
+                  <a href="/help">
+                    Find support <PublicIcon name="arrow" />
+                  </a>
                 </section>
                 <a
                   className="public-button secondary"
                   href={`/rules/${server.rules}`}
                 >
-                  Server rules →
+                  <PublicIcon name="rules" /> Server rules{" "}
+                  <PublicIcon name="arrow" />
                 </a>
               </aside>
             </div>
@@ -522,7 +582,9 @@ function PublicSite() {
           <>
             <div className="public-page-title">
               <span className="public-eyebrow">PLAY FAIR. FEEL AT HOME.</span>
-              <h1>Community rules</h1>
+              <PublicHeading as="h1" icon="rules">
+                Community rules
+              </PublicHeading>
               <p>Keep Drakora welcoming. Play fair and respect each other.</p>
             </div>
             <div className="public-rules-grid">
@@ -533,29 +595,43 @@ function PublicSite() {
                     href={`/rules/${item.id}`}
                     aria-current={section.id === item.id ? "page" : undefined}
                   >
+                    <PublicIcon
+                      name={
+                        item.id === "discord"
+                          ? "discord"
+                          : item.id === "home"
+                            ? "home"
+                            : "servers"
+                      }
+                    />
                     {item.name}
                   </a>
                 ))}
               </nav>
               <article className="public-panel public-rule-text">
-                <h2>
+                <PublicHeading icon="rules">
                   {section.id === "home"
                     ? "Universal rules"
                     : `${section.name} rules`}
-                </h2>
+                </PublicHeading>
                 <Paragraphs text={content.rules[section.id]} />
                 <p className="public-rule-help">
-                  Need help? <a href="/help">Find support →</a>
+                  Need help?{" "}
+                  <a href="/help">
+                    Find support <PublicIcon name="arrow" />
+                  </a>
                 </p>
               </article>
             </div>
           </>
         ) : (
           <section className="public-panel">
-            <h1>Page not found</h1>
+            <PublicHeading as="h1" icon="info">
+              Page not found
+            </PublicHeading>
             <p>This page is no longer available.</p>
             <a className="public-button" href="/">
-              Go home
+              <PublicIcon name="home" /> Go home
             </a>
           </section>
         )}
@@ -566,11 +642,21 @@ function PublicSite() {
           <p>Not affiliated with Mojang or Microsoft.</p>
         </div>
         <nav aria-label="Footer links">
-          <a href={content?.discordInvite || "/discord"}>Discord</a>
-          <a href="/rules">Rules</a>
-          <a href="/apply">Apply</a>
-          <a href={storeUrl}>Store</a>
-          <a href="/help">Need help?</a>
+          <a href={content?.discordInvite || "/discord"}>
+            <PublicIcon name="discord" /> Discord
+          </a>
+          <a href="/rules">
+            <PublicIcon name="rules" /> Rules
+          </a>
+          <a href="/apply">
+            <PublicIcon name="apply" /> Apply
+          </a>
+          <a href={storeUrl}>
+            <PublicIcon name="store" /> Store
+          </a>
+          <a href="/help">
+            <PublicIcon name="help" /> Need help?
+          </a>
         </nav>
         <small>© {new Date().getFullYear()} Drakora</small>
       </footer>
