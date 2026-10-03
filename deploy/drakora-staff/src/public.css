@@ -28,6 +28,8 @@ button {
   cursor: pointer;
 }
 .public-site {
+  position: relative;
+  isolation: isolate;
   --red: #a6382b;
   --heading-red: #ed746a;
   --gold: #d3bd91;
@@ -38,6 +40,100 @@ button {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+.public-fire {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.public-fire-drift {
+  width: 100%;
+  height: 100%;
+  transform: translate(var(--fire-x, 0px), var(--fire-y, 0px));
+  transition: transform 900ms ease-out;
+}
+.public-fire-ember {
+  position: absolute;
+  left: var(--ember-x);
+  top: 110%;
+  width: var(--ember-size);
+  height: var(--ember-size);
+  background: var(--ember-color);
+  opacity: 0;
+  animation: drakora-ember-rise var(--ember-duration) linear var(--ember-delay)
+    infinite;
+}
+.public-fire-flame {
+  position: absolute;
+  bottom: 12vh;
+  width: 72px;
+  height: 96px;
+  opacity: 0.16;
+  transform-origin: center bottom;
+  animation: drakora-flame-flicker 4s steps(4, end) infinite;
+}
+.public-fire-flame.flame-0 {
+  left: 24px;
+}
+.public-fire-flame.flame-1 {
+  left: 104px;
+  bottom: 8vh;
+  width: 48px;
+  height: 64px;
+  animation-delay: -1.5s;
+}
+.public-fire-flame.flame-2 {
+  right: 24px;
+  animation-delay: -2.5s;
+}
+.public-fire-flame.flame-3 {
+  right: 112px;
+  bottom: 9vh;
+  width: 48px;
+  height: 64px;
+  animation-delay: -0.5s;
+}
+.public-fire.is-paused .public-fire-ember,
+.public-fire.is-paused .public-fire-flame {
+  animation-play-state: paused;
+}
+.public-nav,
+.public-masthead,
+.public-content,
+.public-footer {
+  position: relative;
+  z-index: 1;
+}
+@keyframes drakora-ember-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  15% {
+    opacity: 0.24;
+  }
+  50% {
+    opacity: 0.18;
+    transform: translate(12px, -60vh);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-8px, -120vh);
+  }
+}
+@keyframes drakora-flame-flicker {
+  0%,
+  100% {
+    opacity: 0.12;
+    transform: scaleY(0.96);
+  }
+  50% {
+    opacity: 0.18;
+    transform: scaleY(1.04);
+  }
 }
 .public-icon {
   display: inline-block;
@@ -118,9 +214,7 @@ button {
 }
 .public-header {
   position: relative;
-  isolation: isolate;
   overflow: hidden;
-  background: #101010;
   padding-bottom: 36px;
 }
 .public-header::before,
@@ -744,6 +838,15 @@ button {
   }
 }
 @media (max-width: 700px) {
+  .public-fire-ember:nth-child(n + 13),
+  .public-fire-flame.flame-1,
+  .public-fire-flame.flame-3 {
+    display: none;
+  }
+  .public-fire-flame {
+    width: 36px;
+    height: 48px;
+  }
   .public-nav {
     padding: 16px;
     display: flex;
@@ -922,6 +1025,9 @@ button {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .public-fire {
+    display: none;
+  }
   *,
   *::before,
   *::after {

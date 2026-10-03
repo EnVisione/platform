@@ -13,6 +13,7 @@ import restlessHorizons from "./assets/restless-horizons-logo.png";
 import "./public.css";
 import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
+import { AmbientFire } from "./public-fire.jsx";
 
 const artwork = {
   castle,
@@ -382,6 +383,7 @@ function PublicSite() {
   }, [title]);
   return (
     <div className="public-site">
+      <AmbientFire />
       <a href="#main" className="public-skip">
         Skip to content
       </a>
