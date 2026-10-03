@@ -39,7 +39,7 @@
   gap: 12px;
   width: 100%;
   padding: 6px 8px 6px 18px;
-  border: 1px solid #41434a;
+  border: 0;
   border-radius: 12px;
   background: #383a40;
 }
@@ -66,7 +66,7 @@
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 0;
   flex: 1;
-  border: 1px solid #41434a;
+  border: 0;
   border-radius: 14px;
   overflow: hidden;
   background: #232428;
@@ -111,7 +111,7 @@
 .mail-page select,
 .mail-page textarea {
   width: 100%;
-  border: 1px solid #4e5058;
+  border: 0;
   border-radius: 7px;
   padding: 10px 12px;
   background: #1e1f22;
@@ -123,10 +123,21 @@
 .mail-page textarea::placeholder {
   color: #949ba4;
 }
-.mail-page textarea:focus-visible,
-.mail-page select:focus-visible {
-  outline: 2px solid #c1c7ff;
-  outline-offset: 3px;
+.mail-page :focus {
+  outline: none;
+}
+.mail-page button:focus-visible,
+.mail-page a:focus-visible,
+.mail-page summary:focus-visible {
+  filter: brightness(1.25);
+}
+.mail-page select {
+  background: #000;
+  color-scheme: dark;
+}
+.mail-page select option {
+  background: #000;
+  color: #f2f3f5;
 }
 .mail-folders {
   padding: 18px 12px;
@@ -494,7 +505,7 @@ button.mail-row-star:hover {
   align-items: center;
   padding: 12px;
   margin-top: 8px;
-  border: 1px solid #45474f;
+  border: 0;
   border-radius: 8px;
   background: #2b2d31;
   font-size: 13px;
@@ -516,12 +527,12 @@ button.mail-row-star:hover {
 }
 .mail-error {
   background: #493038;
-  border: 1px solid #a04e63;
+  border: 0;
   color: #ffbdc6;
 }
 .mail-success {
   background: #233e35;
-  border: 1px solid #3b8067;
+  border: 0;
   color: #a2ebcc;
 }
 .mail-compose-window {
@@ -546,7 +557,7 @@ button.mail-row-star:hover {
   display: flex;
   flex-direction: column;
   background: #282a30;
-  border: 1px solid #616cf18c;
+  border: 0;
   border-radius: 12px 12px 0 0;
   box-shadow: 0 12px 50px #0008;
   overflow: hidden;
@@ -582,8 +593,8 @@ button.mail-row-star:hover {
 .mail-page .mail-reply-mode {
   width: auto;
   color: #f0f1ff;
-  background: #363d61;
-  border: 1px solid #6975ac;
+  background: #000;
+  border: 0;
   padding: 4px 6px;
   font-size: 13px;
 }
@@ -654,6 +665,9 @@ button.mail-row-star:hover {
   padding: 8px 0;
   font-size: 13px;
   flex: 1;
+}
+.mail-page .mail-compose-line select {
+  background: #000;
 }
 .mail-compose-recipients {
   display: flex;
@@ -834,7 +848,7 @@ button.mail-row-star:hover {
   display: flex;
   align-items: center;
   background: #333954;
-  border: 1px solid #6674b4;
+  border: 0;
   border-radius: 10px 10px 0 0;
   box-shadow: 0 5px 30px #0007;
   padding-right: 6px;
@@ -876,14 +890,13 @@ button.mail-row-star:hover {
   font-weight: 700;
   color: #efca87;
   background: #4c3e25;
-  border: 1px solid #907a43;
+  border: 0;
   padding: 4px 9px;
   border-radius: 16px;
 }
 .mail-read-badge.read {
   color: #a5dcca;
   background: #25443b;
-  border-color: #416f5e;
 }
 .mail-sender-card {
   display: flex;
@@ -929,7 +942,7 @@ button.mail-row-star:hover {
 }
 .mail-envelope-details dl {
   margin-top: 12px;
-  border: 1px solid #4e5770;
+  border: 0;
   border-radius: 8px;
   padding: 10px 14px;
   background: #2c3241;
@@ -948,7 +961,7 @@ button.mail-row-star:hover {
 .mail-read-action {
   color: #b5dfd6;
   background: #2e4846;
-  border: 1px solid #416665;
+  border: 0;
   border-radius: 7px;
   font-size: 11px;
   padding: 7px 10px;
@@ -971,17 +984,15 @@ button.mail-row-star:hover {
   cursor: pointer;
   font-size: 13px;
   font-weight: 650;
-  border: 1px solid #6677c1;
+  border: 0;
   background: #333e65;
   color: #d1dcff;
 }
 .mail-page .mail-reply-actions .mail-reply-all-action {
-  border-color: #75619f;
   background: #423457;
   color: #dcc7f5;
 }
 .mail-page .mail-reply-actions .mail-forward-action {
-  border-color: #468a81;
   background: #2b4846;
   color: #abe2d3;
 }
@@ -991,7 +1002,7 @@ button.mail-row-star:hover {
 .mail-reader-back {
   color: #cad5ff;
   background: #354367;
-  border: 1px solid #526999;
+  border: 0;
 }
 .mail-reply-host:empty {
   display: none;
@@ -999,8 +1010,7 @@ button.mail-row-star:hover {
 .mail-sent-reply {
   margin-top: 18px;
   padding: 16px 20px;
-  border: 1px solid #467e6b;
-  border-left: 3px solid #78d5ab;
+  border: 0;
   background: #263c34;
   border-radius: 8px;
 }
