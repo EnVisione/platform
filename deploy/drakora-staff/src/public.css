@@ -1,8 +1,9 @@
 :root {
   color-scheme: dark;
   font-family: Arial, Helvetica, sans-serif;
-  color: #e7e3d9;
-  background: #171715;
+  color: #eee7d8;
+  background: #171815;
+  font-size: 16px;
 }
 * {
   box-sizing: border-box;
@@ -27,9 +28,11 @@ button {
   cursor: pointer;
 }
 .public-site {
-  --red: #a9392d;
-  --gold: #d0b681;
+  --red: #a6382b;
+  --gold: #d3bd91;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 .public-site h1,
 .public-site h2 {
@@ -38,14 +41,16 @@ button {
   font-weight: 700;
 }
 .public-site h1 {
-  font-size: clamp(28px, 3vw, 38px);
+  font-size: clamp(32px, 3.5vw, 46px);
+  line-height: 1.15;
 }
 .public-site h2 {
-  font-size: 24px;
+  font-size: 27px;
+  line-height: 1.25;
 }
 .public-site p {
-  color: #bcb9ae;
-  line-height: 1.7;
+  color: #c4c1b7;
+  line-height: 1.65;
   margin: 0 0 20px;
 }
 .public-site a {
@@ -71,30 +76,28 @@ button {
   top: 16px;
 }
 .public-header {
-  background: #252727 url("./assets/medieval-castle.svg") center 50% / cover
-    no-repeat;
-  border-bottom: 4px solid #393933;
+  background: #252727;
+  border-bottom: 4px solid #373a31;
 }
 .public-nav {
-  max-width: 1180px;
-  padding: 24px 20px 12px;
-  margin: auto;
+  padding: 14px 20px;
+  background: #151914;
 }
 .public-nav #public-links {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
+  gap: 12px;
 }
 .public-nav a {
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 700;
-  padding: 14px 26px;
-  color: #d4d5cb;
+  padding: 12px 22px;
+  color: #c9ccbd;
 }
 .public-nav a[aria-current="page"] {
   color: #fff;
-  background: #1b211ecc;
+  background: #30372b;
 }
 .public-nav a.public-store-link {
   background: var(--red);
@@ -112,16 +115,17 @@ button {
   display: none;
 }
 .public-masthead {
-  max-width: 1180px;
-  margin: auto;
   display: grid;
-  grid-template-columns: 1fr 1.3fr 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 30px;
-  padding: 30px 20px 38px;
+  gap: 40px;
+  padding: 36px max(24px, calc((100% - 1120px) / 2));
+  min-height: 210px;
+  background: #252727 url("./assets/medieval-castle.svg") center 60% / auto
+    320px no-repeat;
 }
 .home .public-masthead {
-  padding: 54px 20px 66px;
+  min-height: 250px;
 }
 .public-brand {
   display: flex;
@@ -130,15 +134,15 @@ button {
   gap: 14px;
 }
 .public-brand img {
-  width: 104px;
-  height: 104px;
+  width: 96px;
+  height: 96px;
   image-rendering: pixelated;
 }
 .public-brand > span {
   font-family: Georgia, serif;
   font-weight: 900;
   color: #e2d5b4;
-  font-size: clamp(31px, 3.5vw, 51px);
+  font-size: clamp(31px, 3.5vw, 48px);
   letter-spacing: 2px;
 }
 .public-brand small {
@@ -161,6 +165,17 @@ button {
 }
 .public-join {
   text-align: right;
+}
+.public-join,
+.public-discord {
+  background: #1b211b;
+  padding: 18px 20px;
+}
+.public-join {
+  justify-self: end;
+}
+.public-discord {
+  justify-self: start;
 }
 .public-address button {
   border: 0;
@@ -198,26 +213,27 @@ button {
 .public-content {
   max-width: 1180px;
   margin: auto;
-  padding: 32px 20px 60px;
-  min-height: 420px;
+  width: 100%;
+  padding: 42px 20px 64px;
+  flex: 1;
 }
 .public-welcome {
-  background: #222321;
-  padding: 24px 28px;
+  padding: 8px 0 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 32px;
-  border-left: 4px solid var(--red);
+  margin-bottom: 36px;
+  border-bottom: 1px solid #35382f;
 }
 .public-welcome h1 {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: clamp(34px, 4vw, 50px);
+  margin-bottom: 14px;
 }
 .public-welcome p {
   margin: 0;
-  font-size: 14px;
+  font-size: 17px;
+  max-width: 650px;
 }
 .public-welcome > div {
   min-width: 0;
@@ -231,11 +247,12 @@ button {
   justify-content: center;
   align-items: center;
   gap: 16px;
-  padding: 13px 18px;
+  min-height: 46px;
+  padding: 14px 20px;
   border: 0;
   background: var(--red);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -262,18 +279,17 @@ button {
 .public-server-art img {
   width: 100%;
   height: 100%;
-  min-height: 190px;
   object-fit: cover;
   display: block;
 }
 .public-server-body {
-  padding: 26px;
+  padding: 28px;
 }
 .public-server-body h2 a {
   color: #e6dac0;
 }
 .public-server-body p {
-  font-size: 14px;
+  font-size: 16px;
   margin-bottom: 18px;
 }
 .public-server-meta {
@@ -281,7 +297,7 @@ button {
   flex-wrap: wrap;
   gap: 20px;
   color: #9faaa0;
-  font-size: 12px;
+  font-size: 13px;
   padding-bottom: 20px;
 }
 .public-server-actions {
@@ -291,17 +307,19 @@ button {
   gap: 18px;
 }
 .public-server-actions .public-address strong {
-  font-size: 12px;
+  font-size: 15px;
 }
 .public-server-actions .public-button.secondary {
   width: auto;
 }
 .public-server-actions .public-address {
   flex-basis: 100%;
+  padding: 16px 18px;
+  background: #191c17;
 }
 .public-panel {
-  background: #222321;
-  padding: 28px;
+  background: #242620;
+  padding: 32px;
   margin-bottom: 24px;
 }
 .public-panel > :last-child {
@@ -309,6 +327,32 @@ button {
 }
 .public-panel a {
   color: var(--gold);
+}
+.public-panel .public-button {
+  color: #fff;
+}
+.public-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 36px;
+  align-items: start;
+}
+.public-announcements > h2 {
+  margin-bottom: 22px;
+}
+.public-news-empty {
+  padding: 36px;
+}
+.public-home-help {
+  padding: 28px;
+  background: #20231d;
+}
+.public-home-help p {
+  font-size: 15px;
+}
+.public-home-help > a {
+  color: var(--gold);
+  font-weight: 700;
   font-size: 14px;
 }
 .public-announcement h3 {
@@ -326,35 +370,64 @@ button {
   overflow-wrap: anywhere;
 }
 .public-page-title {
-  margin: 14px 0 32px;
+  margin: 4px 0 36px;
 }
 .public-page-title p {
   margin: 0;
+  max-width: 720px;
+  font-size: 17px;
 }
 .public-application {
-  max-width: 860px;
+  max-width: 920px;
   margin: auto;
   overflow-wrap: anywhere;
 }
 .public-application article > section {
-  margin-bottom: 30px;
+  margin-bottom: 34px;
 }
 .public-application h2 {
-  font-size: 21px;
+  font-size: 24px;
 }
 .public-application p {
   white-space: pre-line;
 }
-.public-application ul {
+.public-application ul,
+.public-help-page ul {
   padding-left: 22px;
-  color: #bcb9ae;
-  line-height: 1.7;
+  color: #c4c1b7;
+  line-height: 1.65;
 }
-.public-application li + li {
+.public-application li + li,
+.public-help-page li + li {
   margin-top: 8px;
 }
 .public-application .public-button {
   color: #fff;
+}
+.public-application-actions {
+  padding-top: 30px;
+  border-top: 1px solid #3b3e33;
+}
+.public-help-page {
+  overflow-wrap: anywhere;
+}
+.public-help-page .public-page-title .public-button {
+  margin-top: 24px;
+}
+.public-help-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.public-help-grid .public-panel {
+  margin: 0;
+}
+.public-help-tickets {
+  grid-column: 1 / -1;
+}
+.public-help-page p {
+  white-space: pre-line;
 }
 .public-server-grid {
   display: grid;
@@ -362,7 +435,7 @@ button {
   gap: 28px;
 }
 .public-server-grid .public-server-art {
-  height: 215px;
+  height: 240px;
 }
 .public-detail-grid {
   display: grid;
@@ -381,12 +454,12 @@ button {
   display: block;
 }
 .public-server-art {
-  background: #222321;
+  background: #1e221c;
 }
 .public-server-art .public-pack-logo,
 .public-detail-art .public-pack-logo {
   object-fit: contain;
-  padding: 18px;
+  padding: 24px;
 }
 .public-detail-grid article .public-panel {
   margin-bottom: 24px;
@@ -425,7 +498,7 @@ button {
 }
 .public-rules-nav a {
   padding: 16px;
-  font-size: 14px;
+  font-size: 15px;
 }
 .public-rules-nav a[aria-current="page"] {
   background: var(--red);
@@ -443,9 +516,10 @@ button {
   font-size: 13px;
 }
 .public-footer {
-  max-width: 1140px;
-  margin: auto;
-  padding: 28px 0;
+  width: 100%;
+  margin: 0;
+  padding: 32px max(20px, calc((100% - 1140px) / 2));
+  background: #131611;
   border-top: 1px solid #34362e;
   display: flex;
   align-items: center;
@@ -466,14 +540,15 @@ button {
 .public-footer nav {
   display: flex;
   gap: 24px;
+  flex-wrap: wrap;
 }
 .public-loading {
   padding: 40px 0;
 }
 @media (max-width: 1000px) {
   .public-masthead {
-    gap: 16px;
-    grid-template-columns: 1fr 1.2fr 1fr;
+    gap: 20px;
+    padding: 32px 24px;
   }
   .public-brand img {
     width: 74px;
@@ -490,8 +565,15 @@ button {
   .public-discord strong {
     font-size: 16px;
   }
-  .public-footer {
-    margin: 0 20px;
+  .public-join,
+  .public-discord {
+    padding: 16px;
+  }
+  .public-nav a {
+    padding: 12px 16px;
+  }
+  .public-nav #public-links {
+    gap: 8px;
   }
 }
 @media (max-width: 700px) {
@@ -535,6 +617,8 @@ button {
     padding: 24px 20px 34px;
     grid-template-columns: 1fr 1fr;
     gap: 28px 12px;
+    min-height: auto;
+    background-size: auto 280px;
   }
   .public-brand {
     grid-column: 1 / -1;
@@ -549,12 +633,22 @@ button {
   }
   .public-join {
     text-align: left;
+    justify-self: stretch;
   }
   .public-join .public-address button {
     text-align: left;
   }
   .public-discord {
-    text-align: right;
+    text-align: left;
+    justify-self: stretch;
+  }
+  .public-join,
+  .public-discord {
+    padding: 14px 12px;
+  }
+  .public-address.large strong,
+  .public-discord strong {
+    font-size: 15px;
   }
   .public-eyebrow {
     font-size: 9px;
@@ -564,15 +658,18 @@ button {
     padding: 24px 16px 40px;
   }
   .public-welcome {
-    padding: 22px;
+    padding: 8px 0 28px;
     display: block;
+    margin-bottom: 28px;
   }
   .public-welcome .public-button {
     margin-top: 20px;
   }
   .public-server-grid,
   .public-detail-grid,
-  .public-rules-grid {
+  .public-rules-grid,
+  .public-home-grid,
+  .public-help-grid {
     grid-template-columns: 1fr;
     gap: 22px;
   }
@@ -583,17 +680,40 @@ button {
     padding: 13px;
     font-size: 13px;
   }
+  .public-help-tickets {
+    grid-column: auto;
+  }
+  .public-page-title p,
+  .public-welcome p {
+    font-size: 16px;
+  }
   .public-panel,
+  .public-server-body,
+  .public-news-empty,
+  .public-home-help,
   .public-rule-text {
     padding: 24px;
   }
   .public-footer {
     flex-wrap: wrap;
-    padding: 25px 0;
-    margin: 0 16px;
+    padding: 28px 20px;
+    margin: 0;
   }
   .public-footer nav {
     gap: 20px;
+  }
+}
+@media (max-width: 360px) {
+  .public-masthead {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .public-brand > span {
+    font-size: 30px;
+  }
+  .public-brand img {
+    width: 64px;
+    height: 64px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

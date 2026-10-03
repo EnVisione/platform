@@ -3,6 +3,7 @@ import {
   initialWebsite,
   ruleSections,
   applicationSections,
+  helpSections,
   serverArtwork,
 } from "../shared/website.js";
 
@@ -90,6 +91,14 @@ export function validateWebsite(input) {
       ]),
     ),
   };
+  if (!input.help) throw new AuthError("invalid_website_content", 400);
+  const help = {
+    title: text(input.help.title, 100, true),
+    introduction: text(input.help.introduction, 1000, true),
+    ...Object.fromEntries(
+      helpSections.map(({ id }) => [id, text(input.help[id], 6000, true)]),
+    ),
+  };
   const servers = input.servers.map((entry) => {
     if (
       !entry ||
@@ -139,7 +148,7 @@ export function validateWebsite(input) {
   });
   if (new Set(servers.map((server) => server.slug)).size !== servers.length)
     throw new AuthError("duplicate_server_slug", 400);
-  return { home, apply, rules, servers };
+  return { home, apply, help, rules, servers };
 }
 
 export function websiteService(config, store) {
@@ -152,6 +161,7 @@ export function websiteService(config, store) {
       ...saved,
       home: saved.home ?? structuredClone(initialWebsite.home),
       apply: saved.apply ?? structuredClone(initialWebsite.apply),
+      help: saved.help ?? structuredClone(initialWebsite.help),
       servers: saved.servers.map((server) => {
         if (server.logoUrl !== undefined) return server;
         const pack = initialWebsite.servers.find(
@@ -181,13 +191,14 @@ export function websiteService(config, store) {
       return read();
     },
     publicContent() {
-      const { home, apply, rules, servers } = read();
+      const { home, apply, help, rules, servers } = read();
       return {
         home: {
           ...home,
           announcements: home.announcements.filter((entry) => entry.published),
         },
         apply,
+        help,
         rules,
         servers: servers.filter((server) => server.published),
         address: "play.drakora.org",
@@ -206,6 +217,7 @@ export function websiteService(config, store) {
           ...input,
           home: input.home ?? previous.home,
           apply: input.apply ?? previous.apply,
+          help: input.help ?? previous.help,
           servers: Array.isArray(input.servers)
             ? input.servers.map((server) =>
                 server && server.logoUrl === undefined

@@ -491,6 +491,64 @@ test("Discord counts share requests, respect rate limits and expire stale readin
   assert.equal((await empty()).discord.active, null);
 });
 
+test("Help guidance migrates without replacing pages, persists and survives older editors", (t) => {
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => database.store.close());
+  const legacy = draft();
+  delete legacy.help;
+  legacy.revision = 12;
+  database.store.set(
+    "website-content",
+    "current",
+    legacy,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const service = websiteService(config, database.store);
+  const edit = service.read(admin);
+  assert.equal(edit.revision, 12);
+  assert.deepEqual(edit.help, initialWebsite.help);
+  assert.deepEqual(service.publicContent().help, initialWebsite.help);
+  edit.help.tickets =
+    "Open a ticket in our support area. <script>Plain text.</script>";
+  edit.help.privateField = "Not public";
+  const saved = service.save(admin, edit);
+  assert.equal(saved.revision, 13);
+  assert.equal("privateField" in saved.help, false);
+  for (const field of ["home", "apply", "rules", "servers"])
+    assert.deepEqual(saved[field], legacy[field]);
+  const oldEditor = { ...saved };
+  delete oldEditor.help;
+  assert.deepEqual(service.save(admin, oldEditor).help, saved.help);
+  assert.throws(() => service.save(admin, saved), {
+    code: "website_content_changed",
+  });
+  assert.deepEqual(service.publicContent().help, saved.help);
+});
+
+test("Help guidance rejects invalid fields without changing stored content", (t) => {
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => database.store.close());
+  const service = websiteService(config, database.store);
+  const original = service.publicContent();
+  for (const [field, value] of [
+    ["title", " "],
+    ["introduction", "a".repeat(1001)],
+    ["details", "a".repeat(6001)],
+    ["tickets", null],
+    ["joining", "bad\0text"],
+  ]) {
+    const edit = service.read(admin);
+    edit.help[field] = value;
+    assert.throws(
+      () => service.save(admin, edit),
+      { code: "invalid_website_content" },
+      field,
+    );
+    assert.equal(service.read(admin).revision, 0);
+    assert.deepEqual(service.publicContent(), original);
+  }
+});
+
 test("public routes expose published pages without a session and the staff editor enforces authorization and mutations", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "drakora-website-routes-"));
   writeFileSync(join(directory, "public.html"), "Public Drakora website");
@@ -554,6 +612,8 @@ test("public routes expose published pages without a session and the staff edito
     "/apply",
     "/apply/",
     "/servers",
+    "/help",
+    "/help/",
     "/servers/prom2",
     "/rules",
     "/rules/home",
@@ -657,6 +717,7 @@ test("public routes expose published pages without a session and the staff edito
   ).json();
   assert.equal(content.servers.length, 2);
   assert.equal(content.updatedBy, undefined);
+  assert.deepEqual(content.help, initialWebsite.help);
 });
 
 test("website configuration requires the separate public host and a valid Discord invite", () => {

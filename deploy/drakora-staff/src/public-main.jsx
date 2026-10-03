@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ruleSections, applicationSections } from "../shared/website.js";
+import {
+  ruleSections,
+  applicationSections,
+  helpSections,
+} from "../shared/website.js";
 import logo from "./assets/drakora-logo.png";
 import castle from "./assets/medieval-castle.svg";
 import forest from "./assets/medieval-forest.svg";
@@ -50,6 +54,20 @@ function Paragraphs({ text }) {
     .split(/\n\s*\n/)
     .filter(Boolean)
     .map((paragraph, i) => <p key={i}>{paragraph}</p>);
+}
+function SectionContent({ text, list }) {
+  if (!list) return <Paragraphs text={text} />;
+  return (
+    <ul>
+      {text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, index) => (
+          <li key={index}>{line}</li>
+        ))}
+    </ul>
+  );
 }
 function ServerArtwork({ server, decorative = false }) {
   const [failedUrl, setFailedUrl] = useState("");
@@ -116,11 +134,14 @@ function ServerCard({ server }) {
     </article>
   );
 }
-function HomePage({ home }) {
+function HomePage({ home, discordInvite }) {
   return (
     <>
       <section className="public-welcome">
         <div>
+          <span className="public-eyebrow">
+            YOUR NEXT ADVENTURE STARTS HERE
+          </span>
           <h1>{home.title}</h1>
           <p>{home.introduction}</p>
         </div>
@@ -128,37 +149,52 @@ function HomePage({ home }) {
           View servers <span aria-hidden="true">→</span>
         </a>
       </section>
-      <section
-        className="public-announcements"
-        aria-labelledby="announcements-title"
-      >
-        <h2 id="announcements-title">{home.announcementsTitle}</h2>
-        {home.announcements.length ? (
-          home.announcements.map((entry) => (
-            <article
-              className="public-panel public-announcement"
-              key={entry.id}
-            >
-              {entry.date && (
-                <time className="public-eyebrow" dateTime={entry.date}>
-                  {new Date(`${entry.date}T12:00:00`).toLocaleDateString(
-                    undefined,
-                    {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    },
-                  )}
-                </time>
-              )}
-              <h3>{entry.title}</h3>
-              <Paragraphs text={entry.body} />
-            </article>
-          ))
-        ) : (
-          <p>{home.emptyMessage}</p>
-        )}
-      </section>
+      <div className="public-home-grid">
+        <section
+          className="public-announcements"
+          aria-labelledby="announcements-title"
+        >
+          <h2 id="announcements-title">{home.announcementsTitle}</h2>
+          {home.announcements.length ? (
+            home.announcements.map((entry) => (
+              <article
+                className="public-panel public-announcement"
+                key={entry.id}
+              >
+                {entry.date && (
+                  <time className="public-eyebrow" dateTime={entry.date}>
+                    {new Date(`${entry.date}T12:00:00`).toLocaleDateString(
+                      undefined,
+                      {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      },
+                    )}
+                  </time>
+                )}
+                <h3>{entry.title}</h3>
+                <Paragraphs text={entry.body} />
+              </article>
+            ))
+          ) : (
+            <div className="public-panel public-news-empty">
+              <p>{home.emptyMessage}</p>
+              <a href={discordInvite}>
+                Catch up in Discord <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+          )}
+        </section>
+        <aside className="public-home-help">
+          <span className="public-eyebrow">WE ARE HERE TO HELP</span>
+          <h2>Need a hand?</h2>
+          <p>New to the network, stuck in a world or need to reach staff?</p>
+          <a href="/help">
+            Find support <span aria-hidden="true">→</span>
+          </a>
+        </aside>
+      </div>
     </>
   );
 }
@@ -174,19 +210,7 @@ function ApplicationInformation({ apply }) {
         {applicationSections.map(({ id, name, list }) => (
           <section key={id} aria-labelledby={`apply-${id}`}>
             <h2 id={`apply-${id}`}>{name}</h2>
-            {list ? (
-              <ul>
-                {apply[id]
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean)
-                  .map((line, index) => (
-                    <li key={index}>{line}</li>
-                  ))}
-              </ul>
-            ) : (
-              <Paragraphs text={apply[id]} />
-            )}
+            <SectionContent text={apply[id]} list={list} />
           </section>
         ))}
         <div className="public-application-actions">
@@ -200,6 +224,37 @@ function ApplicationInformation({ apply }) {
           </a>
         </div>
       </article>
+    </div>
+  );
+}
+function HelpPage({ help, discordInvite }) {
+  return (
+    <div className="public-help-page">
+      <div className="public-page-title">
+        <span className="public-eyebrow">DRAKORA SUPPORT</span>
+        <h1>{help.title}</h1>
+        <p>{help.introduction}</p>
+        <a className="public-button" href={discordInvite}>
+          Open Discord <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <div className="public-help-grid">
+        {helpSections.map(({ id, name, list }) => (
+          <section
+            className={`public-panel public-help-${id}`}
+            key={id}
+            aria-labelledby={`help-${id}`}
+          >
+            <h2 id={`help-${id}`}>{name}</h2>
+            <SectionContent text={help[id]} list={list} />
+            {id === "joining" && (
+              <a href="/servers">
+                Find your server <span aria-hidden="true">→</span>
+              </a>
+            )}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -258,14 +313,17 @@ function PublicSite() {
     (path === "/rules" ? ruleSections[0] : null);
   const home = path === "/",
     serversPage = path === "/servers",
-    applyPage = path === "/apply";
+    applyPage = path === "/apply",
+    helpPage = path === "/help";
   const title = home
     ? "Home"
     : serversPage
       ? "Servers"
       : applyPage
         ? "Apply"
-        : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+        : helpPage
+          ? "Need help?"
+          : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -294,6 +352,7 @@ function PublicSite() {
               ["Store", storeUrl],
               ["Rules", "/rules"],
               ["Apply", "/apply"],
+              ["Need help?", "/help"],
             ].map(([name, href]) => (
               <a
                 key={name}
@@ -355,12 +414,15 @@ function PublicSite() {
             Opening Drakora…
           </p>
         ) : home ? (
-          <HomePage home={content.home} />
+          <HomePage home={content.home} discordInvite={content.discordInvite} />
         ) : applyPage ? (
           <ApplicationInformation apply={content.apply} />
+        ) : helpPage ? (
+          <HelpPage help={content.help} discordInvite={content.discordInvite} />
         ) : serversPage ? (
           <>
             <div className="public-page-title">
+              <span className="public-eyebrow">EXPLORE DRAKORA</span>
               <h1>Our servers</h1>
               <p>Pick your adventure. Bring your friends.</p>
             </div>
@@ -432,8 +494,11 @@ function PublicSite() {
                 </section>
                 <section className="public-panel">
                   <h2>Need a hand?</h2>
-                  <p>Ask the community or open a support ticket in Discord.</p>
-                  <a href={content.discordInvite}>Join Discord ↗</a>
+                  <p>
+                    Find joining help or reach our staff through a Discord
+                    ticket.
+                  </p>
+                  <a href="/help">Find support →</a>
                 </section>
                 <a
                   className="public-button secondary"
@@ -447,6 +512,7 @@ function PublicSite() {
         ) : rulesPage && section ? (
           <>
             <div className="public-page-title">
+              <span className="public-eyebrow">PLAY FAIR. FEEL AT HOME.</span>
               <h1>Community rules</h1>
               <p>Keep Drakora welcoming. Play fair and respect each other.</p>
             </div>
@@ -470,10 +536,7 @@ function PublicSite() {
                 </h2>
                 <Paragraphs text={content.rules[section.id]} />
                 <p className="public-rule-help">
-                  Need help?{" "}
-                  <a href={content.discordInvite}>
-                    Open a ticket in Discord ↗
-                  </a>
+                  Need help? <a href="/help">Find support →</a>
                 </p>
               </article>
             </div>
@@ -498,6 +561,7 @@ function PublicSite() {
           <a href="/rules">Rules</a>
           <a href="/apply">Apply</a>
           <a href={storeUrl}>Store</a>
+          <a href="/help">Need help?</a>
         </nav>
         <small>© {new Date().getFullYear()} Drakora</small>
       </footer>

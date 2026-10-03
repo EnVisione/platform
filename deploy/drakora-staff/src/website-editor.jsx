@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   ruleSections,
   applicationSections,
+  helpSections,
   newServer,
   newAnnouncement,
   serverArtwork,
@@ -13,7 +14,7 @@ const messages = {
   website_content_changed:
     "Another staff member saved changes. Your draft is still here. Reload the published content before editing again.",
   invalid_website_content:
-    "Check the Home and Apply text, announcement titles, text and dates. Check each server’s required fields and use HTTPS download and logo links. Rules cannot be empty.",
+    "Check the Home, Apply and Help text, announcement titles, text and dates. Check each server’s required fields and use HTTPS download and logo links. Rules cannot be empty.",
   duplicate_server_slug: "Each server needs a different URL slug.",
   website_role_required:
     "Only Admin, Manager and Founder staff can edit the public website.",
@@ -118,6 +119,14 @@ export function WebsiteEditor({ csrf }) {
     setNotice("");
     setError("");
   }
+  function updateHelp(field, value) {
+    setDocument((previous) => ({
+      ...previous,
+      help: { ...previous.help, [field]: value },
+    }));
+    setNotice("");
+    setError("");
+  }
   function updateAnnouncement(id, field, value) {
     updateHome(
       "announcements",
@@ -157,7 +166,7 @@ export function WebsiteEditor({ csrf }) {
       <header className="website-heading">
         <div>
           <h2 id="website-title">Website</h2>
-          <p>Edit the public Home, Rules, Servers and Apply pages.</p>
+          <p>Edit the public Home, Rules, Servers, Apply and Help pages.</p>
         </div>
         <a href="https://drakora.org" target="_blank" rel="noopener noreferrer">
           View website ↗
@@ -220,6 +229,13 @@ export function WebsiteEditor({ csrf }) {
                   onClick={() => setTab("apply")}
                 >
                   Apply
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={tab === "help"}
+                  onClick={() => setTab("help")}
+                >
+                  Help
                 </button>
               </div>
               <span>
@@ -389,6 +405,43 @@ export function WebsiteEditor({ csrf }) {
                       maxLength={limit}
                       required
                       onChange={(event) => updateApply(id, event.target.value)}
+                    />
+                  </label>
+                ))}
+              </>
+            ) : tab === "help" ? (
+              <>
+                <p className="website-help">
+                  Help visitors find support in the main Discord. Use one item
+                  per line for What to include. Tickets stay in Discord.
+                </p>
+                <label className="website-field">
+                  Help page title
+                  <input
+                    value={document.help.title}
+                    maxLength={100}
+                    required
+                    onChange={(event) =>
+                      updateHelp("title", event.target.value)
+                    }
+                  />
+                </label>
+                {[
+                  {
+                    id: "introduction",
+                    name: "Help introduction",
+                    limit: 1000,
+                  },
+                  ...helpSections,
+                ].map(({ id, name, limit = 6000 }) => (
+                  <label className="website-field" key={id}>
+                    {name}
+                    <textarea
+                      value={document.help[id]}
+                      rows={5}
+                      maxLength={limit}
+                      required
+                      onChange={(event) => updateHelp(id, event.target.value)}
                     />
                   </label>
                 ))}

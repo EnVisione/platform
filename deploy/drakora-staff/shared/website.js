@@ -13,6 +13,12 @@ export const applicationSections = [
   { id: "note", name: "Part of the community" },
 ];
 
+export const helpSections = [
+  { id: "tickets", name: "Open a support ticket" },
+  { id: "details", name: "What to include", list: true },
+  { id: "joining", name: "Trouble joining?" },
+];
+
 export const serverArtwork = [
   { id: "prominence", name: "Prominence II logo" },
   { id: "restless-horizons", name: "Restless Horizons logo" },
@@ -52,6 +58,17 @@ export function newAnnouncement() {
 }
 
 export const initialWebsite = {
+  help: {
+    title: "Need a hand?",
+    introduction:
+      "Whether you are new to Drakora or already at home here, our community and staff are here to help.",
+    tickets:
+      "Join our Discord and use the support ticket area to open a ticket. Choose the option that best fits your question, server issue, report or appeal.\n\nKeep staff matters in a ticket rather than sending private messages. The team will reply there when they are available.",
+    details:
+      "Your Minecraft username and the world or server you play on.\nWhat happened, what you expected and when the issue started.\nAny error message, screenshot or steps that help us understand the problem.\nShare personal information only when staff need it, inside your ticket.",
+    joining:
+      "Find your server on the Servers page and download its modpack. Check the joining instructions and pack version, then add play.drakora.org to your multiplayer list.\n\nIf you still cannot connect, include the exact error message in your Discord ticket.",
+  },
   home: {
     title: "Welcome to Drakora",
     introduction:
