@@ -2,6 +2,10 @@ import { createHmac, randomUUID } from "node:crypto";
 
 const day = 86400000;
 const permanent = Number.MAX_SAFE_INTEGER;
+const profileText = (value) =>
+  typeof value === "string"
+    ? value.replace(/\p{C}/gu, "").trim().slice(0, 80)
+    : undefined;
 
 export function honeypotService(
   config,
@@ -30,10 +34,19 @@ export function honeypotService(
     const record = {
       id: job.id,
       userId: job.userId,
+      name: job.name,
+      username: job.username,
       messageId: job.messageId,
       guildId: settings.guildId,
       channelId: settings.channelId,
       action: job.action,
+      timeoutUntil: job.until,
+      reason:
+        job.action === "timeout"
+          ? "Honeypot. First post in the clearly marked spam trap. 24 hour timeout."
+          : job.action === "ban"
+            ? "Honeypot. Repeat post in the clearly marked spam trap within 365 days. Permanent ban."
+            : undefined,
       actorId: job.actorId,
       result,
       code,
@@ -109,6 +122,8 @@ export function honeypotService(
           id: randomUUID(),
           subject,
           userId: message.userId,
+          name: profileText(message.name),
+          username: profileText(message.username),
           messageId: message.id,
           createdAt: message.createdAt,
           attempts: 0,
@@ -137,6 +152,8 @@ export function honeypotService(
         );
       const strike = store.get("honeypot-strike", job.subject);
       if (!job.action) {
+        job.name = profileText(member.name) || job.name;
+        job.username = profileText(member.username) || job.username;
         job.action = strike ? "ban" : "timeout";
         job.until = job.action === "timeout" ? now() + day : undefined;
         store.set("honeypot-pending", job.subject, job, now() + day);

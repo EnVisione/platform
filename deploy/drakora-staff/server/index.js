@@ -52,6 +52,8 @@ import { ticketMail } from "./ticket-mail.js";
 import { ticketNotices } from "./ticket-notices.js";
 import { ticketRouter } from "./ticket-routes.js";
 import { discordHoneypot } from "./honeypot-discord.js";
+import { moderationHistory } from "./moderation.js";
+import { moderationRouter } from "./moderation-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -366,6 +368,7 @@ function safeNext(value) {
       "/calendar",
       "/tickets",
       "/logs",
+      "/moderation",
     ].includes(value)
   )
     return value;
@@ -381,7 +384,7 @@ function safeNext(value) {
     return value;
   if (
     typeof value === "string" &&
-    /^\/(applications|tickets)\/[a-f0-9-]{36}$/.test(value)
+    /^\/(applications|tickets|moderation)\/[a-f0-9-]{36}$/.test(value)
   )
     return value;
   return "/";
@@ -1336,6 +1339,16 @@ app.get("/api/applications", async (req, res) => {
     }),
   );
 });
+app.use(
+  moderationRouter({
+    history: moderationHistory(store),
+    authorize: (req) => signedIn(req, { syncHuly: false }),
+    applications,
+    tickets,
+    staffHost,
+    dist,
+  }),
+);
 app.get("/api/applications/:id", async (req, res) => {
   await applicationViewer(req);
   const record = applications.get(req.params.id);

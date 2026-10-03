@@ -1,5 +1,11 @@
 export const staffPermissions = [
   [
+    "moderation.view",
+    "Moderation",
+    "View moderation history",
+    "Read recorded warnings, timeouts and bans, including their reasons and linked applicant or ticket history.",
+  ],
+  [
     "tickets.view",
     "Tickets",
     "Open ticket queues",

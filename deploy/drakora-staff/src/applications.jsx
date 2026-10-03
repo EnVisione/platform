@@ -604,7 +604,11 @@ function ApplicationReviews({ csrf, capabilities }) {
             {data.questionnaireVersion}
           </p>
         </div>
-        <ApplicationPlayer application={data} listSearch={listSearch} />
+        <ApplicationPlayer
+          application={data}
+          listSearch={listSearch}
+          capabilities={capabilities}
+        />
       </div>
     </article>
   );

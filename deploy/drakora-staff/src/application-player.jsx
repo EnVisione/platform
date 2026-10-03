@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { applicationRoles } from "../shared/application-form.js";
 import { ApplicationStatus } from "./application-status.jsx";
+import { ModerationHistoryCard } from "./moderation.jsx";
 
 function PreviousApplications({ id, listSearch }) {
   const [offset, setOffset] = useState(0);
@@ -118,7 +119,11 @@ function PendingStats({ labels }) {
   );
 }
 
-export function ApplicationPlayer({ application, listSearch = "" }) {
+export function ApplicationPlayer({
+  application,
+  listSearch = "",
+  capabilities = {},
+}) {
   const identifier = /^[a-f0-9]{32}$/i.test(application.minecraft.uuid ?? "")
     ? application.minecraft.uuid
     : application.answers.ign;
@@ -188,22 +193,12 @@ export function ApplicationPlayer({ application, listSearch = "" }) {
         <h2>Proxy activity</h2>
         <PendingStats labels={["EU proxy sessions", "NA proxy sessions"]} />
       </section>
-      <section className="application-player-card">
-        <h2>Support &amp; moderation</h2>
-        <p className="apply-muted">
-          Waiting for ticket and moderation history integrations.
-        </p>
-        <PendingStats
-          labels={[
-            "Tickets opened",
-            "Reports submitted",
-            "Warnings",
-            "Mutes",
-            "Bans",
-            "Active punishments",
-          ]}
+      {capabilities["moderation.view"] && (
+        <ModerationHistoryCard
+          key={`moderation:${application.id}`}
+          endpoint={`/api/applications/${encodeURIComponent(application.id)}/moderation`}
         />
-      </section>
+      )}
       <PreviousApplications
         key={application.id}
         id={application.id}

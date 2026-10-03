@@ -58,6 +58,8 @@ test("dashboard history keeps supported pages local and leaves external and down
     "/website",
     "/applications",
     "/applications/editor",
+    "/moderation?action=ban",
+    "/moderation/12345678-1234-1234-1234-123456789012",
     "/applications/12345678-1234-1234-1234-123456789012?name=Staff",
   ])
     assert.equal(dashboardDestination(path, origin), path);

@@ -94,7 +94,8 @@ function setup(t) {
   function member(id, roles = [], permissions = []) {
     const result = {
       id,
-      user: { id, bot: false },
+      user: { id, bot: false, username: "fixture.player" },
+      displayName: "Fixture Player",
       guild: { ownerId: "1000" },
       permissions: new PermissionsBitField(permissions),
       roles: { cache: new Collection(roles.map((id) => [id, { id }])) },
@@ -277,6 +278,21 @@ test("gateway posts use the Discord timeout adapter, update the counter and exem
     false,
   );
   assert.deepEqual([...alerts.values()][0].allowedMentions, { parse: [] });
+  const record = app.store
+    .entries("honeypot-audit")
+    .map(([, value]) => value)
+    .find((value) => value.action === "timeout" && value.result === "applied");
+  assert.equal(record.name, "Fixture Player");
+  assert.equal(record.username, "fixture.player");
+  assert.match(record.reason, /Honeypot/);
+  assert.ok(
+    [...alerts.values()].some((message) =>
+      message.embeds[0].fields?.some(
+        (field) =>
+          field.name === "Username" && field.value === "fixture.player",
+      ),
+    ),
+  );
 });
 
 test("staff commands recheck membership and Dashboard access before exposing logs or changing state", async (t) => {

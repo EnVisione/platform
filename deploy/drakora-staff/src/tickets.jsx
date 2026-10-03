@@ -7,6 +7,7 @@ import {
 } from "../shared/tickets.js";
 import logo from "./assets/drakora-logo.png";
 import "./tickets.css";
+import { ModerationHistoryCard } from "./moderation.jsx";
 
 const errors = {
   ticket_identity_required:
@@ -694,6 +695,12 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
         </dl>
         {staffView && (
           <>
+            {capabilities["moderation.view"] && (
+              <ModerationHistoryCard
+                key={`moderation:${ticket.id}`}
+                endpoint={`/api/tickets/${ticket.id}/moderation`}
+              />
+            )}
             <h3>Staff viewing</h3>
             {ticket.viewers.length ? (
               ticket.viewers.map((user) => (

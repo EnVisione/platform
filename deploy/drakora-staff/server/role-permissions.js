@@ -53,7 +53,11 @@ export function rolePermissions(config, store) {
         ].includes(key);
         if (key === "office.host")
           enabled = config.office?.hostRoles.includes(role.id) ?? false;
-        if (key === "applications.view" || key === "applications.comment")
+        if (
+          key === "applications.view" ||
+          key === "applications.comment" ||
+          key === "moderation.view"
+        )
           enabled = reviewers.includes(role.name);
         if (
           [

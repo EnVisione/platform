@@ -12,6 +12,7 @@ import { dashboardDestination } from "../shared/dashboard-navigation.js";
 import { Overview } from "./overview.jsx";
 import { Tickets } from "./tickets.jsx";
 import { WebsiteEditor } from "./website-editor.jsx";
+import { Moderation } from "./moderation.jsx";
 import {
   DashboardClock,
   LocalClock,
@@ -21,6 +22,8 @@ import {
 } from "./time.jsx";
 
 const messages = {
+  moderation_access_denied:
+    "Your roles do not have permission to view moderation history.",
   mail_role_required: "Your roles do not have permission to open Email.",
   invalid_minecraft_name:
     "Use your Java Edition username: 3–16 letters, numbers, or underscores.",
@@ -70,13 +73,14 @@ function safeTarget(value) {
       "/calendar",
       "/tickets",
       "/logs",
+      "/moderation",
     ].includes(value)
   )
     return value;
   if (/^\/interaction\/[A-Za-z0-9_-]+$/.test(value || "")) return value;
   if (/^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value || ""))
     return value;
-  if (/^\/(applications|tickets)\/[a-f0-9-]{36}$/.test(value || ""))
+  if (/^\/(applications|tickets|moderation)\/[a-f0-9-]{36}$/.test(value || ""))
     return value;
   return "/";
 }
@@ -610,6 +614,8 @@ function App() {
   const websitePage = page === "/website";
   const ticketsPage = page === "/tickets" || page.startsWith("/tickets/");
   const logsPage = page === "/logs";
+  const moderationPage =
+    page === "/moderation" || page.startsWith("/moderation/");
   const applicationsPage =
     page === "/applications" || page.startsWith("/applications/");
   useEffect(() => {
@@ -743,7 +749,7 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || ticketsPage || logsPage || workspaceView ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || ticketsPage || logsPage || moderationPage || workspaceView ? "" : " active"}`}
             href="/"
             aria-current={
               settingsPage ||
@@ -754,6 +760,7 @@ function App() {
               websitePage ||
               ticketsPage ||
               logsPage ||
+              moderationPage ||
               workspaceView
                 ? undefined
                 : "page"
@@ -789,6 +796,15 @@ function App() {
               aria-current={logsPage ? "page" : undefined}
             >
               <span aria-hidden="true">▤</span>Logs
+            </a>
+          )}
+          {user.capabilities["moderation.view"] && (
+            <a
+              className={`nav-item${moderationPage ? " active" : ""}`}
+              href="/moderation"
+              aria-current={moderationPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">⚑</span>Moderation
             </a>
           )}
           {user.applications && (
@@ -874,19 +890,21 @@ function App() {
                 ? "Tickets"
                 : logsPage
                   ? "Logs"
-                  : settingsPage
-                    ? "Settings"
-                    : accountsPage
-                      ? "Accounts"
-                      : applicationsPage
-                        ? "Staff Applications"
-                        : emailPage
-                          ? "Email"
-                          : rolesPage
-                            ? "Roles"
-                            : websitePage
-                              ? "Website"
-                              : "Overview"}
+                  : moderationPage
+                    ? "Moderation"
+                    : settingsPage
+                      ? "Settings"
+                      : accountsPage
+                        ? "Accounts"
+                        : applicationsPage
+                          ? "Staff Applications"
+                          : emailPage
+                            ? "Email"
+                            : rolesPage
+                              ? "Roles"
+                              : websitePage
+                                ? "Website"
+                                : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
             {(settingsPage ||
@@ -897,6 +915,7 @@ function App() {
               websitePage ||
               ticketsPage ||
               logsPage ||
+              moderationPage ||
               workspaceView) && <a href="/">Overview</a>}
             {user.todo &&
               dashboardTools
@@ -918,6 +937,9 @@ function App() {
             {user.website && !websitePage && <a href="/website">Website</a>}
             {user.tickets && !ticketsPage && <a href="/tickets">Tickets</a>}
             {user.logs && !logsPage && <a href="/logs">Logs</a>}
+            {user.capabilities["moderation.view"] && !moderationPage && (
+              <a href="/moderation">Moderation</a>
+            )}
           </nav>
           <DashboardClock format={preferences.format} timeZone={timeZone} />
           <button className="signout" onClick={logout} disabled={busy}>
@@ -936,7 +958,10 @@ function App() {
                     ? "dashboard dashboard-mail"
                     : rolesPage
                       ? "dashboard dashboard-roles"
-                      : settingsPage || accountsPage || websitePage
+                      : settingsPage ||
+                          accountsPage ||
+                          websitePage ||
+                          moderationPage
                         ? "dashboard"
                         : "dashboard dashboard-overview"
           }
@@ -967,7 +992,15 @@ function App() {
               <WebsiteEditor csrf={state.csrf} />
             </div>
           )}
-          {ticketsPage || logsPage ? (
+          {moderationPage ? (
+            user.capabilities["moderation.view"] ? (
+              <Moderation key={route} onNavigate={navigateDashboard} />
+            ) : (
+              <p className="notice">
+                Your roles do not have permission to view moderation history.
+              </p>
+            )
+          ) : ticketsPage || logsPage ? (
             user.tickets ? (
               <Tickets
                 key={route}

@@ -148,6 +148,9 @@ export function discordHoneypot(config, store, client, rolePolicy) {
       const value = await member(id);
       return (
         value && {
+          name:
+            value.displayName || value.user.globalName || value.user.username,
+          username: value.user.username,
           protected: protectedMember(value),
           moderatable: value.moderatable,
           bannable: value.bannable,
@@ -215,6 +218,10 @@ export function discordHoneypot(config, store, client, rolePolicy) {
             color: record.result === "applied" ? 0xd4a644 : 0xba3d32,
             timestamp: new Date(record.at).toISOString(),
             footer: { text: footer },
+            fields:
+              record.username || record.name
+                ? [{ name: "Username", value: record.username || record.name }]
+                : [],
           },
         ],
         allowedMentions: { parse: [] },
@@ -477,6 +484,11 @@ export function discordHoneypot(config, store, client, rolePolicy) {
         guildId: message.guildId,
         channelId: message.channelId,
         userId: message.author.id,
+        name:
+          message.member?.displayName ||
+          message.author.globalName ||
+          message.author.username,
+        username: message.author.username,
         id: message.id,
         createdAt: message.createdTimestamp,
         bot: message.author.bot,

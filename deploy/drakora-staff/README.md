@@ -4,7 +4,7 @@ A React staff portal and Discord identity provider for Huly 0.7.426. The Dashboa
 
 The Discord service supplies staff ranks, activity, role synchronization and notifications. Office and its Discord controls are no longer exposed in the dashboard; existing Discord channels and stored records are preserved.
 
-An optional Discord honeypot applies a 24 hour timeout for the first post in a clearly marked spam trap and a permanent ban for a repeat within 365 days. Its pinned warning shows a caught counter. Private moderation alerts and Manager or Founder commands provide status, logs, pause, resume and reviewed marker resets. See [honeypot configuration](documentation.md#discord-honeypot).
+An optional Discord honeypot applies a 24 hour timeout for the first post in a clearly marked spam trap and a permanent ban for a repeat within 365 days. Its pinned warning shows a caught counter. Private moderation alerts and Manager or Founder commands provide status, logs, pause, resume and reviewed marker resets. The Moderation dashboard records the member's Discord name, username, action and reason, with the same history on verified staff application and ticket profiles. Access is controlled through Roles. See [honeypot configuration and moderation history](documentation.md#discord-honeypot).
 
 The dashboard places the Drakora logo beside the staff name in its sidebar heading, with the same branding above navigation on mobile. There is no separate Discord server rail.
 

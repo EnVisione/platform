@@ -77,6 +77,10 @@ test("defaults admit dashboard staff to the workspace and preserve role boundari
     assert.equal(caps["mail.view"], ["20", "28", "21"].includes(rank));
     assert.equal(caps["mail.delete"], ["20", "28", "21"].includes(rank));
     assert.equal(caps["roles.view"], ["20", "28"].includes(rank));
+    assert.equal(
+      caps["moderation.view"],
+      ["20", "28", "21", "29", "22", "30"].includes(rank),
+    );
     assert.equal(caps["applications.approve"], ["20", "28"].includes(rank));
     assert.equal(
       caps["applications.comment"],
