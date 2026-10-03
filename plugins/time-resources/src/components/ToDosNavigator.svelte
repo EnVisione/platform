@@ -3,7 +3,7 @@
   import { ScheduleNavSection } from '@hcengineering/calendar-resources'
   import { getCurrentEmployee } from '@hcengineering/contact'
   import { Ref, getCurrentAccount } from '@hcengineering/core'
-  import { Asset, getMetadata, getResource, IntlString } from '@hcengineering/platform'
+  import { Asset, getEmbeddedLabel, getMetadata, getResource, IntlString } from '@hcengineering/platform'
   import { createQuery } from '@hcengineering/presentation'
   import { NavFooter } from '@hcengineering/workbench-resources'
   import tagsPlugin, { TagElement as TagElementType } from '@hcengineering/tags'
@@ -18,6 +18,8 @@
     themeStore,
     deviceOptionsStore as deviceInfo,
     ButtonIcon,
+    Button,
+    IconAdd,
     showPopup,
     Menu,
     IconMoreV,
@@ -114,7 +116,7 @@
 
   $: actions = getHeaderMenuActions()
 
-  function getHeaderMenuActions (): Action[] {
+  function getHeaderMenuActions(): Action[] {
     const actions: Action[] = []
     if (getMetadata(calendar.metadata.CalDavServerURL)) {
       actions.push({
@@ -130,7 +132,7 @@
     return actions
   }
 
-  function menuButtonClicked (ev: MouseEvent): void {
+  function menuButtonClicked(ev: MouseEvent): void {
     pressed = true
     showPopup(Menu, { actions }, ev.target as HTMLElement, () => {
       pressed = false
@@ -148,6 +150,18 @@
       {#if actions.length > 0}
         <ButtonIcon icon={IconMoreV} hasMenu {pressed} kind="tertiary" size="small" on:click={menuButtonClicked} />
       {/if}
+    </div>
+
+    <div class="px-4 pb-3 flex-no-shrink">
+      <Button
+        icon={IconAdd}
+        label={getEmbeddedLabel('New event')}
+        kind="primary"
+        borderStyle="none"
+        width="100%"
+        dataId="planner-new-event"
+        on:click={() => showPopup(calendar.component.CreateEvent, { date: new Date(currentDate) }, 'top')}
+      />
     </div>
 
     <Scroller shrink>
