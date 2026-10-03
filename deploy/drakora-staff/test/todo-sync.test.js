@@ -253,6 +253,8 @@ function fixture(t, options = {}) {
               throw new Error("Lost message response");
             }
           } else if (method === "DELETE") {
+            if (archived.has(channelId))
+              return Response.json({ code: 50083 }, { status: 400 });
             messages.delete(messageId);
             return new Response(null, { status: 204 });
           } else if (method === "PATCH") {
@@ -1161,6 +1163,12 @@ test("archived posts update assignments and comments while retaining archival an
     updates.map((request) => request.body.archived),
     [false, undefined, true],
   );
+  s.comments.length = 0;
+  await s.sync.sync();
+  assert.equal(s.messages.size, 1);
+  assert.equal(s.thread.thread_metadata.archived, true);
+  assert.equal(s.thread.thread_metadata.locked, true);
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
 });
 
 test("failed rearchival remains durable and retries even without another content change", async (t) => {

@@ -174,8 +174,8 @@ export function discordTodoSync(
     let restore = store.get("discord-todo-archive", thread.id);
     const threadDiscord = async (path, options = {}) => {
       if (
-        ["POST", "PATCH"].includes(options.method) &&
-        (path === `/channels/${thread.id}` ||
+        ["POST", "PATCH", "DELETE"].includes(options.method) &&
+        ((path === `/channels/${thread.id}` && options.method !== "DELETE") ||
           path.startsWith(`/channels/${thread.id}/messages`) ||
           (path.startsWith("/webhooks/") &&
             new URL(`https://discord.invalid${path}`).searchParams.get(
