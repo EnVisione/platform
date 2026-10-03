@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ruleSections,
@@ -23,6 +23,89 @@ const artwork = {
   "restless-horizons": restlessHorizons,
 };
 const storeUrl = "https://store.drakora.org";
+function PublicNavigation({ path }) {
+  const [open, setOpen] = useState(false);
+  const navigation = useRef(null);
+  const toggle = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const mobile = matchMedia("(max-width: 900px)");
+    const resize = () => {
+      if (!mobile.matches) setOpen(false);
+    };
+    const dismiss = (event) => {
+      if (!navigation.current?.contains(event.target)) setOpen(false);
+    };
+    const escape = (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    };
+    mobile.addEventListener("change", resize);
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      mobile.removeEventListener("change", resize);
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <nav
+      ref={navigation}
+      className="public-nav"
+      aria-label="Main navigation"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <a href="/" className="public-mobile-brand">
+        Drakora
+      </a>
+      <button
+        ref={toggle}
+        type="button"
+        className="public-menu"
+        aria-label={open ? "Close menu" : "Open menu"}
+        aria-expanded={open}
+        aria-controls="public-links"
+        onClick={() => setOpen((previous) => !previous)}
+      >
+        <PublicIcon name={open ? "close" : "menu"} /> Menu
+      </button>
+      <div id="public-links" className={open ? "open" : ""}>
+        {[
+          ["Home", "/", "home"],
+          ["Servers", "/servers", "servers"],
+          ["Store", storeUrl, "store"],
+          ["Rules", "/rules", "rules"],
+          ["Apply", "/apply", "apply"],
+          ["Need help?", "/help", "help"],
+        ].map(([name, href, icon]) => (
+          <a
+            key={name}
+            href={href}
+            className={name === "Store" ? "public-store-link" : ""}
+            aria-current={
+              (
+                href === "/"
+                  ? path === "/"
+                  : path === href || path.startsWith(href + "/")
+              )
+                ? "page"
+                : undefined
+            }
+            onClick={() => setOpen(false)}
+          >
+            <PublicIcon name={icon} />
+            {name}
+          </a>
+        ))}
+      </div>
+    </nav>
+  );
+}
 function CopyAddress({ address = "play.drakora.org", large = false }) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -350,8 +433,7 @@ function HelpPage({ help, discordInvite }) {
 function PublicSite() {
   const [content, setContent] = useState(null),
     [error, setError] = useState(false),
-    [status, setStatus] = useState(null),
-    [menu, setMenu] = useState(false);
+    [status, setStatus] = useState(null);
   const path = location.pathname.replace(/\/$/, "") || "/";
   useEffect(() => {
     const controller = new AbortController();
@@ -426,47 +508,7 @@ function PublicSite() {
         Skip to content
       </a>
       <header className={`public-header${home ? " home" : ""}`}>
-        <nav className="public-nav" aria-label="Main navigation">
-          <a href="/" className="public-mobile-brand">
-            Drakora
-          </a>
-          <button
-            className="public-menu"
-            aria-expanded={menu}
-            aria-controls="public-links"
-            onClick={() => setMenu(!menu)}
-          >
-            <PublicIcon name="menu" /> Menu
-          </button>
-          <div id="public-links" className={menu ? "open" : ""}>
-            {[
-              ["Home", "/", "home"],
-              ["Servers", "/servers", "servers"],
-              ["Store", storeUrl, "store"],
-              ["Rules", "/rules", "rules"],
-              ["Apply", "/apply", "apply"],
-              ["Need help?", "/help", "help"],
-            ].map(([name, href, icon]) => (
-              <a
-                key={name}
-                href={href}
-                className={name === "Store" ? "public-store-link" : ""}
-                aria-current={
-                  (
-                    href === "/"
-                      ? home
-                      : path === href || path.startsWith(href + "/")
-                  )
-                    ? "page"
-                    : undefined
-                }
-              >
-                <PublicIcon name={icon} />
-                {name}
-              </a>
-            ))}
-          </div>
-        </nav>
+        <PublicNavigation path={path} />
         <div className="public-masthead">
           <div className="public-join">
             <CopyAddress large />

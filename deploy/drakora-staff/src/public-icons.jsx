@@ -17,6 +17,7 @@ const paths = {
     "M2 5h20v5a2 2 0 0 0 0 4v5H2v-5a2 2 0 0 0 0-4zm12 3v2h2V8zm0 5v3h2v-3z",
   play: "M6 3v18l16-9z",
   menu: "M3 4h18v3H3zm0 7h18v3H3zm0 7h18v3H3z",
+  close: "m5 3 7 7 7-7 2 2-7 7 7 7-2 2-7-7-7 7-2-2 7-7-7-7z",
   arrow: "M3 10h11V5l7 7-7 7v-5H3z",
   back: "M21 10H10V5l-7 7 7 7v-5h11z",
   external: "M13 3h8v8h-3V8l-9 9-2-2 9-9h-3zM3 5h7v3H6v10h10v-4h3v7H3z",
