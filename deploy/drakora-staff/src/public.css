@@ -527,7 +527,8 @@ button {
 .public-application h2,
 .public-rule-text h2,
 .public-help-grid .public-heading,
-.public-home-grid .public-heading {
+.public-home-grid .public-heading,
+.public-detail-grid .public-heading {
   color: #b7a080;
 }
 .public-application h2 {

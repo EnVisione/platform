@@ -549,7 +549,7 @@ function PublicSite() {
                   </dl>
                   {server.downloadUrl && (
                     <a
-                      className="public-button"
+                      className="public-button beige"
                       href={server.downloadUrl}
                       target="_blank"
                       rel="noopener noreferrer"
