@@ -13,6 +13,13 @@ export const applicationSections = [
   { id: "note", name: "Part of the community" },
 ];
 
+export const serverArtwork = [
+  { id: "prominence", name: "Prominence II logo" },
+  { id: "restless-horizons", name: "Restless Horizons logo" },
+  { id: "castle", name: "Medieval castle" },
+  { id: "forest", name: "Forest ruins" },
+];
+
 export function newServer() {
   return {
     slug: "",
@@ -24,6 +31,7 @@ export function newServer() {
     packVersion: "",
     minecraftVersion: "",
     downloadUrl: "",
+    logoUrl: "",
     worlds: "",
     joining:
       "Add play.drakora.org to your multiplayer server list, then choose your world in the lobby.",
@@ -86,6 +94,8 @@ export const initialWebsite = {
         "Explore, build and progress together in Prominence II. Choose a world and make it your home. Our Discord is the place for pack updates, community events and help from staff.",
       worlds: "Luna, Terra, Sol",
       rules: "prom2",
+      artwork: "prominence",
+      downloadUrl: "https://modrinth.com/modpack/prominence-2-fabric",
       published: true,
     },
     {
@@ -98,7 +108,9 @@ export const initialWebsite = {
         "Find your next adventure in Restless Horizons. Join other Drakora players, build together and settle into a shared world. Check Discord for pack updates, community events and support.",
       worlds: "Eclipse, Void",
       rules: "restless-horizons",
-      artwork: "forest",
+      artwork: "restless-horizons",
+      downloadUrl:
+        "https://www.curseforge.com/minecraft/modpacks/restless-horizons",
       published: true,
     },
   ],

@@ -245,7 +245,7 @@ app.use((req, res, next) => {
   if ([staffHost, applicationHost].includes(req.headers.host))
     res.set(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' ${req.headers.host === applicationHost && config.website ? "https:" : "https://cdn.discordapp.com"}; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
   next();
 });

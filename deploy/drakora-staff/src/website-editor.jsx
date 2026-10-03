@@ -4,6 +4,7 @@ import {
   applicationSections,
   newServer,
   newAnnouncement,
+  serverArtwork,
 } from "../shared/website.js";
 import "./website-editor.css";
 const messages = {
@@ -12,7 +13,7 @@ const messages = {
   website_content_changed:
     "Another staff member saved changes. Your draft is still here. Reload the published content before editing again.",
   invalid_website_content:
-    "Check the Home and Apply text, announcement titles, text and dates. Check each server’s required fields and use HTTPS download links. Rules cannot be empty.",
+    "Check the Home and Apply text, announcement titles, text and dates. Check each server’s required fields and use HTTPS download and logo links. Rules cannot be empty.",
   duplicate_server_slug: "Each server needs a different URL slug.",
   website_role_required:
     "Only Admin, Manager and Founder staff can edit the public website.",
@@ -477,6 +478,7 @@ export function WebsiteEditor({ csrf }) {
                           ["minecraftVersion", "Minecraft version", 40],
                           ["worlds", "Worlds", 200],
                           ["downloadUrl", "Download modpack URL", 500],
+                          ["logoUrl", "Custom pack logo URL", 500],
                         ].map(([field, label, maxLength]) => (
                           <label className="website-field" key={field}>
                             {label}
@@ -486,12 +488,16 @@ export function WebsiteEditor({ csrf }) {
                               required={["name", "slug", "address"].includes(
                                 field,
                               )}
-                              type={field === "downloadUrl" ? "url" : "text"}
+                              type={
+                                ["downloadUrl", "logoUrl"].includes(field)
+                                  ? "url"
+                                  : "text"
+                              }
                               onChange={(event) =>
                                 updateServer(field, event.target.value)
                               }
                               placeholder={
-                                field === "downloadUrl"
+                                ["downloadUrl", "logoUrl"].includes(field)
                                   ? "https://… (optional)"
                                   : field === "slug"
                                     ? "prom2"
@@ -504,7 +510,9 @@ export function WebsiteEditor({ csrf }) {
                       <p className="website-help">
                         The URL slug uses lowercase letters, numbers and
                         hyphens. Changing it changes the page address. Versions
-                        and download links can stay empty until confirmed.
+                        and download links can stay empty until confirmed. A
+                        custom HTTPS logo replaces the selected image. Leave it
+                        empty to use the selected pack logo or artwork.
                       </p>
                       <label className="website-field">
                         Short description
@@ -558,15 +566,18 @@ export function WebsiteEditor({ csrf }) {
                           </select>
                         </label>
                         <label className="website-field">
-                          Artwork
+                          Pack logo or fallback artwork
                           <select
                             value={server.artwork}
                             onChange={(event) =>
                               updateServer("artwork", event.target.value)
                             }
                           >
-                            <option value="castle">Medieval castle</option>
-                            <option value="forest">Forest ruins</option>
+                            {serverArtwork.map((art) => (
+                              <option key={art.id} value={art.id}>
+                                {art.name}
+                              </option>
+                            ))}
                           </select>
                         </label>
                       </div>

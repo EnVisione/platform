@@ -240,6 +240,96 @@ test("Home announcements migrate existing content, persist and publish only visi
   assert.deepEqual(service.publicContent().home.announcements, []);
 });
 
+test("legacy server cards receive pack logos and download links without replacing staff content", (t) => {
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => database.store.close());
+  const legacy = draft();
+  legacy.revision = 9;
+  for (const [i, server] of legacy.servers.entries()) {
+    delete server.logoUrl;
+    server.artwork = i === 0 ? "castle" : "forest";
+    server.downloadUrl = "";
+  }
+  legacy.servers[0].summary = "Keep our edited description.";
+  legacy.servers[1].downloadUrl = "https://example.com/our-pack";
+  legacy.servers.push({
+    ...legacy.servers[0],
+    slug: "custom-pack",
+    pack: "Different pack",
+    artwork: "forest",
+  });
+  database.store.set(
+    "website-content",
+    "current",
+    legacy,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const service = websiteService(config, database.store);
+  const migrated = service.read(admin);
+  assert.equal(migrated.revision, 9);
+  assert.deepEqual(migrated.home, legacy.home);
+  assert.deepEqual(migrated.apply, legacy.apply);
+  assert.deepEqual(migrated.rules, legacy.rules);
+  assert.equal(migrated.servers[0].summary, legacy.servers[0].summary);
+  assert.equal(migrated.servers[0].artwork, "prominence");
+  assert.equal(
+    migrated.servers[0].downloadUrl,
+    initialWebsite.servers[0].downloadUrl,
+  );
+  assert.equal(migrated.servers[1].artwork, "restless-horizons");
+  assert.equal(migrated.servers[1].downloadUrl, legacy.servers[1].downloadUrl);
+  assert.equal(migrated.servers[2].artwork, "forest");
+  assert.equal(migrated.servers[2].downloadUrl, "");
+  assert.equal(service.publicContent().servers[0].artwork, "prominence");
+  migrated.servers[0].logoUrl = "https://example.com/logo.png";
+  const saved = service.save(admin, migrated);
+  assert.equal(
+    service.publicContent().servers[0].logoUrl,
+    saved.servers[0].logoUrl,
+  );
+  const olderEditor = structuredClone(saved);
+  delete olderEditor.servers[0].logoUrl;
+  assert.equal(
+    service.save(admin, olderEditor).servers[0].logoUrl,
+    saved.servers[0].logoUrl,
+  );
+  const clearLogo = service.read(admin);
+  clearLogo.servers[0].logoUrl = "";
+  clearLogo.servers[0].downloadUrl = "";
+  clearLogo.servers[0].artwork = "forest";
+  service.save(admin, clearLogo);
+  assert.equal(service.publicContent().servers[0].logoUrl, "");
+  assert.equal(service.publicContent().servers[0].downloadUrl, "");
+  assert.equal(service.publicContent().servers[0].artwork, "forest");
+});
+
+test("pack logos accept HTTPS URLs and reject unsafe URLs and unknown artwork", () => {
+  for (const value of [
+    "http://example.com/logo.png",
+    "javascript:alert(1)",
+    "data:image/png;base64,a",
+    "https://user:pass@example.com/logo.png",
+    "not a URL",
+    "a".repeat(501),
+  ]) {
+    const edit = draft();
+    edit.servers[0].logoUrl = value;
+    assert.throws(() => validateWebsite(edit), {
+      code: "invalid_website_content",
+    });
+  }
+  const edit = draft();
+  edit.servers[0].logoUrl = "https://example.com/logo.png";
+  assert.equal(
+    validateWebsite(edit).servers[0].logoUrl,
+    edit.servers[0].logoUrl,
+  );
+  edit.servers[0].artwork = "unknown";
+  assert.throws(() => validateWebsite(edit), {
+    code: "invalid_website_content",
+  });
+});
+
 test("announcement validation bounds content and rejects malformed dates and duplicate identifiers", () => {
   const base = draft();
   base.home.announcements = [

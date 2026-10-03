@@ -3,6 +3,7 @@ import {
   initialWebsite,
   ruleSections,
   applicationSections,
+  serverArtwork,
 } from "../shared/website.js";
 
 export function websiteAccess(config, user) {
@@ -93,7 +94,7 @@ export function validateWebsite(input) {
     if (
       !entry ||
       typeof entry.published !== "boolean" ||
-      !["castle", "forest"].includes(entry.artwork) ||
+      !serverArtwork.some((art) => art.id === entry.artwork) ||
       !ruleSections.some((section) => section.id === entry.rules)
     )
       throw new AuthError("invalid_website_content", 400);
@@ -107,6 +108,7 @@ export function validateWebsite(input) {
       packVersion: text(entry.packVersion, 60),
       minecraftVersion: text(entry.minecraftVersion, 40),
       downloadUrl: text(entry.downloadUrl, 500),
+      logoUrl: text(entry.logoUrl ?? "", 500),
       worlds: text(entry.worlds, 200),
       joining: text(entry.joining, 6000, true),
       rules: entry.rules,
@@ -123,10 +125,10 @@ export function validateWebsite(input) {
           Number(server.address.split(":")[1]) > 65535))
     )
       throw new AuthError("invalid_website_content", 400);
-    if (server.downloadUrl) {
+    for (const value of [server.downloadUrl, server.logoUrl].filter(Boolean)) {
       let url;
       try {
-        url = new URL(server.downloadUrl);
+        url = new URL(value);
       } catch {
         throw new AuthError("invalid_website_content", 400);
       }
@@ -150,6 +152,23 @@ export function websiteService(config, store) {
       ...saved,
       home: saved.home ?? structuredClone(initialWebsite.home),
       apply: saved.apply ?? structuredClone(initialWebsite.apply),
+      servers: saved.servers.map((server) => {
+        if (server.logoUrl !== undefined) return server;
+        const pack = initialWebsite.servers.find(
+          (entry) => entry.slug === server.slug && entry.pack === server.pack,
+        );
+        const oldArtwork = server.slug === "prom2" ? "castle" : "forest";
+        return {
+          ...server,
+          logoUrl: "",
+          artwork:
+            pack && server.artwork === oldArtwork
+              ? pack.artwork
+              : server.artwork,
+          downloadUrl:
+            pack && !server.downloadUrl ? pack.downloadUrl : server.downloadUrl,
+        };
+      }),
     };
   };
   const authorize = (user) => {
@@ -187,6 +206,19 @@ export function websiteService(config, store) {
           ...input,
           home: input.home ?? previous.home,
           apply: input.apply ?? previous.apply,
+          servers: Array.isArray(input.servers)
+            ? input.servers.map((server) =>
+                server && server.logoUrl === undefined
+                  ? {
+                      ...server,
+                      logoUrl:
+                        previous.servers.find(
+                          (entry) => entry.slug === server.slug,
+                        )?.logoUrl ?? "",
+                    }
+                  : server,
+              )
+            : input.servers,
         });
         const next = {
           ...content,

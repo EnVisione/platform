@@ -4,9 +4,16 @@ import { ruleSections, applicationSections } from "../shared/website.js";
 import logo from "./assets/drakora-logo.png";
 import castle from "./assets/medieval-castle.svg";
 import forest from "./assets/medieval-forest.svg";
+import prominence from "./assets/prominence-logo.png";
+import restlessHorizons from "./assets/restless-horizons-logo.png";
 import "./public.css";
 
-const artwork = { castle, forest };
+const artwork = {
+  castle,
+  forest,
+  prominence,
+  "restless-horizons": restlessHorizons,
+};
 const storeUrl = "https://store.drakora.org";
 function CopyAddress({ address = "play.drakora.org", large = false }) {
   const [copied, setCopied] = useState(false);
@@ -44,6 +51,28 @@ function Paragraphs({ text }) {
     .filter(Boolean)
     .map((paragraph, i) => <p key={i}>{paragraph}</p>);
 }
+function ServerArtwork({ server, decorative = false }) {
+  const [failedUrl, setFailedUrl] = useState("");
+  const customLogo = server.logoUrl && server.logoUrl !== failedUrl;
+  const isLogo = customLogo || !["castle", "forest"].includes(server.artwork);
+  return (
+    <img
+      className={isLogo ? "public-pack-logo" : undefined}
+      src={customLogo ? server.logoUrl : artwork[server.artwork]}
+      alt={
+        decorative
+          ? ""
+          : isLogo
+            ? `${server.pack || server.name} logo`
+            : `${server.name} medieval landscape`
+      }
+      referrerPolicy="no-referrer"
+      onError={() => {
+        if (customLogo) setFailedUrl(server.logoUrl);
+      }}
+    />
+  );
+}
 function ServerCard({ server }) {
   return (
     <article className="public-server">
@@ -53,7 +82,7 @@ function ServerCard({ server }) {
         tabIndex={-1}
         aria-hidden="true"
       >
-        <img src={artwork[server.artwork]} alt="" />
+        <ServerArtwork server={server} decorative />
       </a>
       <div className="public-server-body">
         <span className="public-eyebrow">
@@ -71,6 +100,16 @@ function ServerCard({ server }) {
           <a className="public-button" href={`/servers/${server.slug}`}>
             View server <span aria-hidden="true">→</span>
           </a>
+          {server.downloadUrl && (
+            <a
+              className="public-button secondary"
+              href={server.downloadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Download pack <span aria-hidden="true">↗</span>
+            </a>
+          )}
           <CopyAddress address={server.address} />
         </div>
       </div>
@@ -348,11 +387,9 @@ function PublicSite() {
             </div>
             <div className="public-detail-grid">
               <article>
-                <img
-                  className="public-detail-art"
-                  src={artwork[server.artwork]}
-                  alt={`${server.name} medieval landscape`}
-                />
+                <div className="public-detail-art">
+                  <ServerArtwork server={server} />
+                </div>
                 <section className="public-panel">
                   <h2>About the server</h2>
                   <Paragraphs text={server.description} />
@@ -389,7 +426,7 @@ function PublicSite() {
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      Download modpack ↗
+                      Download pack ↗
                     </a>
                   )}
                 </section>

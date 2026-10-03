@@ -293,6 +293,12 @@ button {
 .public-server-actions .public-address strong {
   font-size: 12px;
 }
+.public-server-actions .public-button.secondary {
+  width: auto;
+}
+.public-server-actions .public-address {
+  flex-basis: 100%;
+}
 .public-panel {
   background: #222321;
   padding: 28px;
@@ -365,9 +371,22 @@ button {
 }
 .public-detail-art {
   width: 100%;
-  max-height: 300px;
+  height: 300px;
+  background: #222321;
+}
+.public-detail-art img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   display: block;
+}
+.public-server-art {
+  background: #222321;
+}
+.public-server-art .public-pack-logo,
+.public-detail-art .public-pack-logo {
+  object-fit: contain;
+  padding: 18px;
 }
 .public-detail-grid article .public-panel {
   margin-bottom: 24px;
