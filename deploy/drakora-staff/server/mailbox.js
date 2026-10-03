@@ -232,15 +232,35 @@ export function mailboxService(config, store, dependencies = {}) {
         return priority(a) - priority(b) || a.name.localeCompare(b.name);
       });
   }
-  const identityScope = {
-    or: identities.flatMap(({ address }) => [
+  const addressQuery = (list) => ({
+    or: list.flatMap((address) => [
       { to: address },
       { cc: address },
       { bcc: address },
       { from: address },
       { header: { "Delivered-To": address } },
     ]),
-  };
+  });
+  function allowedAddresses(scope) {
+    if (scope === undefined)
+      return identities.map(({ address }) => address.toLowerCase());
+    if (!Array.isArray(scope)) throw invalid();
+    return identities
+      .map(({ address }) => address.toLowerCase())
+      .filter((address) => scope.includes(address));
+  }
+  function scopedQuery(scope) {
+    const allowed = allowedAddresses(scope);
+    if (!allowed.length) throw new AuthError("mail_role_required");
+    const denied = identities
+      .map(({ address }) => address.toLowerCase())
+      .filter((address) => !allowed.includes(address));
+    return {
+      ...addressQuery(allowed),
+      ...(denied.length ? { not: addressQuery(denied) } : {}),
+    };
+  }
+  const identityScope = scopedQuery();
   const identityAddresses = new Set(
     identities.map(({ address }) => lower(address)),
   );
@@ -332,7 +352,7 @@ export function mailboxService(config, store, dependencies = {}) {
     folderPath(input.folder);
     return Number(input.uid);
   }
-  async function scopedMessage(client, input, query) {
+  async function scopedMessage(client, input, query, scope) {
     const uid = messageKey(input);
     const record = await client.fetchOne(
       uid,
@@ -349,27 +369,47 @@ export function mailboxService(config, store, dependencies = {}) {
     );
     if (!record || record.uid !== uid)
       throw new AuthError("mail_not_found", 404);
-    const envelope = record.envelope ?? {};
-    if (
-      [envelope.from, envelope.to, envelope.cc, envelope.bcc].some(
-        matchesIdentity,
-      )
-    )
-      return record;
     const parsed = await simpleParser(record.headers ?? Buffer.alloc(0), {
       skipHtmlToText: true,
       skipTextToHtml: true,
     });
-    const deliveredTo = parsed.headers.get("delivered-to");
-    const deliveries = Array.isArray(deliveredTo) ? deliveredTo : [deliveredTo];
-    if (!deliveries.some((entry) => matchesIdentity(entry?.value)))
+    const matched = recordIdentities(record, parsed);
+    const allowed = allowedAddresses(scope);
+    if (
+      !matched.length ||
+      matched.some((address) => !allowed.includes(address))
+    )
       throw new AuthError("mail_not_found", 404);
+    record.mailboxes = matched;
     return record;
   }
+  function recordIdentities(record, parsed) {
+    const envelope = record.envelope ?? {};
+    const delivered = [].concat(parsed?.headers.get("delivered-to") ?? []);
+    const values = [
+      ...(envelope.from || []),
+      ...(envelope.to || []),
+      ...(envelope.cc || []),
+      ...(envelope.bcc || []),
+      ...delivered.flatMap((entry) => entry?.value || []),
+    ];
+    const found = new Set();
+    const visit = (list) => {
+      for (const entry of list) {
+        const address = lower(String(entry.address ?? ""));
+        if (identityAddresses.has(address)) found.add(address);
+        if (entry.group) visit(entry.group);
+      }
+    };
+    visit(values);
+    return [...found];
+  }
+
   function summary(record) {
     const envelope = record.envelope ?? {};
     return {
       uid: record.uid,
+      mailboxes: record.mailboxes ?? recordIdentities(record),
       subject: String(envelope.subject ?? "(No subject)").slice(0, 500),
       from: addresses(envelope.from),
       to: addresses(envelope.to),
@@ -438,7 +478,7 @@ export function mailboxService(config, store, dependencies = {}) {
             specialUse: entry.specialUse ?? null,
           }));
       }),
-    attention: () =>
+    attention: (scope) =>
       connection(async (client) => {
         const folders = selectableFolders(
           await client.list({ listOnly: true }),
@@ -454,7 +494,7 @@ export function mailboxService(config, store, dependencies = {}) {
           true,
           async () => {
             const uids =
-              (await client.search(identityScope, { uid: true })) || [];
+              (await client.search(scopedQuery(scope), { uid: true })) || [];
             let unread = 0;
             for (let offset = 0; offset < uids.length; offset += 100) {
               const records = await client.fetchAll(
@@ -462,11 +502,23 @@ export function mailboxService(config, store, dependencies = {}) {
                 {
                   envelope: true,
                   flags: true,
-                  headers: ["message-id"],
+                  headers: ["message-id", "delivered-to"],
                 },
                 { uid: true },
               );
               for (const record of records) {
+                const scopedHeaders = await simpleParser(
+                  record.headers ?? Buffer.alloc(0),
+                  { skipHtmlToText: true, skipTextToHtml: true },
+                );
+                const matched = recordIdentities(record, scopedHeaders);
+                if (
+                  !matched.length ||
+                  matched.some(
+                    (address) => !allowedAddresses(scope).includes(address),
+                  )
+                )
+                  continue;
                 if (matchesIdentity(record.envelope?.from)) continue;
                 if (!record.flags?.has("\\Seen")) unread++;
                 const parsed = await simpleParser(
@@ -543,7 +595,7 @@ export function mailboxService(config, store, dependencies = {}) {
           folder: inbox.path,
         };
       }),
-    list(input) {
+    list(input, allowed) {
       folderPath(input.folder);
       if (
         typeof (input.search ?? "") !== "string" ||
@@ -556,17 +608,15 @@ export function mailboxService(config, store, dependencies = {}) {
           !identities.some((entry) => entry.address === input.identity))
       )
         throw invalid();
-      const scope = input.identity
-        ? {
-            or: [
-              { to: input.identity },
-              { cc: input.identity },
-              { bcc: input.identity },
-              { from: input.identity },
-              { header: { "Delivered-To": input.identity } },
-            ],
-          }
-        : identityScope;
+      if (
+        input.identity &&
+        !allowedAddresses(allowed).includes(input.identity.toLowerCase())
+      )
+        throw new AuthError("mail_role_required");
+      const scope = {
+        ...scopedQuery(allowed),
+        ...(input.identity ? { or: addressQuery([input.identity]).or } : {}),
+      };
       return connection((client) =>
         mailbox(client, input.folder, undefined, true, async (validity) => {
           const query = { ...scope };
@@ -578,13 +628,33 @@ export function mailboxService(config, store, dependencies = {}) {
           const messages = uids.length
             ? await client.fetchAll(
                 uids,
-                { envelope: true, flags: true, size: true },
+                {
+                  envelope: true,
+                  flags: true,
+                  size: true,
+                  headers: ["delivered-to"],
+                },
                 { uid: true },
               )
             : [];
+          for (const record of messages) {
+            const parsed = await simpleParser(
+              record.headers ?? Buffer.alloc(0),
+              { skipHtmlToText: true, skipTextToHtml: true },
+            );
+            record.mailboxes = recordIdentities(record, parsed);
+          }
           messages.sort((a, b) => b.uid - a.uid);
           return {
-            items: messages.map(summary),
+            items: messages
+              .filter(
+                (record) =>
+                  record.mailboxes.length &&
+                  record.mailboxes.every((address) =>
+                    allowedAddresses(allowed).includes(address),
+                  ),
+              )
+              .map(summary),
             total: matches.length,
             offset: input.offset,
             validity,
@@ -592,15 +662,20 @@ export function mailboxService(config, store, dependencies = {}) {
         }),
       );
     },
-    detail(input, markRead = false) {
+    detail(input, markRead = false, scope) {
       return inMessage(input, !markRead, async (client) => {
-        const record = await scopedMessage(client, input, {
-          envelope: true,
-          flags: true,
-          size: true,
-          bodyStructure: true,
-          headers: ["reply-to", "message-id", "references", "in-reply-to"],
-        });
+        const record = await scopedMessage(
+          client,
+          input,
+          {
+            envelope: true,
+            flags: true,
+            size: true,
+            bodyStructure: true,
+            headers: ["reply-to", "message-id", "references", "in-reply-to"],
+          },
+          scope,
+        );
         const parsed = await simpleParser(record.headers ?? Buffer.alloc(0), {
           skipHtmlToText: true,
           skipTextToHtml: true,
@@ -672,6 +747,9 @@ export function mailboxService(config, store, dependencies = {}) {
           text,
           html,
           replyText,
+          messageId: parsed.messageId,
+          inReplyTo: parsed.inReplyTo,
+          references: [].concat(parsed.references || []),
           replyTo: addresses(
             parsed.replyTo?.value ??
               record.envelope?.replyTo ??
@@ -681,12 +759,17 @@ export function mailboxService(config, store, dependencies = {}) {
         };
       });
     },
-    attachment(input) {
+    attachment(input, scope) {
       if (!/^\d+(?:\.\d+){0,12}$/.test(input.part ?? "")) throw invalid();
       return inMessage(input, true, async (client) => {
-        const record = await scopedMessage(client, input, {
-          bodyStructure: true,
-        });
+        const record = await scopedMessage(
+          client,
+          input,
+          {
+            bodyStructure: true,
+          },
+          scope,
+        );
         const part = partsOf(record.bodyStructure).find(
           (entry) => (entry.part || "1") === input.part,
         );
@@ -710,7 +793,7 @@ export function mailboxService(config, store, dependencies = {}) {
         };
       });
     },
-    flags(input) {
+    flags(input, scope) {
       if (
         !input ||
         !["seen", "starred"].includes(input.flag) ||
@@ -718,7 +801,7 @@ export function mailboxService(config, store, dependencies = {}) {
       )
         throw invalid();
       return inMessage(input, false, async (client) => {
-        await scopedMessage(client, input, { uid: true });
+        await scopedMessage(client, input, { uid: true }, scope);
         const flag = input.flag === "seen" ? "\\Seen" : "\\Flagged";
         const changed = input.value
           ? await client.messageFlagsAdd(Number(input.uid), [flag], {
@@ -731,9 +814,9 @@ export function mailboxService(config, store, dependencies = {}) {
         return { ok: true };
       });
     },
-    trash(input) {
+    trash(input, scope) {
       return inMessage(input, false, async (client, folders) => {
-        await scopedMessage(client, input, { uid: true });
+        await scopedMessage(client, input, { uid: true }, scope);
         const trash = folders.find((entry) => entry.specialUse === "\\Trash");
         if (!trash) throw new AuthError("mail_trash_unavailable", 503);
         if (trash.path === input.folder) throw invalid();
@@ -744,9 +827,12 @@ export function mailboxService(config, store, dependencies = {}) {
         return { ok: true };
       });
     },
-    async send(userId, input) {
+    async send(userId, input, access, options = {}) {
       if (closed) throw new AuthError("mail_unavailable", 503);
       const mail = validateMailDraft(input, identities);
+      const action = input.reply?.kind === "reply" ? "reply" : "send";
+      if (access && !access[action]?.includes(mail.from.address.toLowerCase()))
+        throw new AuthError("mail_role_required");
       const digest = createHash("sha256")
         .update(JSON.stringify(input))
         .digest("hex");
@@ -764,13 +850,33 @@ export function mailboxService(config, store, dependencies = {}) {
         let repliedMessageId;
         if (input.reply?.kind === "reply") {
           const headers = await inMessage(input.reply, true, async (client) => {
-            const original = await scopedMessage(client, input.reply, {
-              headers: ["message-id", "references"],
-            });
-            return simpleParser(original.headers ?? Buffer.alloc(0), {
-              skipHtmlToText: true,
-              skipTextToHtml: true,
-            });
+            const original = await scopedMessage(
+              client,
+              input.reply,
+              {
+                headers: ["message-id", "references", "reply-to"],
+              },
+              access?.view,
+            );
+            const parsed = await simpleParser(
+              original.headers ?? Buffer.alloc(0),
+              { skipHtmlToText: true, skipTextToHtml: true },
+            );
+            if (access) {
+              const destinations = [
+                ...(parsed.replyTo?.value || original.envelope?.from || []),
+                ...(original.envelope?.to || []),
+                ...(original.envelope?.cc || []),
+              ].map(({ address }) => String(address || "").toLowerCase());
+              if (
+                !original.mailboxes.includes(mail.from.address.toLowerCase()) ||
+                [...mail.to, ...mail.cc, ...mail.bcc].some(
+                  (address) => !destinations.includes(address),
+                )
+              )
+                throw new AuthError("mail_role_required");
+            }
+            return parsed;
           });
           const messageId = headers.messageId;
           const validId = (value) =>
@@ -789,7 +895,9 @@ export function mailboxService(config, store, dependencies = {}) {
             ];
           }
         }
-        const messageId = `<${randomUUID()}@${mail.from.address.split("@")[1]}>`;
+        const messageId =
+          options.messageId ??
+          `<${randomUUID()}@${mail.from.address.split("@")[1]}>`;
         // retain the send receipt without message bodies or attachment data.
         store.set(
           "mail-send",

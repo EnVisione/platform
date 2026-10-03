@@ -639,3 +639,25 @@
     gap: 10px;
   }
 }
+
+.ticket-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 20px 0;
+}
+.ticket-category-tabs button {
+  border: 0;
+  border-radius: 8px;
+  background: #282a2e;
+  padding: 14px 18px;
+  color: #dcdee1;
+}
+.ticket-category-tabs button[aria-pressed="true"] {
+  background: #a6382b;
+  color: white;
+}
+.ticket-category-tabs span {
+  margin-left: 10px;
+  font-weight: 700;
+}

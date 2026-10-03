@@ -13,6 +13,7 @@ import restlessHorizons from "./assets/restless-horizons-logo.png";
 import "./public.css";
 import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
+import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire } from "./public-fire.jsx";
 
 const artwork = {
@@ -151,6 +152,39 @@ function ServerCard({ server }) {
     </article>
   );
 }
+function PartnershipBanner({ discordInvite }) {
+  return (
+    <section
+      className="public-welcome public-partnership"
+      aria-labelledby="partnership-title"
+    >
+      <div className="public-welcome-art" aria-hidden="true">
+        <img src={forest} alt="" />
+      </div>
+      <div className="public-welcome-copy">
+        <span className="public-eyebrow">A HOME FOR YOUR NEXT CHAPTER</span>
+        <PublicHeading as="h2" icon="servers" id="partnership-title">
+          Your modpack. Our next adventure.
+        </PublicHeading>
+        <p>
+          Want your modpack featured on the Drakora network? Let’s build a place
+          for your community to play.
+        </p>
+        <div className="public-partner-actions">
+          <a className="public-button beige" href="/partners">
+            Partner with us <PublicIcon name="arrow" />
+          </a>
+          <a href={discordInvite}>
+            <PublicIcon name="discord" /> Talk on Discord
+          </a>
+          <a href="mailto:partners@drakora.org">
+            <PublicIcon name="mail" /> partners@drakora.org
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
 function HomePage({ home, discordInvite }) {
   return (
     <>
@@ -171,6 +205,7 @@ function HomePage({ home, discordInvite }) {
           <img src={castle} alt="" />
         </div>
       </section>
+      <PartnershipBanner discordInvite={discordInvite} />
       <div className="public-home-grid">
         <section
           className="public-announcements"
@@ -367,17 +402,20 @@ function PublicSite() {
     (path === "/rules" ? ruleSections[0] : null);
   const home = path === "/",
     serversPage = path === "/servers",
+    partnershipPage = path === "/partners",
     applyPage = path === "/apply",
     helpPage = path === "/help";
   const title = home
     ? "Home"
-    : serversPage
-      ? "Servers"
-      : applyPage
-        ? "Apply"
-        : helpPage
-          ? "Need help?"
-          : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+    : partnershipPage
+      ? "Partnerships"
+      : serversPage
+        ? "Servers"
+        : applyPage
+          ? "Apply"
+          : helpPage
+            ? "Need help?"
+            : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -481,8 +519,11 @@ function PublicSite() {
           <ApplicationInformation apply={content.apply} />
         ) : helpPage ? (
           <HelpPage help={content.help} discordInvite={content.discordInvite} />
+        ) : partnershipPage ? (
+          <PartnershipForm />
         ) : serversPage ? (
           <>
+            <PartnershipBanner discordInvite={content.discordInvite} />
             <div className="public-page-title">
               <span className="public-eyebrow">EXPLORE DRAKORA</span>
               <PublicHeading as="h1" icon="servers">

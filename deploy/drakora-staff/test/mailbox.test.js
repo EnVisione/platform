@@ -239,7 +239,13 @@ test("attention includes read unanswered mail and excludes replies and staff mes
     },
   ];
   const { service, state, store } = harness(t, {
-    records,
+    records: records.map((record) => ({
+      ...record,
+      envelope: {
+        ...record.envelope,
+        to: [{ address: "support@drakora.org" }],
+      },
+    })),
     sentRecords: [
       {
         uid: 101,
@@ -752,6 +758,13 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
               permissions: permissions(fixture, roles),
             }),
             "mail.flags": !readOnly,
+            ...Object.fromEntries(
+              settings.mail.identities.flatMap(({ address }) => [
+                [`mail.inbox.${address}.view`, true],
+                [`mail.inbox.${address}.send`, !readOnly],
+                [`mail.inbox.${address}.reply`, !readOnly],
+              ]),
+            ),
           },
         };
         if (readOnly && capability !== "mail.view")
@@ -963,5 +976,81 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
   readOnly = false;
   roles = ["10", "23"];
   assert.equal((await call("/")).status, 403);
+  assert.equal(state.sends.length, 1);
+});
+
+test("per-inbox scope blocks guessed messages, files, read flags and deletion, including mixed recipients", async (t) => {
+  const { service, state } = harness(t);
+  const visible = ["support@drakora.org"];
+  state.records.find((record) => record.uid === 4).envelope.to = [
+    { address: "no-reply@drakora.org" },
+  ];
+  for (const action of [
+    () => service.detail(key, true, visible),
+    () => service.attachment({ ...key, part: "3" }, visible),
+    () => service.flags({ ...key, flag: "seen", value: true }, visible),
+    () => service.trash(key, visible),
+  ])
+    await assert.rejects(action(), { code: "mail_not_found" });
+  assert.equal(state.flags.length, 0);
+  assert.equal(state.moves.length, 0);
+  state.records.find((record) => record.uid === 4).envelope.cc = [
+    { address: "support@drakora.org" },
+  ];
+  await assert.rejects(service.detail(key, false, visible), {
+    code: "mail_not_found",
+  });
+  assert.throws(
+    () =>
+      service.list(
+        { folder: "INBOX", identity: "no-reply@drakora.org", offset: 0 },
+        visible,
+      ),
+    { code: "mail_role_required" },
+  );
+  const list = await service.list({ folder: "INBOX", offset: 0 }, visible);
+  assert.equal(
+    list.items.some((record) => record.uid === 4),
+    false,
+  );
+  assert.ok(
+    state.searches
+      .at(-1)
+      .not.or.some((term) => term.to === "no-reply@drakora.org"),
+  );
+  await assert.rejects(service.detail(key, false, []), {
+    code: "mail_not_found",
+  });
+});
+
+test("compose and reply inbox grants are independent and a forged reply cannot send to arbitrary recipients", async (t) => {
+  const { service, state } = harness(t);
+  const access = {
+    view: ["support@drakora.org"],
+    send: [],
+    reply: ["support@drakora.org"],
+  };
+  await assert.rejects(service.send("staff", input(), access), {
+    code: "mail_role_required",
+  });
+  const reply = { ...input(), reply: { ...key, kind: "reply" } };
+  await service.send("staff", reply, access);
+  assert.equal(state.sends.length, 1);
+  await assert.rejects(
+    service.send(
+      "staff",
+      { ...reply, sendId: randomUUID(), to: "intruder@example.invalid" },
+      access,
+    ),
+    { code: "mail_role_required" },
+  );
+  await assert.rejects(
+    service.send(
+      "staff",
+      { ...reply, sendId: randomUUID() },
+      { ...access, reply: [], send: ["support@drakora.org"] },
+    ),
+    { code: "mail_role_required" },
+  );
   assert.equal(state.sends.length, 1);
 });

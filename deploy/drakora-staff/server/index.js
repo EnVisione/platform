@@ -47,6 +47,7 @@ import { websiteService, websiteAccess, communityStatus } from "./website.js";
 import { publicWebsiteRouter, websiteEditorRouter } from "./website-routes.js";
 import { ticketService } from "./tickets.js";
 import { ticketDiscord } from "./ticket-discord.js";
+import { partnershipContact } from "./partnership-contact.js";
 import { ticketMail } from "./ticket-mail.js";
 import { ticketNotices } from "./ticket-notices.js";
 import { ticketRouter } from "./ticket-routes.js";
@@ -140,6 +141,10 @@ const ticketTransport = tickets
 const ticketStaffNotices = tickets
   ? ticketNotices(config, tickets, ticketTransport)
   : undefined;
+const partnerships =
+  tickets && mail
+    ? partnershipContact(config, tickets, mail, office.gateway, ticketTransport)
+    : undefined;
 office?.onAccessChanged((packet) => {
   const access = discord.observe(packet);
   if (!access?.revoked) return;
@@ -273,7 +278,7 @@ app.use((req, res, next) => {
 app.use((req, res, next) =>
   ticketSession &&
   req.headers.host === applicationHost &&
-  req.path.startsWith("/help/")
+  (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
     ? ticketSession(req, res, next)
     : config.website &&
         req.headers.host === applicationHost &&
@@ -1541,6 +1546,7 @@ server.listen(3000, "0.0.0.0", () =>
 todoSync?.start();
 applications?.start();
 tickets?.start();
+partnerships?.start();
 ticketEmails?.start();
 ticketStaffNotices?.start();
 async function stop() {
@@ -1549,6 +1555,7 @@ async function stop() {
   await assignments?.close();
   await todoSync?.close();
   await applications?.close();
+  await partnerships?.close();
   await ticketEmails?.close();
   await ticketStaffNotices?.close();
   await tickets?.stop();

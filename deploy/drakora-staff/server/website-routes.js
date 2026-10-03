@@ -22,7 +22,7 @@ export function publicWebsiteRouter(service, status, dist) {
   router.get("/discord", (_req, res) =>
     res.redirect(service.publicContent().discordInvite),
   );
-  router.get(["/", "/servers", "/rules", "/help"], (_req, res) =>
+  router.get(["/", "/servers", "/rules", "/help", "/partners"], (_req, res) =>
     res.sendFile(`${dist}/public.html`),
   );
   router.get("/apply", (req, res) => {

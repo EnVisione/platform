@@ -102,7 +102,7 @@ export function ticketRouter(
       res.json({
         csrf: req.session.csrf,
         identity: identities(req.session)[0] || null,
-        types: ticketTypes,
+        types: ticketTypes.filter((type) => type.id !== "partnership"),
         minecraftEnabled: false,
       });
     });
@@ -114,9 +114,10 @@ export function ticketRouter(
         checkMutation(req);
         const path =
           typeof req.body.returnPath === "string" &&
-          /^\/help\/[A-Za-z0-9_]{3,16}\/[a-f0-9-]{36}$/.test(
-            req.body.returnPath,
-          )
+          (req.body.returnPath === "/partners" ||
+            /^\/help\/[A-Za-z0-9_]{3,16}\/[a-f0-9-]{36}$/.test(
+              req.body.returnPath,
+            ))
             ? req.body.returnPath
             : "/help/new";
         const challenge = service.challenge(req.sessionID, path);
@@ -211,13 +212,46 @@ export function ticketRouter(
         res.status(201).json({ path: ticketPath(ticket) });
       },
     );
+    router.post(
+      "/partners/api/requests",
+      rateLimit({ windowMs: 60000, limit: 5, legacyHeaders: false }),
+      express.json({ limit: "12kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        let user =
+          identities(req.session).find((entry) => !entry.guest) ||
+          req.session.partnerIdentity;
+        if (!user) {
+          user = {
+            id: `guest:${randomUUID()}`,
+            name: String(req.body.name || "").slice(0, 80),
+            guest: true,
+          };
+          req.session.partnerIdentity = user;
+          await save(req);
+        }
+        if (req.body.preference === "discord" && !user.guest)
+          await transport.assertMember(user.id);
+        const network = createHmac("sha256", config.sessionSecret)
+          .update(`partnership-network:${req.ip}`)
+          .digest("hex");
+        const ticket = service.createPartnership(user, req.body, network);
+        res.status(201).json({
+          reference: ticket.id,
+          preference: ticket.partnership.preference,
+        });
+      },
+    );
     router.get(prefix, async (req, res) => {
       await identity(req);
       const owners = new Set(identities(req.session).map((user) => user.id));
       res.json({
         items: service
           .all()
-          .filter((ticket) => owners.has(ticket.owner.id))
+          .filter(
+            (ticket) =>
+              ticket.type !== "partnership" && owners.has(ticket.owner.id),
+          )
           .map((ticket) => ({
             id: ticket.id,
             ign: ticket.ign,
@@ -234,7 +268,13 @@ export function ticketRouter(
       const closed = req.query.closed === "1";
       if (closed && !user.capabilities["logs.view"])
         throw new AuthError("ticket_access_denied");
-      res.json(service.list(user, { closed, offset }));
+      res.json(
+        service.list(user, {
+          closed,
+          offset,
+          category: req.query.category || undefined,
+        }),
+      );
     });
     router.get(
       ["/tickets", "/tickets/:id", "/logs"],

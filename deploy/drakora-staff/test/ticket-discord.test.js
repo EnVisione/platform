@@ -206,8 +206,20 @@ function setupDiscord(t, notices = false) {
   );
   const staffGuild = {
     channels: {
+      async create(data) {
+        const channel = createChannel(data);
+        channel.guildId = config.guildId;
+        return channel;
+      },
       async fetch(id) {
-        return id === staffChannel?.id ? staffChannel : undefined;
+        return id
+          ? id === staffChannel?.id
+            ? staffChannel
+            : channels.get(id)
+          : new Collection([
+              ...channels,
+              ...(staffChannel ? [[staffChannel.id, staffChannel]] : []),
+            ]);
       },
     },
     members: {
@@ -340,7 +352,14 @@ test("restricted notices stay generic and a claim during delivery cancels the re
     { event: "opened", channelId: app.staffChannel.id },
     `${ticket.id}:opened`,
   );
-  const data = JSON.stringify(app.staffChannel.savedMessages.first().data);
+  const noticeChannel = app.channels.get(
+    app.service.store.get("ticket-discord", "channels").categoryNotices.staff,
+  );
+  assert.equal(
+    noticeChannel.overwrites.some((entry) => entry.id === "201"),
+    false,
+  );
+  const data = JSON.stringify(noticeChannel.savedMessages.first().data);
   for (const text of [
     "SecretIgn",
     "PrivatePlayer",
@@ -348,8 +367,8 @@ test("restricted notices stay generic and a claim during delivery cancels the re
     "PRIVATE",
   ])
     assert.equal(data.includes(text), false);
-  const fetch = app.staffChannel.messages.fetch;
-  app.staffChannel.messages.fetch = async (options) => {
+  const fetch = noticeChannel.messages.fetch;
+  noticeChannel.messages.fetch = async (options) => {
     app.service.claim(
       { id: "200", name: "Manager", roles: ["10", "28"] },
       ticket.id,
@@ -364,7 +383,7 @@ test("restricted notices stay generic and a claim during delivery cancels the re
     ),
     { cancelled: true },
   );
-  assert.equal(app.staffChannel.savedMessages.size, 1);
+  assert.equal(noticeChannel.savedMessages.size, 1);
 });
 
 test("Discord transport creates private tickets, preserves webhook identity and recovers ambiguous sends", async (t) => {
@@ -754,7 +773,7 @@ test("closure saves paginated missed history and preserves Discord files before 
   assert.equal(service.messages(ticket.id).length, 600);
   const [, file] = service.store.entries("ticket-media")[0];
   assert.notEqual(file.channelId, target.id);
-  assert.equal(channels.get(file.channelId).name, "ticket-attachments");
+  assert.equal(channels.get(file.channelId).name, "support-attachments");
   assert.equal(file.expiresAt - file.createdAt, 30 * 86400000);
   assert.equal((await transport.bytes(file)).toString(), "picture");
   assert.equal(

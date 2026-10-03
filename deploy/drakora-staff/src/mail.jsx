@@ -770,7 +770,20 @@ export function Mail({ csrf, capabilities }) {
       setDeleteBusy(false);
     }
   }
+  const sendIdentities =
+    metadata?.identities.filter((entry) => entry.permissions?.send) || [];
+  const replyIdentities =
+    metadata?.identities.filter(
+      (entry) =>
+        entry.permissions?.reply &&
+        message?.mailboxes?.includes(entry.address.toLowerCase()),
+    ) || [];
+  const canSend = Boolean(capabilities["mail.send"] && sendIdentities.length);
+  const canReply = Boolean(capabilities["mail.send"] && replyIdentities.length);
   function compose(kind) {
+    const identities =
+      kind === "reply" || kind === "all" ? replyIdentities : sendIdentities;
+    if (!identities.length) return;
     if (draft) {
       setDraftOpen((previous) => previous + 1);
       setNotice(
@@ -780,10 +793,10 @@ export function Mail({ csrf, capabilities }) {
     }
     const next =
       kind && message
-        ? replyDraft(kind, message, metadata.identities, identity)
+        ? replyDraft(kind, message, identities, identity)
         : newDraft(
-            metadata.identities.find((entry) => entry.address === identity)
-              ?.address ?? metadata.identities[0].address,
+            identities.find((entry) => entry.address === identity)?.address ??
+              identities[0].address,
           );
     setDraft(next);
     setNotice(null);
@@ -845,7 +858,7 @@ export function Mail({ csrf, capabilities }) {
       )}
       <div className="mail-layout">
         <aside className="mail-folders" aria-label="Email folders">
-          {capabilities["mail.send"] && (
+          {canSend && (
             <button
               className="mail-primary mail-compose-button"
               disabled={!metadata}
@@ -1247,22 +1260,25 @@ export function Mail({ csrf, capabilities }) {
                       <pre>{sentReply.text}</pre>
                     </section>
                   )}
-                {capabilities["mail.send"] && (
+                {(canSend || canReply) && (
                   <div className="mail-reply-actions">
                     <button
                       className="mail-reply-action"
+                      disabled={!canReply}
                       onClick={() => compose("reply")}
                     >
                       <span aria-hidden="true">↩</span> Reply
                     </button>
                     <button
                       className="mail-reply-all-action"
+                      disabled={!canReply}
                       onClick={() => compose("all")}
                     >
                       <span aria-hidden="true">↶</span> Reply all
                     </button>
                     <button
                       className="mail-forward-action"
+                      disabled={!canSend}
                       onClick={() => compose("forward")}
                     >
                       <span aria-hidden="true">↪</span> Forward
@@ -1279,7 +1295,9 @@ export function Mail({ csrf, capabilities }) {
         <Composer
           key={draft.sendId}
           draft={draft}
-          identities={metadata.identities}
+          identities={
+            draft.reply?.kind === "reply" ? replyIdentities : sendIdentities
+          }
           csrf={csrf}
           onChange={setDraft}
           openRequest={draftOpen}

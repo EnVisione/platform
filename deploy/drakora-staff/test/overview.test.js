@@ -169,6 +169,7 @@ test("Overview never reads private application or email counts without permissio
         },
       },
       mail: {
+        identities: [{ address: "support@drakora.org" }],
         attention: async () => {
           email++;
           return { unanswered: 2, unread: 1 };
@@ -182,7 +183,11 @@ test("Overview never reads private application or email counts without permissio
   assert.equal(denied.email, null);
   assert.equal(applications, 0);
   assert.equal(email, 0);
-  user.capabilities = { "applications.view": true, "mail.view": true };
+  user.capabilities = {
+    "applications.view": true,
+    "mail.view": true,
+    "mail.inbox.support@drakora.org.view": true,
+  };
   const allowed = await service.snapshot(user);
   assert.equal(allowed.applications.pending, 3);
   assert.equal(allowed.email.unanswered, 2);
@@ -292,8 +297,14 @@ test("Discord queue counts respect channel access and exclude closed forum posts
 test("slow email counts do not hold up Overview and failed scans are cached", async () => {
   let complete;
   let scans = 0;
-  const user = { capabilities: { "mail.view": true } };
+  const user = {
+    capabilities: {
+      "mail.view": true,
+      "mail.inbox.support@drakora.org.view": true,
+    },
+  };
   const mail = {
+    identities: [{ address: "support@drakora.org" }],
     attention: () => {
       scans++;
       return new Promise((resolve) => {
@@ -311,6 +322,7 @@ test("slow email counts do not hold up Overview and failed scans are cached", as
     { mail: {} },
     {
       mail: {
+        identities: [{ address: "support@drakora.org" }],
         attention: async () => {
           scans++;
           throw new Error("private detail");

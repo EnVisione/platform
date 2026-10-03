@@ -117,6 +117,7 @@ function Composer({
   internal = false,
   onSent,
   resolution = false,
+  uploadLimit = ticketMessageUploadLimit,
 }) {
   const [content, setContent] = useState(""),
     [commands, setCommands] = useState("None"),
@@ -137,9 +138,11 @@ function Composer({
     }
     if (
       [...files, ...selected].reduce((size, file) => size + file.size, 0) >
-      ticketMessageUploadLimit
+      uploadLimit
     ) {
-      setError(errors.attachments_too_large);
+      setError(
+        `Attachments can total up to ${uploadLimit / 1024 / 1024} MB per message.`,
+      );
       return;
     }
     setFiles((previous) => [...previous, ...selected]);
@@ -302,7 +305,13 @@ function Composer({
         >
           ＋ Attach or paste
         </button>
-        <small>8 MB each · retained for 30 days</small>
+        <small>
+          8 MB each
+          {uploadLimit !== ticketMessageUploadLimit
+            ? ` · ${uploadLimit / 1024 / 1024} MB total`
+            : ""}{" "}
+          · retained for 30 days
+        </small>
         <button className="ticket-primary" disabled={busy}>
           {busy
             ? "Sending…"
@@ -337,6 +346,8 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
       setError("");
     } catch (error) {
       setError(error.message);
+      setTicket(null);
+      setOlder([]);
     } finally {
       loading.current = false;
       if (queued.current) {
@@ -376,6 +387,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
         <button onClick={refresh}>Retry</button>
       </div>
     );
+  const partner = ticket.type === "partnership";
   const active = ["pending", "claimed"].includes(ticket.status);
   const combined = [...older, ...ticket.messages].filter(
     (message, index, values) =>
@@ -395,7 +407,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             <small className="ticket-connection" role="status">
               {connected ? "Live" : "Reconnecting…"}
               {ticket.deliveryPending
-                ? ` · ${ticket.deliveryPending} Discord updates pending`
+                ? ` · ${ticket.deliveryPending} ${partner ? "contact" : "Discord"} updates pending`
                 : ticket.sync === "pending"
                   ? " · Creating Discord channel…"
                   : ""}
@@ -403,7 +415,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
           </div>
           <div className="ticket-actions">
             {staffView &&
-              capabilities["tickets.claim"] &&
+              ticket.actions?.claim &&
               ticket.status === "pending" && (
                 <button
                   className="ticket-primary"
@@ -414,7 +426,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
                 </button>
               )}
             {staffView &&
-              capabilities["tickets.close"] &&
+              ticket.actions?.close &&
               ticket.status !== "closed" && (
                 <button onClick={() => setClosing((value) => !value)}>
                   {closing ? "Cancel resolution" : "Resolve ticket"}
@@ -477,10 +489,32 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
               · {ticket.location}
             </p>
             <p>{ticket.description}</p>
+            {partner && (
+              <p>
+                <a
+                  href={ticket.partnership.packUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View modpack ↗
+                </a>{" "}
+                ·{" "}
+                {ticket.partnership.relationship === "owner"
+                  ? "Pack owner"
+                  : "Pack developer"}
+              </p>
+            )}
             <small>
               Opened by {ticket.owner.name} · {stamp(ticket.createdAt)}
             </small>
           </article>
+          {ticket.deliveryIssues?.length > 0 && (
+            <p className="ticket-error" role="alert">
+              A contact update could not be confirmed. Check the partnership
+              inbox or Discord DM before sending again. The saved request and
+              messages are safe.
+            </p>
+          )}
           {combined.map((message) => (
             <article
               className={`ticket-message${message.deleted ? " deleted" : ""}`}
@@ -502,16 +536,31 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
                 {message.attachments.map((file) => (
                   <FileView key={file.id} file={file} />
                 ))}
+                {message.delivery === "failed" && (
+                  <small className="ticket-error">
+                    Delivery needs attention. Check the contact inbox before
+                    sending again.
+                  </small>
+                )}
                 {message.delivery === "pending" && (
-                  <small>Saved · sending to Discord…</small>
+                  <small>
+                    Saved · sending{" "}
+                    {partner
+                      ? `by ${ticket.partnership.emailFallback ? "email" : ticket.partnership.preference === "discord" ? "Discord DM" : "email"}`
+                      : "to Discord"}
+                    …
+                  </small>
                 )}
               </div>
             </article>
           ))}
           {!combined.length && (
             <p className="ticket-empty">
-              Your ticket is ready. Add any extra details here while you wait
-              for staff.
+              {partner
+                ? "No messages yet. Replies sent here go to the applicant’s chosen contact method."
+                : staffView
+                  ? "No messages yet. Reply here to help the player."
+                  : "Your ticket is ready. Add any extra details here while you wait for staff."}
             </p>
           )}
         </div>
@@ -537,15 +586,21 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             csrf={csrf}
             resolution
             internal
+            uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
             onSent={async () => {
               setClosing(false);
               await refresh();
             }}
           />
         )}
-        {active &&
-          (!staffView || capabilities["tickets.reply"]) &&
-          !closing && <Composer base={base} csrf={csrf} onSent={refresh} />}
+        {active && (!staffView || ticket.actions?.reply) && !closing && (
+          <Composer
+            base={base}
+            csrf={csrf}
+            onSent={refresh}
+            uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
+          />
+        )}
         {!active && (
           <div className="ticket-finished">
             <p>
@@ -585,20 +640,22 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
         )}
       </section>
       <aside className="ticket-player">
-        <h3>Player information</h3>
-        <img
-          className="ticket-skin"
-          src={
-            staffView
-              ? `/apply/api/head/${ticket.ign}`
-              : `/help/api/head/${ticket.ign}`
-          }
-          alt={`${ticket.ign}'s Minecraft skin`}
-        />
+        <h3>{partner ? "Partner contact" : "Player information"}</h3>
+        {!partner && (
+          <img
+            className="ticket-skin"
+            src={
+              staffView
+                ? `/apply/api/head/${ticket.ign}`
+                : `/help/api/head/${ticket.ign}`
+            }
+            alt={`${ticket.ign}'s Minecraft skin`}
+          />
+        )}
         <strong>{ticket.ign}</strong>
         <span>{ticket.owner.name}</span>
         <dl>
-          {staffView && (
+          {staffView && !partner && (
             <>
               <dt>Minecraft status</dt>
               <dd>Not connected</dd>
@@ -612,6 +669,22 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
                   <dd>{ticket.contactEmail}</dd>
                 </>
               )}
+            </>
+          )}
+          {partner && (
+            <>
+              <dt>Email</dt>
+              <dd>{ticket.contactEmail}</dd>
+              <dt>Discord</dt>
+              <dd>{ticket.partnership.discord}</dd>
+              <dt>Contact preference</dt>
+              <dd>
+                {ticket.partnership.emailFallback
+                  ? "Email · Discord messages were blocked"
+                  : ticket.partnership.preference === "discord"
+                    ? "Discord direct messages"
+                    : "Email"}
+              </dd>
             </>
           )}
           <dt>Ticket opened from</dt>
@@ -667,18 +740,21 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
 export function Tickets({ csrf, capabilities, logs = false }) {
   const [data, setData] = useState(null),
     [error, setError] = useState(""),
-    [offset, setOffset] = useState(0);
+    [offset, setOffset] = useState(0),
+    [category, setCategory] = useState("");
   const id = location.pathname.match(/^\/tickets\/([a-f0-9-]{36})$/)?.[1];
   const refresh = useCallback(async () => {
     try {
       setData(
-        await request(`/api/tickets?closed=${logs ? 1 : 0}&offset=${offset}`),
+        await request(
+          `/api/tickets?closed=${logs ? 1 : 0}&offset=${offset}&category=${category}`,
+        ),
       );
       setError("");
     } catch (error) {
       setError(error.message);
     }
-  }, [logs, offset]);
+  }, [logs, offset, category]);
   useLive(!id ? "/api/tickets/events" : null, refresh);
   useEffect(() => {
     if (id) return;
@@ -707,7 +783,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
     <div className="ticket-page">
       <div className="ticket-list-heading">
         <div>
-          <h2>{logs ? "Community logs" : "Support tickets"}</h2>
+          <h2>{logs ? "Community logs" : "Tickets"}</h2>
           <p>
             {logs
               ? "Ticket text, staff resolution records and history are kept permanently. Attachments expire after 30 days."
@@ -731,6 +807,33 @@ export function Tickets({ csrf, capabilities, logs = false }) {
       {!data && !error && <p>Loading tickets…</p>}
       {data && (
         <>
+          <div
+            className="ticket-category-tabs"
+            role="group"
+            aria-label="Ticket categories"
+          >
+            <button
+              aria-pressed={!category}
+              onClick={() => {
+                setCategory("");
+                setOffset(0);
+              }}
+            >
+              All accessible tickets
+            </button>
+            {data.categories.map((entry) => (
+              <button
+                key={entry.id}
+                aria-pressed={category === entry.id}
+                onClick={() => {
+                  setCategory(entry.id);
+                  setOffset(0);
+                }}
+              >
+                {entry.name} <span>{entry.count}</span>
+              </button>
+            ))}
+          </div>
           <div className="ticket-list">
             {data.items.map((ticket) => (
               <a
@@ -997,11 +1100,13 @@ export function PublicTickets() {
                     setForm((value) => ({ ...value, type: event.target.value }))
                   }
                 >
-                  {ticketTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.name}
-                    </option>
-                  ))}
+                  {ticketTypes
+                    .filter((type) => type.id !== "partnership")
+                    .map((type) => (
+                      <option key={type.id} value={type.id}>
+                        {type.name}
+                      </option>
+                    ))}
                 </select>
               </label>
               {form.type === "staff" && (

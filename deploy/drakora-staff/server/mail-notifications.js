@@ -1,3 +1,4 @@
+import { inboxPermission } from "../shared/staff-permissions.js";
 import { createHash } from "node:crypto";
 import { ChannelType, PermissionFlagsBits } from "discord.js";
 
@@ -54,8 +55,23 @@ export function mailAlertMessage(config, item, nonce) {
 }
 
 export function discordMailTransport(config, store, policy, client) {
-  let channel;
-  async function ensure() {
+  const channelsByScope = new Map();
+  async function ensure(scope) {
+    const all = config.mail.identities
+      .map(({ address }) => address.toLowerCase())
+      .sort();
+    const addresses = scope
+      ? [...new Set(scope)].filter((address) => all.includes(address)).sort()
+      : all;
+    if (!addresses.length) throw new Error("Mail channel scope unavailable");
+    const scoped = addresses.join(",") !== all.join(",");
+    const key = scoped
+      ? `${config.guildId}:${digest(addresses.join(","))}`
+      : config.guildId;
+    const channelTopic = scoped
+      ? `${topic} Mailboxes: ${addresses.join(", ")}.`
+      : topic;
+    let channel = channelsByScope.get(key);
     if (!client.isReady()) throw new Error("Discord unavailable");
     const guild = await client.guilds.fetch(config.guildId);
     const members = await guild.members.fetch();
@@ -64,7 +80,12 @@ export function discordMailTransport(config, store, policy, client) {
         !member.user.bot &&
         policy.apply({ roles: [...member.roles.cache.keys()] }).capabilities[
           "mail.view"
-        ],
+        ] &&
+        addresses.every(
+          (address) =>
+            policy.apply({ roles: [...member.roles.cache.keys()] })
+              .capabilities[inboxPermission(address)],
+        ),
     );
     const view =
       PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory;
@@ -103,7 +124,7 @@ export function discordMailTransport(config, store, policy, client) {
         ])
         .sort(),
     );
-    const saved = store.get("mail-alert-channel", config.guildId);
+    const saved = store.get("mail-alert-channel", key);
     if (saved) {
       const found = await guild.channels.fetch(saved.id).catch((error) => {
         if (error.code === 10003) return null;
@@ -111,7 +132,7 @@ export function discordMailTransport(config, store, policy, client) {
       });
       if (
         found &&
-        (found.type !== ChannelType.GuildText || found.topic !== topic)
+        (found.type !== ChannelType.GuildText || found.topic !== channelTopic)
       )
         throw new Error("Mail channel ownership changed");
       channel = found;
@@ -120,23 +141,23 @@ export function discordMailTransport(config, store, policy, client) {
       const channels = await guild.channels.fetch();
       const matches = [...channels.values()].filter(
         (entry) =>
-          entry?.type === ChannelType.GuildText && entry.topic === topic,
+          entry?.type === ChannelType.GuildText && entry.topic === channelTopic,
       );
       if (matches.length > 1) throw new Error("Ambiguous mail channel");
       channel =
         matches[0] ??
         (await guild.channels.create({
-          name: "email",
+          name: scoped ? `email-${addresses[0].split("@")[0]}` : "email",
           type: ChannelType.GuildText,
           parent: config.mail.notifications.categoryId,
-          topic,
+          topic: channelTopic,
           permissionOverwrites: overwrites,
           reason: "Private shared mailbox notifications",
         }));
       store.set(
         "mail-alert-channel",
-        config.guildId,
-        { id: channel.id },
+        key,
+        { id: channel.id, addresses },
         forever,
       );
     }
@@ -158,13 +179,33 @@ export function discordMailTransport(config, store, policy, client) {
     }
     if (viewers.length > 98)
       throw new Error("Mail channel access capacity exceeded");
+    channelsByScope.set(key, channel);
     return channel.id;
   }
   return {
     available: () => client.isReady(),
-    ensure,
+    async ensure() {
+      await ensure();
+      for (const [key, entry] of store.entries("mail-alert-channel"))
+        if (key.startsWith(`${config.guildId}:`) && entry.addresses)
+          await ensure(entry.addresses);
+    },
     async send(item, nonce, retry) {
-      if (!channel) throw new Error("Mail channel unavailable");
+      const recipients = [
+        ...new Set(
+          [...item.to, ...item.cc].map(({ address }) => address.toLowerCase()),
+        ),
+      ].filter((address) =>
+        config.mail.identities.some(
+          (identity) => identity.address.toLowerCase() === address,
+        ),
+      );
+      const channelId = await ensure(
+        recipients.length ? recipients : undefined,
+      );
+      const channel = await (
+        await client.guilds.fetch(config.guildId)
+      ).channels.fetch(channelId);
       if (retry) {
         const recent = await channel.messages.fetch({ limit: 100 });
         if (

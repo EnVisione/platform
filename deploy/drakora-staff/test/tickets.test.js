@@ -602,3 +602,61 @@ test("maintenance queues existing closed channels for the same safe removal", as
   await service.expire();
   assert.equal(removed, 1);
 });
+
+test("category permissions guard lists, attention, messages, files and transcripts and can be revoked", async (t) => {
+  const { service, policy } = setup(t);
+  const ticket = service.create(owner, input({ type: "billing" }));
+  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const file = mediaFixture(service, owner, ticket.id, {
+    name: "receipt.txt",
+    type: "text/plain",
+    size: 3,
+  });
+  for (const user of [helper, manager]) {
+    assert.equal(service.list(user).items.length, 0);
+    assert.equal(service.attention(user).count, 0);
+    for (const action of [
+      () => service.view(user, ticket.id, true),
+      () => service.reply(user, ticket.id, message(), true),
+      () => service.claim(user, ticket.id),
+      () => service.media(user, ticket.id, file.id, true),
+    ])
+      fails(action, "ticket_access_denied");
+    await assert.rejects(
+      ticketTranscript(service, user, ticket.id, { staffView: true }),
+      { code: "ticket_access_denied" },
+    );
+  }
+  assert.equal(service.view(owner, ticket.id).id, ticket.id);
+  assert.equal(service.view(founder, ticket.id, true).id, ticket.id);
+  const model = policy.read(founder);
+  const roles = model.roles
+    .filter((role) => role.id)
+    .map((role) => ({
+      id: role.id,
+      permissions: { ...role.permissions },
+    }));
+  for (const key of ["view", "reply", "claim", "close"])
+    roles.find((role) => role.id === "23").permissions[
+      `tickets.category.billing.${key}`
+    ] = true;
+  policy.save(founder, { revision: model.revision, roles });
+  assert.equal(service.list(helper, { category: "billing" }).items.length, 1);
+  assert.equal(
+    service.reply(helper, ticket.id, message("Billing reply"), true).content,
+    "Billing reply",
+  );
+  const updated = policy.read(founder);
+  const revocation = updated.roles
+    .filter((role) => role.id)
+    .map((role) => ({
+      id: role.id,
+      permissions: { ...role.permissions },
+    }));
+  for (const key of ["view", "reply", "claim", "close"])
+    revocation.find((role) => role.id === "23").permissions[
+      `tickets.category.billing.${key}`
+    ] = false;
+  policy.save(founder, { revision: updated.revision, roles: revocation });
+  fails(() => service.view(helper, ticket.id, true), "ticket_access_denied");
+});

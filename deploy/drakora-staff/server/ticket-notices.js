@@ -40,7 +40,12 @@ export function ticketNotices(
             finish(key, job, { status: "cancelled" });
             continue;
           }
-          if (job.failed || job.after > now() || !ticket.channelId) continue;
+          if (
+            job.failed ||
+            job.after > now() ||
+            (!ticket.channelId && ticket.type !== "partnership")
+          )
+            continue;
           if (store.get("ticket-outbox", `${ticket.id}:create:${ticket.id}`))
             continue;
           if (

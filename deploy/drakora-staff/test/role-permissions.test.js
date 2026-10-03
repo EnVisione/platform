@@ -240,3 +240,64 @@ test("workspace permissions remain enforced after the Todo role is retired", (t)
   assert.equal(policy.apply(staff).permissions.todo, false);
   assert.equal(policy.apply(actor("29", ["11"])).permissions.dashboard, false);
 });
+
+test("category and inbox defaults preserve billing and partnership privacy across legacy policies", (t) => {
+  const { store } = setup(t);
+  const config = {
+    ...settings,
+    mail: {
+      identities: [
+        { address: "support@drakora.org" },
+        { address: "partners@drakora.org" },
+      ],
+    },
+  };
+  const policy = rolePermissions(config, store);
+  const founder = policy.apply(actor("20")),
+    manager = policy.apply(actor("28")),
+    admin = policy.apply(actor("21")),
+    helper = policy.apply(actor("23"));
+  for (const user of [founder, manager, admin, helper])
+    assert.equal(user.capabilities["tickets.category.support.view"], true);
+  assert.equal(founder.capabilities["tickets.category.billing.view"], true);
+  for (const user of [manager, admin, helper])
+    assert.equal(user.capabilities["tickets.category.billing.view"], false);
+  for (const user of [founder, manager]) {
+    assert.equal(user.capabilities["tickets.category.partnership.reply"], true);
+    assert.equal(
+      user.capabilities["mail.inbox.partners@drakora.org.view"],
+      true,
+    );
+  }
+  assert.equal(admin.capabilities["mail.inbox.support@drakora.org.send"], true);
+  assert.equal(
+    admin.capabilities["mail.inbox.partners@drakora.org.view"],
+    false,
+  );
+  assert.equal(helper.capabilities["tickets.category.partnership.view"], false);
+  const edit = input(policy);
+  change(edit, "28", "tickets.category.billing.view", true);
+  assert.throws(() => policy.save(actor("28"), edit), {
+    code: "founder_role_required",
+  });
+  policy.save(actor("20"), edit);
+  assert.equal(
+    policy.apply(actor("28")).capabilities["tickets.category.billing.view"],
+    true,
+  );
+  const revoke = input(policy);
+  change(revoke, "28", "mail.inbox.partners@drakora.org.send", false);
+  policy.save(actor("20"), revoke);
+  assert.equal(
+    policy.apply(actor("28")).capabilities[
+      "mail.inbox.partners@drakora.org.reply"
+    ],
+    true,
+  );
+  assert.equal(
+    policy.apply(actor("28")).capabilities[
+      "mail.inbox.partners@drakora.org.send"
+    ],
+    false,
+  );
+});

@@ -2,8 +2,8 @@ export const staffPermissions = [
   [
     "tickets.view",
     "Tickets",
-    "View support tickets",
-    "Read private player tickets and intake details.",
+    "Open ticket queues",
+    "Open Tickets. Each category also requires its own view permission.",
   ],
   [
     "tickets.reply",
@@ -30,7 +30,7 @@ export const staffPermissions = [
     "logs.view",
     "Logs",
     "View ticket logs",
-    "Read ticket history and private staff transcripts. Staff reports remain limited to Managers and Founders.",
+    "Read ticket history and private staff transcripts. Category permissions also apply to transcripts.",
     ["tickets.view"],
   ],
   [
@@ -195,9 +195,66 @@ export const protectedFounderPermissions = [
   "roles.assign",
 ];
 
-export function permissionDependencies(values) {
+export const inboxPermission = (address, action = "view") =>
+  `mail.inbox.${address.toLowerCase()}.${action}`;
+
+export function staffPermissionCatalog(identities = []) {
+  const categoryPermissions = [
+    ["support", "Support"],
+    ["billing", "Billing"],
+    ["partnership", "Partnerships"],
+    ["staff", "Staff reports"],
+  ].flatMap(([category, name]) =>
+    ["view", "reply", "claim", "close"].map((action) => ({
+      key: `tickets.category.${category}.${action}`,
+      group: `${name} tickets`,
+      label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve" }[action]} ${name.toLowerCase()} tickets`,
+      description:
+        category === "billing"
+          ? "Billing access defaults to Founders. Only a Founder can change these grants."
+          : "Applies to the queue, messages, files, history and transcripts in this category.",
+      requires: [
+        "dashboard.view",
+        "tickets.view",
+        ...(action === "view"
+          ? []
+          : [`tickets.${action}`, `tickets.category.${category}.view`]),
+      ],
+    })),
+  );
+  const inboxPermissions = identities.flatMap(({ address }) =>
+    ["view", "send", "reply"].map((action) => ({
+      key: inboxPermission(address, action),
+      group: `Inbox · ${address}`,
+      label: {
+        view: "View inbox",
+        send: "Compose and forward",
+        reply: "Reply to received email",
+      }[action],
+      description: `Controls ${action === "view" ? "messages, search, files and counts" : action === "send" ? "new messages and forwards" : "replies to visible messages"} for ${address}.`,
+      requires: [
+        "dashboard.view",
+        "mail.view",
+        ...(action === "view" ? [] : ["mail.send", inboxPermission(address)]),
+      ],
+    })),
+  );
+  return [...staffPermissions, ...categoryPermissions, ...inboxPermissions];
+}
+
+export function visibleInboxes(user, identities) {
+  return identities
+    .filter(
+      ({ address }) =>
+        user.capabilities?.["mail.view"] &&
+        user.capabilities?.[inboxPermission(address)],
+    )
+    .map(({ address }) => address);
+}
+
+export function permissionDependencies(values, catalog = staffPermissions) {
   const result = { ...values };
-  for (const permission of staffPermissions)
+  for (const permission of catalog)
     result[permission.key] = Boolean(
       result[permission.key] && permission.requires.every((key) => result[key]),
     );

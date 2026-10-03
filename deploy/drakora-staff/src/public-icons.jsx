@@ -9,6 +9,7 @@ const paths = {
   apply: "M4 2h11l5 5v15H4zm10 2v5h4zM7 12v2h10v-2zM7 17v2h7v-2z",
   help: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 14h2v3h-2zm-3-7c0-3 2-4 4-4s4 1 4 4c0 2-3 3-3 5h-2c0-3 3-3 3-5 0-1-1-2-2-2s-2 1-2 2z",
   crest: "M12 2 3 5v6c0 5 4 9 9 11 5-2 9-6 9-11V5zm0 4v12c-3-2-5-4-5-7V8z",
+  mail: "M2 4h20v16H2zm2 2 8 6 8-6zm0 4v8h16v-8l-8 6z",
   news: "M2 3h20v18H2zm3 3v6h6V6zm9 0v2h5V6zm0 4v2h5v-2zM5 15v2h14v-2z",
   users:
     "M8 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm10 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM1 14c0-2 3-3 7-3s7 1 7 3v7H1zm15-2c3 0 7 1 7 3v6h-6v-7z",

@@ -10,7 +10,13 @@ import {
   AttachmentBuilder,
 } from "discord.js";
 import { AuthError } from "./discord.js";
-import { ticketTypes, ticketPath, ticketStatuses } from "../shared/tickets.js";
+import {
+  ticketTypes,
+  ticketPath,
+  ticketStatuses,
+  ticketCategory,
+  ticketCapability,
+} from "../shared/tickets.js";
 import { ticketTranscript } from "./ticket-transcript.js";
 
 const actor = (user, member) => ({
@@ -69,19 +75,39 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           user.id !== owner &&
           user.id !== client.user.id &&
           user.capabilities["tickets.view"] &&
-          (!restricted || rolePolicy.isManager(user)),
+          user.capabilities[
+            ticketCapability({
+              type: restricted === true ? "staff" : restricted || "general",
+            })
+          ],
       )
       .map((user) => ({
         id: user.id,
         type: 1,
         allow: [
           P.ViewChannel,
-          P.SendMessages,
           P.ReadMessageHistory,
-          P.AttachFiles,
-          P.EmbedLinks,
+          ...(user.capabilities[
+            ticketCapability(
+              { type: restricted === true ? "staff" : restricted || "general" },
+              "reply",
+            )
+          ] && user.capabilities["tickets.reply"]
+            ? [P.SendMessages, P.AttachFiles, P.EmbedLinks]
+            : []),
         ],
+        deny:
+          user.capabilities[
+            ticketCapability(
+              { type: restricted === true ? "staff" : restricted || "general" },
+              "reply",
+            )
+          ] && user.capabilities["tickets.reply"]
+            ? []
+            : [P.SendMessages, P.AttachFiles],
       }));
+    if (staff.length > (owner ? 97 : 98))
+      throw new Error("Ticket access capacity exceeded");
     return [
       { id: settings.guildId, type: 0, deny: [P.ViewChannel] },
       ...staff,
@@ -120,7 +146,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const permissions = overwrites(
       members,
       ticket.owner.guest ? null : ticket.owner.id,
-      ticket.type === "staff",
+      ticket.type,
     );
     if (["closed", "awaiting_resolution"].includes(ticket.status))
       for (const permission of permissions)
@@ -172,7 +198,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         type: ChannelType.GuildText,
         parent: archived.id,
         topic: "Drakora ticket attachments. Removed after 30 days.",
-        permissionOverwrites: overwrites(members, null, true),
+        permissionOverwrites: overwrites(members, null, "billing"),
       });
     saved.categoryId = category.id;
     saved.mediaId = media.id;
@@ -290,7 +316,35 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async notice(ticket, job, key) {
       if (!client.isReady()) throw new Error("Discord is not ready");
       const staffGuild = await client.guilds.fetch(config.guildId);
-      const target = await staffGuild.channels.fetch(job.channelId);
+      let target = await staffGuild.channels.fetch(job.channelId);
+      const category = ticketCategory(ticket);
+      const members = await staffMembers();
+      const permissionsForCategory = overwrites(members, null, category).map(
+        (entry) =>
+          entry.id === settings.guildId
+            ? { ...entry, id: config.guildId }
+            : entry,
+      );
+      if (category !== "support") {
+        const saved = state();
+        saved.categoryNotices ??= {};
+        const channels = await staffGuild.channels.fetch();
+        const topic = `Drakora private ${category} ticket notices.`;
+        target =
+          channels.get(saved.categoryNotices[category]) ||
+          [...channels.values()].find((entry) => entry?.topic === topic);
+        if (!target)
+          target = await staffGuild.channels.create({
+            name: `${category}-tickets`,
+            type: ChannelType.GuildText,
+            parent: (await staffGuild.channels.fetch(job.channelId)).parentId,
+            topic,
+            permissionOverwrites: permissionsForCategory,
+          });
+        saved.categoryNotices[category] = target.id;
+        save("channels", saved);
+      }
+      await target.permissionOverwrites.set(permissionsForCategory);
       if (
         target?.guildId !== config.guildId ||
         target.type !== ChannelType.GuildText
@@ -359,13 +413,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           (current.status !== "pending" || current.claimedBy))
       )
         return { cancelled: true };
-      const restricted = ticket.type === "staff";
+      const restricted = category !== "support";
       const sent = await target.send({
         embeds: [
           {
             title:
               job.event === "opened"
-                ? "New support ticket"
+                ? `New ${category === "partnership" ? "partnership request" : `${category} ticket`}`
                 : "Ticket still waiting for staff",
             description: restricted
               ? job.event === "opened"
@@ -383,12 +437,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           {
             type: 1,
             components: [
-              {
-                type: 2,
-                style: 5,
-                label: "Open Discord ticket",
-                url: `https://discord.com/channels/${settings.guildId}/${ticket.channelId}`,
-              },
+              ...(ticket.channelId
+                ? [
+                    {
+                      type: 2,
+                      style: 5,
+                      label: "Open Discord ticket",
+                      url: `https://discord.com/channels/${settings.guildId}/${ticket.channelId}`,
+                    },
+                  ]
+                : []),
               {
                 type: 2,
                 style: 5,
@@ -427,11 +485,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           type: ChannelType.GuildText,
           parent: state().categoryId,
           topic: marker(ticket.id),
-          permissionOverwrites: overwrites(
-            members,
-            ticket.owner.guest ? null : ticket.owner.id,
-            ticket.type === "staff",
-          ),
+          permissionOverwrites: ticketOverwrites(ticket, members),
         });
       service.bind(ticket.id, target.id);
       const saved = service.store.get("ticket-discord", ticket.id) || {};
@@ -594,9 +648,35 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
       return acknowledge(sent);
     },
-    async upload(bytes, name, type) {
+    async upload(bytes, name, type, ticket) {
       await ready();
-      const target = await channel(state().mediaId);
+      const saved = state();
+      const category = ticket ? ticketCategory(ticket) : "staff";
+      saved.categoryMedia ??= {};
+      const main = await guild();
+      const channels = await main.channels.fetch();
+      const topic = `Drakora ${category} ticket attachments. Removed after 30 days.`;
+      let target =
+        channels.get(saved.categoryMedia[category]) ||
+        [...channels.values()].find(
+          (entry) =>
+            entry?.parentId === settings.archiveCategoryId &&
+            entry.topic === topic,
+        );
+      if (!target)
+        target = await main.channels.create({
+          name: `${category}-attachments`,
+          type: ChannelType.GuildText,
+          parent: settings.archiveCategoryId,
+          topic,
+          permissionOverwrites: overwrites(
+            await staffMembers(),
+            null,
+            category,
+          ),
+        });
+      saved.categoryMedia[category] = target.id;
+      save("channels", saved);
       const sent = await target.send({
         files: [{ attachment: bytes, name }],
         allowedMentions: { parse: [] },
@@ -615,7 +695,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (file.expiresAt <= Date.now() || file.purged || file.removed)
         throw new AuthError("attachment_expired", 410);
       const source = await (
-        await channel(file.channelId)
+        file.directMessage
+          ? await client.channels.fetch(file.channelId)
+          : await channel(file.channelId)
       ).messages.fetch(file.messageId);
       const attachment = source.attachments.get(file.attachmentId);
       if (!attachment) throw new AuthError("attachment_expired", 410);
@@ -765,6 +847,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           await transport.bytes(file),
           file.name,
           file.type,
+          ticket,
         );
         const current = service.store.get("ticket-media", id);
         if (
@@ -836,7 +919,14 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           members = await staffMembers();
         const targets = [
           { id: saved.categoryId, permissions: overwrites(members) },
-          { id: saved.mediaId, permissions: overwrites(members, null, true) },
+          {
+            id: saved.mediaId,
+            permissions: overwrites(members, null, "billing"),
+          },
+          ...Object.entries(saved.categoryMedia || {}).map(([type, id]) => ({
+            id,
+            permissions: overwrites(members, null, type),
+          })),
           ...service
             .all()
             .filter((ticket) => ticket.channelId)
@@ -852,6 +942,28 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             await (
               await main.channels.fetch(target.id)
             ).permissionOverwrites.set(target.permissions);
+          } catch {
+            failed = true;
+          }
+        }
+        const staffGuild = await client.guilds.fetch(config.guildId);
+        const noticeChannels = {
+          ...saved.categoryNotices,
+          ...(settings.staffChannelId
+            ? { support: settings.staffChannelId }
+            : {}),
+        };
+        for (const [type, id] of Object.entries(noticeChannels)) {
+          try {
+            await (
+              await staffGuild.channels.fetch(id)
+            ).permissionOverwrites.set(
+              overwrites(members, null, type).map((entry) =>
+                entry.id === settings.guildId
+                  ? { ...entry, id: config.guildId }
+                  : entry,
+              ),
+            );
           } catch {
             failed = true;
           }
@@ -970,7 +1082,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       .setCustomId("ticket:type")
       .setPlaceholder("What do you need help with?")
       .addOptions(
-        ticketTypes.map((type) => ({ label: type.name, value: type.id })),
+        ticketTypes
+          .filter((type) => type.id !== "partnership")
+          .map((type) => ({ label: type.name, value: type.id })),
       );
     return interaction.reply({
       content: "Choose the kind of help you need. Your ticket stays private.",
@@ -1005,7 +1119,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     try {
       if (action === "type") {
         const type = interaction.values[0];
-        if (!ticketTypes.some((item) => item.id === type))
+        if (
+          type === "partnership" ||
+          !ticketTypes.some((item) => item.id === type)
+        )
           throw new AuthError("invalid_ticket", 400);
         return await interaction.showModal(
           new ModalBuilder()

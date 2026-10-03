@@ -153,9 +153,9 @@ test("mail alerts have color and keep private headers, content and mention pings
   );
 });
 
-function discordHarness(t) {
+function discordHarness(t, settings = config) {
   const store = database(t);
-  const policy = rolePermissions(config, store);
+  const policy = rolePermissions(settings, store);
   const state = { creates: [], permissions: [], sends: [], recent: new Map() };
   const member = (id, roles) => ({
     id,
@@ -209,9 +209,19 @@ function discordHarness(t) {
       },
       async create(options) {
         state.creates.push(options);
-        channel.topic = options.topic;
-        channels.set(channel.id, channel);
-        return channel;
+        const created = channels.size
+          ? {
+              ...channel,
+              id: String(8 + state.creates.length),
+              permissionOverwrites: {
+                ...channel.permissionOverwrites,
+                cache: new Map(),
+              },
+            }
+          : channel;
+        created.topic = options.topic;
+        channels.set(created.id, created);
+        return created;
       },
     },
   };
@@ -231,7 +241,7 @@ function discordHarness(t) {
     members,
     channel,
     channels,
-    transport: discordMailTransport(config, store, policy, client),
+    transport: discordMailTransport(settings, store, policy, client),
   };
 }
 
@@ -252,6 +262,10 @@ test("channel is private at creation and effective View email permission control
     .filter((role) => role.id)
     .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
   roles.find((role) => role.id === "29").permissions["mail.view"] = true;
+  for (const identity of config.mail.identities)
+    roles.find((role) => role.id === "29").permissions[
+      `mail.inbox.${identity.address}.view`
+    ] = true;
   policy.save(founder, { revision: model.revision, roles });
   await transport.ensure();
   assert.ok(channel.permissionOverwrites.cache.has("42"));
@@ -260,6 +274,74 @@ test("channel is private at creation and effective View email permission control
   assert.equal(channel.permissionOverwrites.cache.has("40"), false);
   assert.equal(channel.permissionOverwrites.cache.has("41"), false);
   assert.equal(state.creates.length, 1);
+});
+
+test("inbox alerts isolate partners from support and refresh revoked access", async (t) => {
+  const settings = {
+    ...config,
+    mail: {
+      ...config.mail,
+      identities: [
+        ...config.mail.identities,
+        { address: "partners@drakora.org" },
+      ],
+    },
+  };
+  const { transport, channels, members, policy } = discordHarness(t, settings);
+  members.set("43", {
+    id: "43",
+    user: { bot: false },
+    roles: {
+      cache: new Map([
+        ["10", {}],
+        ["28", {}],
+      ]),
+    },
+  });
+  members.set("50", {
+    id: "50",
+    user: { bot: false },
+    roles: {
+      cache: new Map([
+        ["10", {}],
+        ["20", {}],
+      ]),
+    },
+  });
+  await transport.ensure();
+  await transport.send(item(6), "support", false);
+  await transport.send(
+    { ...item(7), to: [{ address: "partners@drakora.org" }] },
+    "partners",
+    false,
+  );
+  const support = [...channels.values()].find((entry) =>
+    entry.topic.includes("Mailboxes: support@drakora.org."),
+  );
+  const partners = [...channels.values()].find((entry) =>
+    entry.topic.includes("Mailboxes: partners@drakora.org."),
+  );
+  assert.ok(support.permissionOverwrites.cache.has("40"));
+  assert.equal(partners.permissionOverwrites.cache.has("40"), false);
+  assert.ok(partners.permissionOverwrites.cache.has("43"));
+  assert.ok(partners.permissionOverwrites.cache.has("50"));
+  const founder = { id: "50", name: "Founder", roles: ["10", "20"] };
+  const model = policy.read(founder);
+  const roles = model.roles
+    .filter((entry) => entry.id)
+    .map((entry) => ({
+      id: entry.id,
+      permissions: { ...entry.permissions },
+    }));
+  for (const action of ["view", "send", "reply"])
+    roles.find((entry) => entry.id === "28").permissions[
+      `mail.inbox.partners@drakora.org.${action}`
+    ] = false;
+  policy.save(founder, { revision: model.revision, roles });
+  await transport.ensure();
+  assert.equal(partners.permissionOverwrites.cache.has("43"), false);
+  assert.ok(partners.permissionOverwrites.cache.has("50"));
+  assert.ok(support.permissionOverwrites.cache.has("43"));
 });
 
 test("uncertain deliveries recover from recent bot alerts, and manual messages cannot impersonate them", async (t) => {

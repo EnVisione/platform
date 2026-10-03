@@ -4,6 +4,9 @@ import { AuthError } from "./discord.js";
 import { validMailAddress } from "./mail-address.js";
 import {
   ticketTypes,
+  ticketCategories,
+  ticketCategory,
+  ticketCapability,
   ticketPath,
   ticketMediaDays,
   ticketMessageUploadLimit,
@@ -56,14 +59,17 @@ export function ticketService(
     const current = rolePolicy.apply(user);
     if (
       !current.capabilities[capability] ||
-      (ticket?.type === "staff" && !rolePolicy.isManager(current))
+      (ticket &&
+        !current.capabilities[
+          ticketCapability(ticket, capability.split(".").at(-1))
+        ])
     )
       throw new AuthError("ticket_access_denied");
     return current;
   }
   function authorize(user, ticket, staffView = false, capability) {
     if (staffView) return staff(user, ticket, capability);
-    if (!user || ticket.owner.id !== user.id)
+    if (!user || ticket.type === "partnership" || ticket.owner.id !== user.id)
       throw new AuthError("ticket_not_found", 404);
     return user;
   }
@@ -73,15 +79,19 @@ export function ticketService(
   }
   function queue(ticket, kind, ref = ticket.id) {
     const id = `${ticket.id}:${kind}:${ref}`;
-    put("ticket-outbox", id, {
+    put(
+      ticket.type === "partnership" ? "partnership-outbox" : "ticket-outbox",
       id,
-      generation: randomUUID(),
-      ticketId: ticket.id,
-      kind,
-      ref,
-      attempts: 0,
-      after: 0,
-    });
+      {
+        id,
+        generation: randomUUID(),
+        ticketId: ticket.id,
+        kind,
+        ref,
+        attempts: 0,
+        after: 0,
+      },
+    );
   }
   function audit(ticket, user, action, detail, internal = false) {
     ticket.revision++;
@@ -101,6 +111,7 @@ export function ticketService(
     );
     put("ticket", ticket.id, ticket);
     if (
+      ticket.type !== "partnership" &&
       ticket.owner.guest &&
       !internal &&
       (["opened", "claimed", "closed"].includes(action) ||
@@ -159,16 +170,19 @@ export function ticketService(
       updatedAt: ticket.updatedAt,
       revision: ticket.revision,
       rating: ticket.rating,
-      path: ticketPath(ticket),
+      path: ticket.type === "partnership" ? null : ticketPath(ticket),
+      category: ticketCategory(ticket),
       discordUrl: ticket.channelId
         ? `https://discord.com/channels/${config.tickets.guildId}/${ticket.channelId}`
         : null,
       sync:
-        ticket.discordDeletedAt || ticket.discordArchivedAt
-          ? "saved"
-          : ticket.channelId
-            ? "connected"
-            : "pending",
+        ticket.type === "partnership"
+          ? ticket.partnership.preference
+          : ticket.discordDeletedAt || ticket.discordArchivedAt
+            ? "saved"
+            : ticket.channelId
+              ? "connected"
+              : "pending",
       messages,
       hasOlder: page.total > messages.length,
       history: store
@@ -188,6 +202,17 @@ export function ticketService(
     };
     if (staffView) {
       safe.contactEmail = ticket.contactEmail || null;
+      safe.partnership = ticket.partnership || null;
+      const current = rolePolicy.apply(user);
+      safe.actions = Object.fromEntries(
+        ["view", "reply", "claim", "close"].map((action) => [
+          action,
+          Boolean(
+            current.capabilities[`tickets.${action}`] &&
+            current.capabilities[ticketCapability(ticket, action)],
+          ),
+        ]),
+      );
       safe.resolution = ticket.resolution
         ? {
             ...ticket.resolution,
@@ -196,27 +221,69 @@ export function ticketService(
             ),
           }
         : null;
+      safe.deliveryIssues = store
+        .entries(
+          ticket.type === "partnership"
+            ? "partnership-outbox"
+            : "ticket-outbox",
+        )
+        .filter(([, job]) => job.ticketId === id && job.failed)
+        .map(([, job]) => ({ kind: job.kind, failure: job.failure }));
       safe.deliveryPending = store
-        .entries("ticket-outbox")
+        .entries(
+          ticket.type === "partnership"
+            ? "partnership-outbox"
+            : "ticket-outbox",
+        )
         .filter(([, job]) => job.ticketId === id).length;
     }
     return safe;
   }
-  function list(user, { closed = false, offset = 0 } = {}) {
-    staff(user);
-    return store.page(
-      "ticket",
-      50,
-      offset,
-      (ticket) =>
-        (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
-        (ticket.type !== "staff" || rolePolicy.isManager(user)),
+  function visible(user, ticket) {
+    const current = rolePolicy.apply(user);
+    return Boolean(
+      current.capabilities["tickets.view"] &&
+      current.capabilities[ticketCapability(ticket)],
     );
+  }
+  function list(user, { closed = false, offset = 0, category } = {}) {
+    staff(user);
+    if (category && !ticketCategories.some((entry) => entry.id === category))
+      throw new AuthError("invalid_ticket_category", 400);
+    const matches = (ticket) =>
+      (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
+      visible(user, ticket);
+    return {
+      ...store.page(
+        "ticket",
+        50,
+        offset,
+        (ticket) =>
+          matches(ticket) && (!category || ticketCategory(ticket) === category),
+      ),
+      categories: ticketCategories
+        .filter(
+          (entry) =>
+            rolePolicy.apply(user).capabilities[
+              `tickets.category.${entry.id}.view`
+            ],
+        )
+        .map((entry) => ({
+          ...entry,
+          count: store
+            .entries("ticket")
+            .filter(
+              ([, ticket]) =>
+                matches(ticket) && ticketCategory(ticket) === entry.id,
+            ).length,
+        })),
+    };
   }
   function create(user, input, origin = "web", guestNetwork) {
     if (!user?.id || !["web", "discord"].includes(origin))
       throw new AuthError("ticket_origin_disabled", 400);
     if (
+      input.type === "partnership" ||
       !ticketTypes.some((type) => type.id === input.type) ||
       !/^[A-Za-z0-9_]{3,16}$/.test(input.ign || "")
     )
@@ -290,6 +357,103 @@ export function ticketService(
     announce(ticket);
     return ticket;
   }
+  function createPartnership(user, input, network) {
+    if (!["owner", "developer"].includes(input.relationship))
+      throw new AuthError("partnership_owner_required", 400);
+    if (!user?.id || !/^[a-f0-9]{64}$/.test(network || ""))
+      throw new AuthError("invalid_request", 400);
+    const name = text(input.name, 2, 80);
+    const email = text(
+      input.email,
+      3,
+      254,
+      "invalid_ticket_email",
+    ).toLowerCase();
+    if (!validMailAddress(email))
+      throw new AuthError("invalid_ticket_email", 400);
+    const discord = text(input.discord, 2, 100);
+    const packUrl = text(input.packUrl, 10, 1000);
+    let url;
+    try {
+      url = new URL(packUrl);
+    } catch {
+      throw new AuthError("invalid_pack_link", 400);
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      !url.hostname.includes(".")
+    )
+      throw new AuthError("invalid_pack_link", 400);
+    if (!["email", "discord"].includes(input.preference))
+      throw new AuthError("invalid_contact_preference", 400);
+    if (
+      input.preference === "discord" &&
+      (user.guest || !/^\d{17,20}$/.test(user.id) || input.allowDm !== true)
+    )
+      throw new AuthError("partnership_discord_required", 400);
+    if (!idPattern.test(input.requestId || ""))
+      throw new AuthError("invalid_request", 400);
+    const prior = store.get("ticket-request", `${user.id}:${input.requestId}`);
+    if (prior) return get(prior.id);
+    const ticket = {
+      id: randomUUID(),
+      ign: name,
+      type: "partnership",
+      location: url.hostname,
+      description: text(input.description, 50, 4000),
+      owner: publicActor({ ...user, name }),
+      contactEmail: email,
+      guestNetwork: network,
+      origin: "web",
+      status: "pending",
+      claimedBy: null,
+      channelId: null,
+      createdAt: now(),
+      updatedAt: now(),
+      revision: 0,
+      sequence: 0,
+      rating: null,
+      resolution: null,
+      partnership: {
+        relationship: input.relationship,
+        packUrl: url.href,
+        discord,
+        preference: input.preference,
+        discordId: user.guest ? null : user.id,
+      },
+    };
+    store.transaction(() => {
+      if (
+        store
+          .entries("ticket")
+          .some(
+            ([, current]) =>
+              current.type === "partnership" &&
+              current.status !== "closed" &&
+              (current.guestNetwork === network ||
+                current.contactEmail?.toLowerCase() === email ||
+                current.owner.id === user.id),
+          )
+      )
+        throw new AuthError("partnership_limit", 409);
+      audit(ticket, user, "opened", "Modpack partnership request submitted");
+      queue(ticket, "opened");
+      if (config.tickets.staffChannelId)
+        for (const event of ["opened", "unclaimed"])
+          put("ticket-notice-outbox", `${ticket.id}:${event}`, {
+            ticketId: ticket.id,
+            event,
+            channelId: config.tickets.staffChannelId,
+            after: now() + (event === "unclaimed" ? 3600000 : 0),
+            attempts: 0,
+          });
+      put("ticket-request", `${user.id}:${input.requestId}`, { id: ticket.id });
+    });
+    announce(ticket);
+    return ticket;
+  }
   function files(ticket, user, ids, internal = false) {
     if (
       !Array.isArray(ids) ||
@@ -301,7 +465,10 @@ export function ticketService(
       ids.reduce(
         (total, id) => total + (store.get("ticket-media", id)?.size || 0),
         0,
-      ) > ticketMessageUploadLimit
+      ) >
+      (ticket.type === "partnership"
+        ? 10 * 1024 * 1024
+        : ticketMessageUploadLimit)
     )
       throw new AuthError("attachments_too_large", 413);
     return ids.map((id) => {
@@ -465,7 +632,7 @@ export function ticketService(
       internal ? "tickets.close" : "tickets.reply",
     );
     if (!transport) throw new AuthError("ticket_sync_unavailable", 503);
-    const metadata = await transport.upload(bytes, name, type);
+    const metadata = await transport.upload(bytes, name, type, ticket);
     // validate again after the upload. a closure may have raced it.
     const file = {
       ...metadata,
@@ -522,6 +689,19 @@ export function ticketService(
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
     const saveAttachment = (metadata) => {
+      if (metadata.savedId) {
+        const saved = store.get("ticket-media", metadata.savedId);
+        if (
+          !saved ||
+          saved.ticketId !== id ||
+          saved.uploader !== incoming.actor.id ||
+          saved.expiresAt <= now()
+        )
+          throw new AuthError("invalid_attachment", 400);
+        saved.used = true;
+        put("ticket-media", saved.id, saved);
+        return saved.id;
+      }
       const createdAt = closing ? Math.min(incoming.at, now()) : now();
       const file = {
         ...metadata,
@@ -612,7 +792,7 @@ export function ticketService(
         content: (incoming.content || "").slice(0, 2000),
         attachments,
         at: incoming.at || now(),
-        origin: "discord",
+        origin: incoming.origin === "email" ? "email" : "discord",
         delivery: "delivered",
         discordId: incoming.id,
         discordEditedAt: incoming.editedAt || 0,
@@ -622,7 +802,14 @@ export function ticketService(
       put(`ticket-messages:${id}`, key, message);
       put("ticket-discord-message", incoming.id, { ticketId: id, key });
       ticket.lastDiscordId = incoming.id;
-      audit(ticket, incoming.actor, "message", "Discord message received");
+      audit(
+        ticket,
+        incoming.actor,
+        "message",
+        incoming.origin === "email"
+          ? "Email reply received"
+          : "Discord message received",
+      );
     });
     announce(ticket);
   }
@@ -761,6 +948,8 @@ export function ticketService(
     list,
     view,
     create,
+    createPartnership,
+    visible,
     reply,
     claim,
     closeTicket,
@@ -768,6 +957,21 @@ export function ticketService(
     media,
     upload,
     ingest,
+    importMedia(id, actor, metadata) {
+      get(id);
+      const file = {
+        ...metadata,
+        id: randomUUID(),
+        ticketId: id,
+        uploader: actor.id,
+        internal: false,
+        used: false,
+        createdAt: now(),
+        expiresAt: now() + ticketMediaDays * 86400000,
+      };
+      put("ticket-media", file.id, file);
+      return { savedId: file.id };
+    },
     linked,
     bind,
     events,
@@ -788,9 +992,7 @@ export function ticketService(
         count: store
           .entries("ticket")
           .filter(
-            ([, ticket]) =>
-              ticket.status !== "closed" &&
-              (ticket.type !== "staff" || rolePolicy.isManager(user)),
+            ([, ticket]) => ticket.status !== "closed" && visible(user, ticket),
           ).length,
         available: true,
         checkedAt: now(),

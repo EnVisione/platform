@@ -1,5 +1,6 @@
 import {
   Client,
+  Partials,
   GatewayIntentBits,
   ChannelType,
   PermissionFlagsBits,
@@ -37,8 +38,11 @@ export function discordOffice(config, store, dependencies = {}) {
       GatewayIntentBits.GuildPresences,
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.GuildMessages,
-      ...(config.tickets ? [GatewayIntentBits.MessageContent] : []),
+      ...(config.tickets
+        ? [GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages]
+        : []),
     ],
+    partials: [Partials.Channel],
     makeCache: Options.cacheWithLimits({ MessageManager: 0 }),
     allowedMentions: { parse: [] },
   });

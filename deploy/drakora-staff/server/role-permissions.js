@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
 import { permissions } from "./roles.js";
 import {
-  staffPermissions,
+  staffPermissionCatalog,
   permissionDependencies,
   protectedFounderPermissions,
 } from "../shared/staff-permissions.js";
@@ -32,6 +32,7 @@ export function staffRoleCatalog(config) {
 
 export function rolePermissions(config, store) {
   const roles = staffRoleCatalog(config);
+  const staffPermissions = staffPermissionCatalog(config.mail?.identities);
   const keys = staffPermissions.map((permission) => permission.key);
   const managers = ["Founder", "Manager"];
   const admins = [...managers, "Admin"];
@@ -69,6 +70,17 @@ export function rolePermissions(config, store) {
           enabled = admins.includes(role.name);
         if (key.startsWith("tickets.") || key === "logs.view")
           enabled = [...reviewers, "Helper"].includes(role.name);
+        if (key.startsWith("tickets.category.")) {
+          const category = key.split(".")[2];
+          enabled =
+            category === "billing"
+              ? role.name === "Founder"
+              : category === "support"
+                ? [...reviewers, "Helper"].includes(role.name)
+                : managers.includes(role.name);
+        }
+        if (key.startsWith("mail.inbox.partners@drakora.org."))
+          enabled = managers.includes(role.name);
         return [key, enabled];
       }),
     );
@@ -103,7 +115,7 @@ export function rolePermissions(config, store) {
       for (const key of protectedFounderPermissions) granted[key] = true;
     if (!base.dashboard) granted["dashboard.view"] = false;
     if (!base.todo) granted["huly.access"] = false;
-    const capabilities = permissionDependencies(granted);
+    const capabilities = permissionDependencies(granted, staffPermissions);
     return {
       ...user,
       capabilities,
@@ -128,16 +140,20 @@ export function rolePermissions(config, store) {
       permissions: staffPermissions,
       roles: roles.map((role) => ({
         ...role,
-        permissions: values(role),
+        permissions: permissionDependencies(values(role), staffPermissions),
         editable: Boolean(
           role.id && (role.name !== "Founder" || isFounder(current)),
         ),
-        locked:
-          role.name === "Founder"
+        locked: [
+          ...(!isFounder(current)
+            ? keys.filter((key) => key.startsWith("tickets.category.billing."))
+            : []),
+          ...(role.name === "Founder"
             ? protectedFounderPermissions
             : !managers.includes(role.name)
               ? keys.filter((key) => key.startsWith("roles."))
-              : [],
+              : []),
+        ],
       })),
       canEdit: current.capabilities["roles.edit"],
       canAssign: current.capabilities["roles.assign"],
@@ -168,7 +184,7 @@ export function rolePermissions(config, store) {
         keys.some((key) => typeof entry.permissions[key] !== "boolean")
       )
         throw new AuthError("invalid_role_permissions", 400);
-      const previous = values(role);
+      const previous = permissionDependencies(values(role), staffPermissions);
       if (
         role.name === "Founder" &&
         !isFounder(current) &&
@@ -195,6 +211,15 @@ export function rolePermissions(config, store) {
         )
       )
         throw new AuthError("role_permission_dependency", 400);
+      if (
+        !isFounder(current) &&
+        keys.some(
+          (key) =>
+            key.startsWith("tickets.category.billing.") &&
+            entry.permissions[key] !== previous[key],
+        )
+      )
+        throw new AuthError("founder_role_required");
       overrides[role.id] = { ...entry.permissions };
     }
     const next = {
