@@ -106,7 +106,7 @@ export function ticketService(
       name: file.name,
       type: file.type,
       size: file.size,
-      expired: file.expiresAt <= now() || file.purged,
+      expired: Boolean(file.expiresAt <= now() || file.purged || file.removed),
       url: `${staffView ? "/api/tickets" : "/help/api/tickets"}/${ticketId}/attachments/${file.id}`,
     };
   }
@@ -452,7 +452,7 @@ export function ticketService(
       (!file.used && file.uploader !== user.id)
     )
       throw new AuthError("ticket_not_found", 404);
-    if (file.purged || file.expiresAt <= now())
+    if (file.purged || file.removed || file.expiresAt <= now())
       throw new AuthError("attachment_expired", 410);
     return file;
   }
@@ -472,20 +472,69 @@ export function ticketService(
   function ingest(id, incoming) {
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
+    const saveAttachment = (metadata) => {
+      const file = {
+        ...metadata,
+        id: randomUUID(),
+        ticketId: id,
+        uploader: incoming.actor.id,
+        internal: false,
+        used: true,
+        createdAt: now(),
+        expiresAt: now() + ticketMediaDays * 86400000,
+      };
+      put("ticket-media", file.id, file);
+      return file.id;
+    };
     if (ref) {
+      if (ref.ticketId !== id) return;
       const message = store.get(`ticket-messages:${id}`, ref.key);
       if (
-        message.origin !== "discord" ||
-        (message.content === incoming.content &&
-          message.deleted === Boolean(incoming.deleted))
+        !incoming.deleted &&
+        (message.deleted ||
+          (incoming.editedAt || 0) < (message.discordEditedAt || 0))
       )
         return;
-      Object.assign(message, {
-        content: incoming.deleted ? "Message deleted" : incoming.content,
-        deleted: Boolean(incoming.deleted),
-        editedAt: now(),
-      });
+      const nextContent = incoming.deleted
+        ? "Message deleted"
+        : (incoming.content || "").slice(0, 2000);
+      const metadata = incoming.deleted ? [] : incoming.attachments;
+      const previous = message.attachments.map((fileId) =>
+        store.get("ticket-media", fileId),
+      );
+      const attachmentsChanged =
+        metadata !== undefined &&
+        (metadata.length !== previous.length ||
+          metadata.some(
+            (file, index) =>
+              file.attachmentId !== previous[index]?.attachmentId,
+          ));
+      if (
+        message.origin !== "discord" ||
+        (message.content === nextContent &&
+          message.deleted === Boolean(incoming.deleted) &&
+          !attachmentsChanged)
+      )
+        return;
       store.transaction(() => {
+        if (attachmentsChanged) {
+          message.attachments = metadata.map(
+            (file) =>
+              previous.find((old) => old.attachmentId === file.attachmentId)
+                ?.id || saveAttachment(file),
+          );
+          for (const old of previous)
+            if (!message.attachments.includes(old.id)) {
+              old.removed = true;
+              put("ticket-media", old.id, old);
+            }
+        }
+        Object.assign(message, {
+          content: nextContent,
+          deleted: Boolean(incoming.deleted),
+          editedAt: now(),
+          discordEditedAt: incoming.editedAt || 0,
+        });
         put(`ticket-messages:${id}`, ref.key, message);
         audit(
           ticket,
@@ -500,20 +549,7 @@ export function ticketService(
     if (incoming.deleted || !["pending", "claimed"].includes(ticket.status))
       return;
     store.transaction(() => {
-      const attachments = (incoming.attachments || []).map((metadata) => {
-        const file = {
-          ...metadata,
-          id: randomUUID(),
-          ticketId: id,
-          uploader: incoming.actor.id,
-          internal: false,
-          used: true,
-          createdAt: now(),
-          expiresAt: now() + ticketMediaDays * 86400000,
-        };
-        put("ticket-media", file.id, file);
-        return file.id;
-      });
+      const attachments = (incoming.attachments || []).map(saveAttachment);
       const message = {
         id: randomUUID(),
         sequence: ++ticket.sequence,
@@ -525,6 +561,7 @@ export function ticketService(
         origin: "discord",
         delivery: "delivered",
         discordId: incoming.id,
+        discordEditedAt: incoming.editedAt || 0,
         deleted: false,
       };
       const key = String(message.sequence).padStart(12, "0");
@@ -539,12 +576,25 @@ export function ticketService(
     if (!transport || stopped || running) return running;
     running = Promise.resolve()
       .then(async () => {
+        const blocked = new Set();
+        const priority = { create: 0, message: 1, status: 2 };
+        let attempts = 0;
         for (const [key, job] of store
           .entries("ticket-outbox")
-          .filter(([, job]) => job.after <= now())
-          .slice(0, 20)) {
+          .sort(
+            ([, a], [, b]) =>
+              a.ticketId.localeCompare(b.ticketId) ||
+              priority[a.kind] - priority[b.kind] ||
+              a.ref.localeCompare(b.ref),
+          )) {
+          if (job.kind === "message" && blocked.has(job.ticketId)) continue;
+          if (job.after > now()) {
+            if (job.kind === "message") blocked.add(job.ticketId);
+            continue;
+          }
           const ticket = get(job.ticketId);
           if (job.kind !== "create" && !ticket.channelId) continue;
+          if (attempts++ === 20) break;
           try {
             if (job.kind === "create") await transport.create(ticket);
             else if (job.kind === "status") await transport.status(ticket);
@@ -579,6 +629,7 @@ export function ticketService(
               revision: get(ticket.id).revision,
             });
           } catch (error) {
+            if (job.kind === "message") blocked.add(job.ticketId);
             job.attempts++;
             job.after =
               now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));

@@ -409,7 +409,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       };
     },
     async bytes(file) {
-      if (file.expiresAt <= Date.now() || file.purged)
+      if (file.expiresAt <= Date.now() || file.purged || file.removed)
         throw new AuthError("attachment_expired", 410);
       const source = await (
         await channel(file.channelId)
@@ -469,18 +469,19 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       message.guildId !== settings.guildId
     )
       return;
-    if (!edited && service.store.get("ticket-discord-message", message.id))
-      return;
+    const prior = service.store.get("ticket-discord-message", message.id);
+    if (!edited && prior) return;
     const user = actor(message.author, message.member);
     const isOwner = user.id === ticket.owner.id;
-    const staff = isOwner ? null : await staffUser(user.id);
-    if (!isOwner)
+    const staff = isOwner || prior ? null : await staffUser(user.id);
+    if (!isOwner && !prior)
       service.staff(staff || { roles: [] }, ticket, "tickets.reply");
     service.ingest(ticket.id, {
       id: message.id,
       actor: user,
       staff: !isOwner,
       at: message.createdTimestamp,
+      editedAt: message.editedTimestamp,
       content: message.content,
       attachments: [...message.attachments.values()].map((file) => ({
         channelId: message.channelId,
@@ -517,40 +518,62 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     return refreshing;
   }
   async function recover() {
-    if (stopped || recovering || !client.isReady()) return;
+    if (stopped || !client.isReady()) return;
+    if (recovering) return recovering;
     recovering = (async () => {
       await ready();
       await refreshPermissions();
       for (const ticket of service
         .all()
-        .filter(
-          (ticket) =>
-            ticket.channelId && ["pending", "claimed"].includes(ticket.status),
+        .filter((ticket) => ticket.channelId)
+        .sort(
+          (a, b) =>
+            Number(a.status === "closed") - Number(b.status === "closed"),
         )) {
-        const target = await channel(ticket.channelId);
-        let after = service.store.get(
-          "ticket-discord-cursor",
-          ticket.id,
-        )?.after;
-        for (let page = 0; page < 20; page++) {
-          const batch = await target.messages.fetch({
-            limit: 100,
-            ...(after ? { after } : {}),
-          });
-          const sorted = [...batch.values()].sort(
-            (a, b) => a.createdTimestamp - b.createdTimestamp,
-          );
-          for (const message of sorted) await observe(message);
-          if (sorted.length) {
-            after = sorted.at(-1).id;
-            service.store.set(
-              "ticket-discord-cursor",
-              ticket.id,
-              { after },
-              Number.MAX_SAFE_INTEGER,
+        try {
+          const target = await channel(ticket.channelId);
+          if (
+            !target
+              .permissionsFor(client.user)
+              ?.has([P.ViewChannel, P.ReadMessageHistory])
+          )
+            throw new Error("Ticket message history is unavailable");
+          let after =
+            service.store.get("ticket-discord-cursor", ticket.id)?.after ||
+            target.id;
+          for (let page = 0; page < 20; page++) {
+            const batch = await target.messages.fetch({
+              limit: 100,
+              ...(after ? { after } : {}),
+            });
+            const sorted = [...batch.values()].sort(
+              (a, b) => a.createdTimestamp - b.createdTimestamp,
             );
+            for (const message of sorted) await observe(message, true);
+            if (sorted.length) {
+              after = sorted.at(-1).id;
+              service.store.set(
+                "ticket-discord-cursor",
+                ticket.id,
+                { after },
+                Number.MAX_SAFE_INTEGER,
+              );
+            }
+            if (batch.size < 100) break;
           }
-          if (batch.size < 100) break;
+          const sweep = service.store.get("ticket-discord-sweep", ticket.id);
+          const latest = await reconcile(ticket, target);
+          const before = sweep?.before
+            ? await reconcile(ticket, target, sweep.before)
+            : latest;
+          service.store.set(
+            "ticket-discord-sweep",
+            ticket.id,
+            { before },
+            Number.MAX_SAFE_INTEGER,
+          );
+        } catch {
+          console.error("Ticket channel recovery is pending.");
         }
       }
     })()
@@ -559,6 +582,31 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         recovering = null;
       });
     return recovering;
+  }
+  async function reconcile(ticket, target, before) {
+    // snapshot before fetching. newer gateway messages are outside this deletion check.
+    const known = service
+      .messages(ticket.id)
+      .filter((message) => message.origin === "discord" && !message.deleted);
+    const batch = await target.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {}),
+    });
+    const sorted = [...batch.values()].sort(
+      (a, b) => a.createdTimestamp - b.createdTimestamp,
+    );
+    for (const message of sorted)
+      if (service.store.get("ticket-discord-message", message.id))
+        await observe(message, true);
+    const oldest = sorted[0]?.id;
+    for (const message of known) {
+      if (batch.size === 100 && BigInt(message.discordId) < BigInt(oldest))
+        continue;
+      if (before && BigInt(message.discordId) >= BigInt(before)) continue;
+      if (!batch.has(message.discordId))
+        service.ingest(ticket.id, { id: message.discordId, deleted: true });
+    }
+    return batch.size === 100 ? oldest : null;
   }
   function intake(interaction) {
     const select = new StringSelectMenuBuilder()
@@ -778,11 +826,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       console.error("Ticket message ingestion is pending."),
     );
   const handleRaw = (event) => {
-    if (!["MESSAGE_UPDATE", "MESSAGE_DELETE"].includes(event.t)) return;
+    if (
+      !["MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK"].includes(
+        event.t,
+      )
+    )
+      return;
     const ticket = service.linked(event.d.channel_id);
     if (!ticket) return;
-    if (event.t === "MESSAGE_DELETE")
-      service.ingest(ticket.id, { id: event.d.id, deleted: true });
+    if (event.t === "MESSAGE_DELETE" || event.t === "MESSAGE_DELETE_BULK")
+      for (const id of event.d.ids || [event.d.id])
+        service.ingest(ticket.id, { id, deleted: true });
     else
       void channel(event.d.channel_id)
         .then((target) => target.messages.fetch(event.d.id))
@@ -808,6 +862,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   return {
     ...transport,
     staffUser,
+    recover,
     async refreshPermissions() {
       save("permissions-pending", { generation: randomUUID() });
       return refreshPermissions();

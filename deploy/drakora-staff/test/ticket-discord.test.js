@@ -9,7 +9,7 @@ import { ticketDiscord } from "../server/ticket-discord.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
-test("Discord transport creates private tickets, preserves webhook identity and recovers ambiguous sends", async (t) => {
+function setupDiscord(t) {
   const config = {
     ...fixture,
     applications: { publicOrigin: "https://example.invalid" },
@@ -47,6 +47,8 @@ test("Discord transport creates private tickets, preserves webhook identity and 
       guildId: "2",
       parentId: data.parent,
       isTextBased: () => true,
+      readable: true,
+      permissionsFor: () => ({ has: () => target.readable }),
       overwrites: data.permissionOverwrites,
       permissionOverwrites: {
         async set(values) {
@@ -71,6 +73,9 @@ test("Discord transport creates private tickets, preserves webhook identity and 
             sends++;
             const message = {
               id: String(++nextId),
+              createdTimestamp: nextId,
+              channelId: id,
+              guildId: "2",
               webhookId: hook.id,
               author: { id: "bot", bot: true },
               embeds: data.embeds || [],
@@ -86,6 +91,9 @@ test("Discord transport creates private tickets, preserves webhook identity and 
       async send(data) {
         const message = {
           id: String(++nextId),
+          createdTimestamp: nextId,
+          channelId: id,
+          guildId: "2",
           author: { id: "bot", bot: true },
           embeds: data.embeds || [],
           data,
@@ -100,13 +108,30 @@ test("Discord transport creates private tickets, preserves webhook identity and 
       },
       messages: {
         async fetch(query) {
-          return typeof query === "string" ? messages.get(query) : messages;
+          if (typeof query === "string") return messages.get(query);
+          const sorted = [...messages.values()].sort(
+            (a, b) => Number(a.id) - Number(b.id),
+          );
+          const found = query.after
+            ? sorted
+                .filter((message) => BigInt(message.id) > BigInt(query.after))
+                .slice(0, query.limit)
+                .reverse()
+            : sorted
+                .filter(
+                  (message) =>
+                    !query.before || BigInt(message.id) < BigInt(query.before),
+                )
+                .reverse()
+                .slice(0, query.limit);
+          return new Collection(found.map((message) => [message.id, message]));
         },
         async delete(id) {
           messages.delete(id);
         },
       },
     };
+    target.savedMessages = messages;
     channels.set(id, target);
     return target;
   }
@@ -159,6 +184,23 @@ test("Discord transport creates private tickets, preserves webhook identity and 
     await service.stop();
     store.close();
   });
+  return {
+    config,
+    service,
+    transport,
+    policy,
+    client,
+    channels,
+    user,
+    get sends() {
+      return sends;
+    },
+  };
+}
+
+test("Discord transport creates private tickets, preserves webhook identity and recovers ambiguous sends", async (t) => {
+  const context = setupDiscord(t);
+  const { service, transport, policy, client, channels, user } = context;
   const ticket = service.create(
     { id: user.id, name: "Player", avatar: user.displayAvatarURL() },
     {
@@ -196,11 +238,11 @@ test("Discord transport creates private tickets, preserves webhook identity and 
     { requestId: randomUUID(), content: "Hello from the web" },
   );
   await service.pump();
-  assert.equal(sends, 1);
+  assert.equal(context.sends, 1);
   const delivered = service.messages(ticket.id)[0];
   const duplicate = await transport.message(linked, outgoing, []);
   assert.equal(duplicate.id, delivered.discordId);
-  assert.equal(sends, 1);
+  assert.equal(context.sends, 1);
   const sent = await target.messages.fetch(delivered.discordId);
   assert.equal(sent.data.username, "Player");
   assert.equal(sent.data.avatarURL, user.displayAvatarURL());
@@ -252,4 +294,101 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(modal.custom_id, "ticket:intake:bug");
   assert.equal(modal.components.length, 3);
+});
+
+test("Discord reconnect backfills multiple pages and reconciles edits and deletions without duplicates", async (t) => {
+  const { service, transport, client, channels, user } = setupDiscord(t);
+  const ticket = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description:
+        "Reconnect verification with missing messages and changed history.",
+    },
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  await transport.recover();
+  service.store.delete("ticket-discord-cursor", ticket.id);
+  for (let index = 0; index < 110; index++) {
+    const id = String(2000 + index);
+    target.savedMessages.set(id, {
+      id,
+      createdTimestamp: 2000 + index,
+      channelId: target.id,
+      guildId: "2",
+      author: user,
+      content: `Offline reply ${index}`,
+      attachments: new Collection(),
+    });
+  }
+  client.emit("shardResume");
+  await transport.recover();
+  assert.equal(service.messages(ticket.id).length, 110);
+  assert.equal(service.messages(ticket.id)[0].content, "Offline reply 0");
+  target.savedMessages.get("2109").content = "Edited while disconnected";
+  target.savedMessages.delete("2108");
+  client.emit("shardResume");
+  await transport.recover();
+  const saved = service.messages(ticket.id);
+  assert.equal(saved.length, 110);
+  assert.equal(saved.at(-1).content, "Edited while disconnected");
+  assert.equal(saved.at(-2).deleted, true);
+  client.emit("raw", {
+    t: "MESSAGE_DELETE_BULK",
+    d: { channel_id: target.id, ids: ["2000", "2001"] },
+  });
+  assert.ok(
+    service
+      .messages(ticket.id)
+      .slice(0, 2)
+      .every((message) => message.deleted),
+  );
+  target.readable = false;
+  target.savedMessages.clear();
+  client.emit("shardResume");
+  await transport.recover();
+  assert.equal(
+    service.messages(ticket.id).filter((message) => message.deleted).length,
+    3,
+  );
+  const other = service.create(
+    { id: user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "OtherPlayer",
+      type: "general",
+      location: "Terra",
+      description:
+        "This ticket must recover while another channel has lost read permissions.",
+    },
+  );
+  await service.pump();
+  const otherTarget = channels.get(service.get(other.id).channelId);
+  otherTarget.savedMessages.set("3000", {
+    id: "3000",
+    createdTimestamp: 3000,
+    channelId: otherTarget.id,
+    guildId: "2",
+    author: user,
+    content: "Unaffected ticket reply",
+    attachments: new Collection(),
+  });
+  await transport.recover();
+  assert.equal(
+    service.messages(other.id)[0].content,
+    "Unaffected ticket reply",
+  );
+  service.closeTicket({ id: user.id }, other.id, {});
+  otherTarget.savedMessages.get("3000").content =
+    "Edited after closure while disconnected";
+  await transport.recover();
+  assert.equal(
+    service.messages(other.id)[0].content,
+    "Edited after closure while disconnected",
+  );
 });

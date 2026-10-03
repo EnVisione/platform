@@ -181,6 +181,90 @@ test("a status change during delivery retains a fresh outbox job", async (t) => 
   assert.equal(service.get(ticket.id).status, "awaiting_resolution");
 });
 
+test("a failed reply holds later replies in order while other tickets continue", async (t) => {
+  let time = Date.now();
+  const { service } = setup(t, { now: () => time });
+  const first = service.create(owner, input()),
+    other = service.create(owner, input());
+  service.bind(first.id, "400");
+  service.bind(other.id, "401");
+  service.reply(owner, first.id, message("First reply"));
+  service.reply(owner, first.id, message("Later reply"));
+  service.reply(owner, other.id, message("Other ticket"));
+  const delivered = [];
+  let unavailable = true;
+  service.attach({
+    async create() {},
+    async status() {},
+    async message(ticket, item) {
+      if (item.content === "First reply" && unavailable)
+        throw new Error("Temporary delivery failure");
+      delivered.push(item.content);
+      return { id: String(500 + delivered.length) };
+    },
+  });
+  await service.pump();
+  await service.pump();
+  assert.deepEqual(delivered, ["Other ticket"]);
+  unavailable = false;
+  time += 3000;
+  await service.pump();
+  assert.deepEqual(delivered, ["Other ticket", "First reply", "Later reply"]);
+});
+
+test("Discord attachment edits preserve unchanged media and remove deleted files from views", (t) => {
+  const { service } = setup(t);
+  const ticket = service.create(owner, input());
+  const original = {
+    id: "650",
+    actor: owner,
+    content: "Evidence",
+    attachments: [
+      {
+        channelId: "400",
+        messageId: "650",
+        attachmentId: "651",
+        name: "proof.png",
+        type: "image/png",
+        size: 20,
+      },
+    ],
+  };
+  service.ingest(ticket.id, original);
+  const revision = service.get(ticket.id).revision;
+  const fileId = service.messages(ticket.id)[0].attachments[0];
+  service.ingest(ticket.id, original);
+  assert.equal(service.get(ticket.id).revision, revision);
+  service.ingest(ticket.id, { ...original, content: "Updated evidence" });
+  assert.deepEqual(service.messages(ticket.id)[0].attachments, [fileId]);
+  service.ingest(ticket.id, {
+    ...original,
+    content: "Updated evidence",
+    attachments: [],
+  });
+  assert.deepEqual(service.view(owner, ticket.id).messages[0].attachments, []);
+  service.ingest(ticket.id, { ...original, id: "652" });
+  service.ingest(ticket.id, { id: "652", deleted: true });
+  assert.deepEqual(service.view(owner, ticket.id).messages[1].attachments, []);
+  fails(() => service.media(owner, ticket.id, fileId), "attachment_expired");
+  service.ingest(ticket.id, {
+    ...original,
+    id: "653",
+    content: "Latest edit",
+    editedAt: 20,
+  });
+  service.ingest(ticket.id, {
+    ...original,
+    id: "653",
+    content: "Stale fetched edit",
+    editedAt: 10,
+  });
+  assert.equal(service.messages(ticket.id).at(-1).content, "Latest edit");
+  service.ingest(ticket.id, { id: "653", deleted: true });
+  service.ingest(ticket.id, { ...original, id: "653", editedAt: 30 });
+  assert.equal(service.messages(ticket.id).at(-1).deleted, true);
+});
+
 test("owner close requires a later staff resolution, optional rating accepts only one valid score", (t) => {
   const { service } = setup(t);
   const ticket = service.create(owner, input());
