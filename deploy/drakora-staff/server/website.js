@@ -1,14 +1,18 @@
 import { AuthError } from "./discord.js";
-import { initialWebsite, ruleSections } from "../shared/website.js";
+import {
+  initialWebsite,
+  ruleSections,
+  applicationSections,
+} from "../shared/website.js";
 
 export function websiteAccess(config, user) {
   return Boolean(
     user.permissions?.dashboard &&
-    config.ranks.some(
-      (rank) =>
-        ["Founder", "Manager", "Admin"].includes(rank.name) &&
-        user.roles?.includes(rank.id),
-    ),
+      config.ranks.some(
+        (rank) =>
+          ["Founder", "Manager", "Admin"].includes(rank.name) &&
+          user.roles?.includes(rank.id),
+      ),
   );
 }
 
@@ -74,6 +78,17 @@ export function validateWebsite(input) {
   const rules = Object.fromEntries(
     ruleSections.map(({ id }) => [id, text(input.rules[id], 20000, true)]),
   );
+  if (!input.apply) throw new AuthError("invalid_website_content", 400);
+  const apply = {
+    title: text(input.apply.title, 100, true),
+    introduction: text(input.apply.introduction, 1000, true),
+    ...Object.fromEntries(
+      applicationSections.map(({ id }) => [
+        id,
+        text(input.apply[id], 6000, true),
+      ]),
+    ),
+  };
   const servers = input.servers.map((entry) => {
     if (
       !entry ||
@@ -122,7 +137,7 @@ export function validateWebsite(input) {
   });
   if (new Set(servers.map((server) => server.slug)).size !== servers.length)
     throw new AuthError("duplicate_server_slug", 400);
-  return { home, rules, servers };
+  return { home, apply, rules, servers };
 }
 
 export function websiteService(config, store) {
@@ -134,6 +149,7 @@ export function websiteService(config, store) {
     return {
       ...saved,
       home: saved.home ?? structuredClone(initialWebsite.home),
+      apply: saved.apply ?? structuredClone(initialWebsite.apply),
     };
   };
   const authorize = (user) => {
@@ -146,12 +162,13 @@ export function websiteService(config, store) {
       return read();
     },
     publicContent() {
-      const { home, rules, servers } = read();
+      const { home, apply, rules, servers } = read();
       return {
         home: {
           ...home,
           announcements: home.announcements.filter((entry) => entry.published),
         },
+        apply,
         rules,
         servers: servers.filter((server) => server.published),
         address: "play.drakora.org",
@@ -169,6 +186,7 @@ export function websiteService(config, store) {
         const content = validateWebsite({
           ...input,
           home: input.home ?? previous.home,
+          apply: input.apply ?? previous.apply,
         });
         const next = {
           ...content,

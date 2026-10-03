@@ -27,7 +27,7 @@ export function applicationRouter(config, applications, dist) {
     express.json({ limit: "1mb" }),
   );
   router.get("/", (_req, res) => res.redirect("/apply"));
-  router.get(["/apply", "/apply/"], (_req, res) =>
+  router.get(["/apply", "/apply/", "/apply/start"], (_req, res) =>
     res.sendFile(`${dist}/index.html`),
   );
   router.get("/apply/api/draft", async (req, res) => {
@@ -66,7 +66,7 @@ export function applicationRouter(config, applications, dist) {
   });
   router.get("/apply/auth/complete", (req, res) => {
     applications.complete(req.sessionID, req.query.code);
-    res.redirect("/apply");
+    res.redirect("/apply/start");
   });
   router.get("/apply/api/minecraft/:name", async (req, res) =>
     res.json(await applications.minecraftProfile(req.params.name)),
@@ -130,7 +130,7 @@ export function applicationRouter(config, applications, dist) {
           : 503;
     if (req.path.startsWith("/apply/api/"))
       return res.status(status).json({ error: code });
-    res.redirect(`/apply?error=${encodeURIComponent(code)}`);
+    res.redirect(`/apply/start?error=${encodeURIComponent(code)}`);
   });
   return router;
 }

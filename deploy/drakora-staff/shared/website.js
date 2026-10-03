@@ -5,6 +5,14 @@ export const ruleSections = [
   { id: "discord", name: "Discord" },
 ];
 
+export const applicationSections = [
+  { id: "role", name: "What being staff means" },
+  { id: "qualities", name: "What we look for", list: true },
+  { id: "beforeApplying", name: "Before you apply", list: true },
+  { id: "answers", name: "Write in your own words" },
+  { id: "note", name: "Part of the community" },
+];
+
 export function newServer() {
   return {
     slug: "",
@@ -44,6 +52,19 @@ export const initialWebsite = {
     emptyMessage:
       "Community news and events will appear here. Join Discord for the latest updates.",
     announcements: [],
+  },
+  apply: {
+    title: "Staff applications",
+    introduction:
+      "Want to help Drakora grow? We are looking for people who enjoy helping players, building together and keeping our community welcoming.",
+    role: "Staff help players find their feet, keep conversations respectful and handle problems fairly. Builders, artists and developers also help shape our worlds and community.\n\nThese are volunteer roles. We value the time and care you give, but they are not paid positions. You do not need to know everything before applying; patience, honesty and a willingness to learn matter.",
+    qualities:
+      "Community spirit: help make Drakora welcoming for everyone.\nCalm communication: explain things clearly and stay respectful when a situation is difficult.\nFair judgment: listen to both sides and avoid favoritism.\nReliability: communicate your availability and follow through on what you take on.\nWillingness to learn: ask questions, accept feedback and work with the team.",
+    beforeApplying:
+      "Use your real Minecraft username and accurate contact details.\nBe honest about your experience, availability and moderation history.\nExplain why you want to help Drakora and the role you are interested in.\nGive thoughtful answers and examples rather than one-word responses.\nYou must be 18 or older to apply.\nApplying does not guarantee acceptance.",
+    answers:
+      "Your answers should reflect your own experience and judgment. Help with spelling or grammar is fine, but do not submit answers written for you. Take the time to explain what you think and how you would approach a situation.",
+    note: "Staff are part of the community. Be helpful, patient and easy to work with. After you submit, the team will review your application and contact you through the details you provide. You can return to the form in this browser to check your application.",
   },
   rules: {
     home: "Harassment, bullying and discrimination are strictly prohibited.\n\nDo not post explicit or inflammatory media. Hateful or explicit profiles, usernames and skins are forbidden.\n\nKeep public chats in English so staff can moderate. Other languages are welcome in private messages. Contact staff if you need help with a translator.\n\nDo not spam, use excessive caps, beg for items or bring excessive negativity into chat. Advertising is prohibited.\n\nDo not impersonate staff or other players. Evading bans, warnings or mutes is strictly forbidden.\n\nStaff decisions are final. Do not argue about staff decisions in public. Open a Discord support ticket to discuss staff actions, appeal or report an issue. Do not DM staff about issues without direct permission.",

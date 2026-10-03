@@ -288,6 +288,63 @@ test("announcement validation bounds content and rejects malformed dates and dup
   );
 });
 
+test("Apply guidance migrates saved pages and older editors preserve published guidance", (t) => {
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => database.store.close());
+  const legacy = draft();
+  delete legacy.apply;
+  legacy.revision = 9;
+  legacy.home.title = "Keep our welcome";
+  database.store.set(
+    "website-content",
+    "current",
+    legacy,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const service = websiteService(config, database.store);
+  const edit = service.read(admin);
+  assert.deepEqual(edit.apply, initialWebsite.apply);
+  assert.equal(edit.revision, 9);
+  edit.apply.introduction = "Help our community.";
+  edit.apply.answers = "Write honestly. <script>Plain text.</script>";
+  edit.apply.privateField = "Do not publish";
+  const saved = service.save(admin, edit);
+  assert.equal(saved.revision, 10);
+  assert.equal(
+    service.publicContent().apply.introduction,
+    "Help our community.",
+  );
+  assert.equal("privateField" in saved.apply, false);
+  assert.deepEqual(saved.home, legacy.home);
+  assert.deepEqual(saved.rules, legacy.rules);
+  assert.deepEqual(saved.servers, legacy.servers);
+  const olderEditor = { ...saved };
+  delete olderEditor.apply;
+  assert.deepEqual(service.save(admin, olderEditor).apply, saved.apply);
+  assert.throws(() => service.save(admin, saved), {
+    code: "website_content_changed",
+  });
+  assert.deepEqual(service.publicContent().apply, saved.apply);
+});
+
+test("Apply guidance rejects blank and oversized fields without changing saved pages", () => {
+  for (const [field, value] of [
+    ["title", " "],
+    ["introduction", "a".repeat(1001)],
+    ["qualities", "a".repeat(6001)],
+    ["beforeApplying", null],
+    ["answers", "bad\0text"],
+  ]) {
+    const edit = draft();
+    edit.apply[field] = value;
+    assert.throws(
+      () => validateWebsite(edit),
+      { code: "invalid_website_content" },
+      field,
+    );
+  }
+});
+
 test("Discord counts share requests, respect rate limits and expire stale readings while players stay zero", async () => {
   let time = 0,
     calls = 0,
@@ -404,6 +461,8 @@ test("public routes expose published pages without a session and the staff edito
   const origin = `http://127.0.0.1:${server.address().port}`;
   for (const path of [
     "/",
+    "/apply",
+    "/apply/",
     "/servers",
     "/servers/prom2",
     "/rules",
@@ -419,6 +478,22 @@ test("public routes expose published pages without a session and the staff edito
     assert.equal(response.headers.get("set-cookie"), null);
     assert.equal(await response.text(), "Public Drakora website");
   }
+  const form = await requestSite(origin + "/apply/start", {
+    headers: { Host: "public.example" },
+  });
+  assert.equal(form.status, 200);
+  assert.equal(await form.text(), "Staff dashboard");
+  const legacyCallback = await requestSite(
+    origin + "/apply?error=discord_cancelled",
+    {
+      headers: { Host: "public.example" },
+    },
+  );
+  assert.equal(legacyCallback.status, 302);
+  assert.equal(
+    legacyCallback.headers.get("location"),
+    "/apply/start?error=discord_cancelled",
+  );
   for (const path of [
     "/servers/hidden-world",
     "/servers/missing",

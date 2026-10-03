@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ruleSections, newServer, newAnnouncement } from "../shared/website.js";
+import {
+  ruleSections,
+  applicationSections,
+  newServer,
+  newAnnouncement,
+} from "../shared/website.js";
 import "./website-editor.css";
 const messages = {
   website_content_too_large:
@@ -7,7 +12,7 @@ const messages = {
   website_content_changed:
     "Another staff member saved changes. Your draft is still here. Reload the published content before editing again.",
   invalid_website_content:
-    "Check the Home fields and announcement titles, text and dates. Check each server’s required fields and use HTTPS download links. Rules cannot be empty.",
+    "Check the Home and Apply text, announcement titles, text and dates. Check each server’s required fields and use HTTPS download links. Rules cannot be empty.",
   duplicate_server_slug: "Each server needs a different URL slug.",
   website_role_required:
     "Only Admin, Manager and Founder staff can edit the public website.",
@@ -104,6 +109,14 @@ export function WebsiteEditor({ csrf }) {
     setNotice("");
     setError("");
   }
+  function updateApply(field, value) {
+    setDocument((previous) => ({
+      ...previous,
+      apply: { ...previous.apply, [field]: value },
+    }));
+    setNotice("");
+    setError("");
+  }
   function updateAnnouncement(id, field, value) {
     updateHome(
       "announcements",
@@ -143,7 +156,7 @@ export function WebsiteEditor({ csrf }) {
       <header className="website-heading">
         <div>
           <h2 id="website-title">Website</h2>
-          <p>Edit the public Home, Rules and Servers pages.</p>
+          <p>Edit the public Home, Rules, Servers and Apply pages.</p>
         </div>
         <a href="https://drakora.org" target="_blank" rel="noopener noreferrer">
           View website ↗
@@ -199,6 +212,13 @@ export function WebsiteEditor({ csrf }) {
                   onClick={() => setTab("servers")}
                 >
                   Servers
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={tab === "apply"}
+                  onClick={() => setTab("apply")}
+                >
+                  Apply
                 </button>
               </div>
               <span>
@@ -337,6 +357,40 @@ export function WebsiteEditor({ csrf }) {
                   Use a blank line between paragraphs. HTML is displayed as
                   text. Server details are managed on the Servers tab.
                 </p>
+              </>
+            ) : tab === "apply" ? (
+              <>
+                <p className="website-help">
+                  Visitors read this page before opening the application form.
+                  Use one item per line for the two lists. Application questions
+                  are managed in Staff Applications.
+                </p>
+                <label className="website-field">
+                  Apply page title
+                  <input
+                    value={document.apply.title}
+                    maxLength={100}
+                    required
+                    onChange={(event) =>
+                      updateApply("title", event.target.value)
+                    }
+                  />
+                </label>
+                {[
+                  { id: "introduction", name: "Introduction", limit: 1000 },
+                  ...applicationSections,
+                ].map(({ id, name, limit = 6000 }) => (
+                  <label className="website-field" key={id}>
+                    {name}
+                    <textarea
+                      value={document.apply[id]}
+                      rows={5}
+                      maxLength={limit}
+                      required
+                      onChange={(event) => updateApply(id, event.target.value)}
+                    />
+                  </label>
+                ))}
               </>
             ) : tab === "rules" ? (
               <>

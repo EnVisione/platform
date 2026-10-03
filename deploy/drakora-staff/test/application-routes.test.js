@@ -219,4 +219,31 @@ test("public form mutations require its browser session, CSRF token, and origin"
     (await fetch(`${origin}/auth/discord`, { headers })).status,
     404,
   );
+  const handoff = new URL(
+    applications.handoff(destination.searchParams.get("challenge"), {
+      id: "synthetic",
+      name: "Synthetic applicant",
+      username: "fixture",
+      email: "fixture@example.com",
+      roles: [],
+    }),
+  );
+  const completed = await fetch(origin + handoff.pathname + handoff.search, {
+    headers,
+    redirect: "manual",
+  });
+  assert.equal(completed.status, 302);
+  assert.equal(completed.headers.get("location"), "/apply/start");
+  assert.equal(
+    applications.view(sessionId).answers.displayName,
+    "Synthetic applicant",
+  );
+  const repeated = await fetch(origin + handoff.pathname + handoff.search, {
+    headers,
+    redirect: "manual",
+  });
+  assert.equal(
+    repeated.headers.get("location"),
+    "/apply/start?error=invalid_login_state",
+  );
 });

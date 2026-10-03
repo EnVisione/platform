@@ -325,6 +325,31 @@ button {
 .public-page-title p {
   margin: 0;
 }
+.public-application {
+  max-width: 860px;
+  margin: auto;
+  overflow-wrap: anywhere;
+}
+.public-application article > section {
+  margin-bottom: 30px;
+}
+.public-application h2 {
+  font-size: 21px;
+}
+.public-application p {
+  white-space: pre-line;
+}
+.public-application ul {
+  padding-left: 22px;
+  color: #bcb9ae;
+  line-height: 1.7;
+}
+.public-application li + li {
+  margin-top: 8px;
+}
+.public-application .public-button {
+  color: #fff;
+}
 .public-server-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

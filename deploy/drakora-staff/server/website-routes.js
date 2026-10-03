@@ -25,6 +25,13 @@ export function publicWebsiteRouter(service, status, dist) {
   router.get(["/", "/servers", "/rules"], (_req, res) =>
     res.sendFile(`${dist}/public.html`),
   );
+  router.get("/apply", (req, res) => {
+    if (typeof req.query.error === "string")
+      return res.redirect(
+        `/apply/start?error=${encodeURIComponent(req.query.error)}`,
+      );
+    res.sendFile(`${dist}/public.html`);
+  });
   router.get("/rules/:section", (req, res) =>
     res
       .status(

@@ -746,7 +746,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       const code =
         error instanceof AuthError ? error.code : "service_unavailable";
       return res.redirect(
-        `${config.applications.publicOrigin}/apply?error=${encodeURIComponent(code)}`,
+        `${config.applications.publicOrigin}/apply/start?error=${encodeURIComponent(code)}`,
       );
     }
   }

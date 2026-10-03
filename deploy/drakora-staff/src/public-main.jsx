@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ruleSections } from "../shared/website.js";
+import { ruleSections, applicationSections } from "../shared/website.js";
 import logo from "./assets/drakora-logo.png";
 import castle from "./assets/medieval-castle.svg";
 import forest from "./assets/medieval-forest.svg";
@@ -123,6 +123,47 @@ function HomePage({ home }) {
     </>
   );
 }
+function ApplicationInformation({ apply }) {
+  return (
+    <div className="public-application">
+      <div className="public-page-title">
+        <span className="public-eyebrow">JOIN THE TEAM</span>
+        <h1>{apply.title}</h1>
+        <p>{apply.introduction}</p>
+      </div>
+      <article className="public-panel">
+        {applicationSections.map(({ id, name, list }) => (
+          <section key={id} aria-labelledby={`apply-${id}`}>
+            <h2 id={`apply-${id}`}>{name}</h2>
+            {list ? (
+              <ul>
+                {apply[id]
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean)
+                  .map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+              </ul>
+            ) : (
+              <Paragraphs text={apply[id]} />
+            )}
+          </section>
+        ))}
+        <div className="public-application-actions">
+          <h2>Ready to apply?</h2>
+          <p>
+            Take your time. You can save your progress and return in this
+            browser.
+          </p>
+          <a href="/apply/start" className="public-button">
+            Continue application <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </article>
+    </div>
+  );
+}
 function PublicSite() {
   const [content, setContent] = useState(null),
     [error, setError] = useState(false),
@@ -177,12 +218,15 @@ function PublicSite() {
     ruleSections.find((section) => path === `/rules/${section.id}`) ??
     (path === "/rules" ? ruleSections[0] : null);
   const home = path === "/",
-    serversPage = path === "/servers";
+    serversPage = path === "/servers",
+    applyPage = path === "/apply";
   const title = home
     ? "Home"
     : serversPage
       ? "Servers"
-      : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+      : applyPage
+        ? "Apply"
+        : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -273,6 +317,8 @@ function PublicSite() {
           </p>
         ) : home ? (
           <HomePage home={content.home} />
+        ) : applyPage ? (
+          <ApplicationInformation apply={content.apply} />
         ) : serversPage ? (
           <>
             <div className="public-page-title">
@@ -388,7 +434,9 @@ function PublicSite() {
                 <Paragraphs text={content.rules[section.id]} />
                 <p className="public-rule-help">
                   Need help?{" "}
-                  <a href={content.discordInvite}>Open a ticket in Discord ↗</a>
+                  <a href={content.discordInvite}>
+                    Open a ticket in Discord ↗
+                  </a>
                 </p>
               </article>
             </div>
