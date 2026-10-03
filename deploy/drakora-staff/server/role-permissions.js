@@ -67,6 +67,8 @@ export function rolePermissions(config, store) {
           enabled = managers.includes(role.name);
         if (key === "accounts.view" || key.startsWith("mail."))
           enabled = admins.includes(role.name);
+        if (key.startsWith("tickets.") || key === "logs.view")
+          enabled = [...reviewers, "Helper"].includes(role.name);
         return [key, enabled];
       }),
     );

@@ -11,6 +11,7 @@ import forest from "./assets/medieval-forest.svg";
 import prominence from "./assets/prominence-logo.png";
 import restlessHorizons from "./assets/restless-horizons-logo.png";
 import "./public.css";
+import { PublicTickets } from "./tickets.jsx";
 
 const artwork = {
   castle,
@@ -234,6 +235,9 @@ function HelpPage({ help, discordInvite }) {
         <span className="public-eyebrow">DRAKORA SUPPORT</span>
         <h1>{help.title}</h1>
         <p>{help.introduction}</p>
+        <a className="public-button" href="/help/new">
+          Open a ticket <span aria-hidden="true">→</span>
+        </a>
         <a className="public-button" href={discordInvite}>
           Open Discord <span aria-hidden="true">↗</span>
         </a>
@@ -568,4 +572,6 @@ function PublicSite() {
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<PublicSite />);
+createRoot(document.getElementById("root")).render(
+  location.pathname.startsWith("/help/") ? <PublicTickets /> : <PublicSite />,
+);

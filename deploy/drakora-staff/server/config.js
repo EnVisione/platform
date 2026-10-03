@@ -378,5 +378,24 @@ export function validateConfig(config) {
         "Configure a staff category for private email notifications",
       );
   }
+  if (config.tickets !== undefined) {
+    const settings = config.tickets;
+    if (
+      !settings ||
+      !config.office ||
+      !config.applications ||
+      !config.roleSync ||
+      !snowflake(settings.guildId) ||
+      settings.guildId !== config.roleSync.guildId ||
+      !snowflake(settings.archiveCategoryId) ||
+      Buffer.from(settings.databaseKey ?? "", "base64").length !== 32 ||
+      settings.minecraftEnabled !== false ||
+      settings.databaseKey === config.databaseKey ||
+      settings.databaseKey === config.applications.databaseKey
+    )
+      throw new Error(
+        "Configure a separate ticket database key, community guild, archive category and disabled Minecraft ticket integration",
+      );
+  }
   return config;
 }

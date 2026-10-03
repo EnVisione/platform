@@ -12,6 +12,7 @@ services:
     volumes:
       - ${STAFF_DATA_PATH:?Set STAFF_DATA_PATH}:/data
       - ${STAFF_APPLICATIONS_DATA_PATH:-./applications-data}:/applications
+      - ${STAFF_TICKETS_DATA_PATH:-./tickets-data}:/tickets
       - ${STAFF_CONFIG_PATH:?Set STAFF_CONFIG_PATH}:/run/secrets/config.json:ro
       - ${STAFF_MAIL_SOCKET_PATH:-./mail-socket}:/run/mail:ro
       - ${STAFF_STATUS_SOCKET_PATH:-./status-socket}:/run/status:ro

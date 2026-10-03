@@ -10,6 +10,7 @@ import logo from "./assets/drakora-logo.png";
 import { accentForeground } from "../shared/accent.js";
 import { dashboardDestination } from "../shared/dashboard-navigation.js";
 import { Overview } from "./overview.jsx";
+import { Tickets } from "./tickets.jsx";
 import { WebsiteEditor } from "./website-editor.jsx";
 import {
   DashboardClock,
@@ -65,13 +66,16 @@ function safeTarget(value) {
       "/office",
       "/tracker",
       "/calendar",
+      "/tickets",
+      "/logs",
     ].includes(value)
   )
     return value;
   if (/^\/interaction\/[A-Za-z0-9_-]+$/.test(value || "")) return value;
   if (/^\/huly\/authorize\?challenge=[A-Za-z0-9_-]{43}$/.test(value || ""))
     return value;
-  if (/^\/applications\/[a-f0-9-]{36}$/.test(value || "")) return value;
+  if (/^\/(applications|tickets)\/[a-f0-9-]{36}$/.test(value || ""))
+    return value;
   return "/";
 }
 const defaultAccent = "#5865F2";
@@ -602,6 +606,8 @@ function App() {
   const emailPage = page === "/email";
   const rolesPage = page === "/roles";
   const websitePage = page === "/website";
+  const ticketsPage = page === "/tickets" || page.startsWith("/tickets/");
+  const logsPage = page === "/logs";
   const applicationsPage =
     page === "/applications" || page.startsWith("/applications/");
   useEffect(() => {
@@ -735,7 +741,7 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || workspaceView ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || ticketsPage || logsPage || workspaceView ? "" : " active"}`}
             href="/"
             aria-current={
               settingsPage ||
@@ -744,6 +750,8 @@ function App() {
               emailPage ||
               rolesPage ||
               websitePage ||
+              ticketsPage ||
+              logsPage ||
               workspaceView
                 ? undefined
                 : "page"
@@ -763,6 +771,24 @@ function App() {
                 {tool.title}
               </a>
             ))}
+          {user.tickets && (
+            <a
+              className={`nav-item${ticketsPage ? " active" : ""}`}
+              href="/tickets"
+              aria-current={ticketsPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">☏</span>Tickets
+            </a>
+          )}
+          {user.logs && (
+            <a
+              className={`nav-item${logsPage ? " active" : ""}`}
+              href="/logs"
+              aria-current={logsPage ? "page" : undefined}
+            >
+              <span aria-hidden="true">▤</span>Logs
+            </a>
+          )}
           {user.applications && (
             <a
               className={`nav-item${applicationsPage ? " active" : ""}`}
@@ -842,19 +868,23 @@ function App() {
             {workspaceView
               ? dashboardTools.find((tool) => tool.view === workspaceView)
                   ?.title
-              : settingsPage
-                ? "Settings"
-                : accountsPage
-                  ? "Accounts"
-                  : applicationsPage
-                    ? "Staff Applications"
-                    : emailPage
-                      ? "Email"
-                      : rolesPage
-                        ? "Roles"
-                        : websitePage
-                          ? "Website"
-                          : "Overview"}
+              : ticketsPage
+                ? "Tickets"
+                : logsPage
+                  ? "Logs"
+                  : settingsPage
+                    ? "Settings"
+                    : accountsPage
+                      ? "Accounts"
+                      : applicationsPage
+                        ? "Staff Applications"
+                        : emailPage
+                          ? "Email"
+                          : rolesPage
+                            ? "Roles"
+                            : websitePage
+                              ? "Website"
+                              : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
             {(settingsPage ||
@@ -863,6 +893,8 @@ function App() {
               emailPage ||
               rolesPage ||
               websitePage ||
+              ticketsPage ||
+              logsPage ||
               workspaceView) && <a href="/">Overview</a>}
             {user.todo &&
               dashboardTools
@@ -882,6 +914,8 @@ function App() {
             {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
             {user.mail && !emailPage && <a href="/email">Email</a>}
             {user.website && !websitePage && <a href="/website">Website</a>}
+            {user.tickets && !ticketsPage && <a href="/tickets">Tickets</a>}
+            {user.logs && !logsPage && <a href="/logs">Logs</a>}
           </nav>
           <DashboardClock format={preferences.format} timeZone={timeZone} />
           <button className="signout" onClick={logout} disabled={busy}>
@@ -898,7 +932,11 @@ function App() {
                   ? "dashboard dashboard-mail"
                   : rolesPage
                     ? "dashboard dashboard-roles"
-                    : settingsPage || accountsPage || websitePage
+                    : settingsPage ||
+                        accountsPage ||
+                        websitePage ||
+                        ticketsPage ||
+                        logsPage
                       ? "dashboard"
                       : "dashboard dashboard-overview"
           }
@@ -929,7 +967,20 @@ function App() {
               <WebsiteEditor csrf={state.csrf} />
             </div>
           )}
-          {workspaceView ? (
+          {ticketsPage || logsPage ? (
+            user.tickets ? (
+              <Tickets
+                key={route}
+                csrf={state.csrf}
+                capabilities={user.capabilities}
+                logs={logsPage}
+              />
+            ) : (
+              <p className="notice">
+                Your roles do not have permission to view tickets.
+              </p>
+            )
+          ) : workspaceView ? (
             !user.todo && (
               <p className="notice">
                 Your roles do not have permission to open this workspace.

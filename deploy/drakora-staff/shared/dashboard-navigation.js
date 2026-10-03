@@ -17,10 +17,12 @@ export function dashboardDestination(href, origin) {
       "/roles",
       "/website",
       "/settings",
+      "/tickets",
+      "/logs",
       "/applications",
       "/applications/editor",
     ].includes(url.pathname) &&
-    !/^\/applications\/[a-f0-9-]{36}$/.test(url.pathname)
+    !/^\/(applications|tickets)\/[a-f0-9-]{36}$/.test(url.pathname)
   )
     return null;
   return `${url.pathname}${url.search}${url.hash}`;

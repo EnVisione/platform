@@ -1,0 +1,766 @@
+import { randomUUID, randomBytes, createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { AuthError } from "./discord.js";
+import {
+  ticketTypes,
+  ticketPath,
+  ticketMediaDays,
+  ticketMessageUploadLimit,
+} from "../shared/tickets.js";
+
+const forever = Number.MAX_SAFE_INTEGER;
+const digest = (text) => createHash("sha256").update(text).digest("hex");
+const token = () => randomBytes(32).toString("base64url");
+const idPattern = /^[a-f0-9-]{36}$/;
+const publicActor = (user) => ({
+  id: user.id,
+  name: user.name || user.username,
+  avatar: user.avatar || null,
+});
+function text(value, min, max, code = "invalid_ticket") {
+  if (
+    typeof value !== "string" ||
+    value.trim().length < min ||
+    value.trim().length > max ||
+    value.includes("\0")
+  )
+    throw new AuthError(code, 400);
+  return value.trim();
+}
+
+export function ticketService(
+  config,
+  store,
+  rolePolicy,
+  { now = Date.now } = {},
+) {
+  const events = new EventEmitter();
+  events.setMaxListeners(200);
+  let transport,
+    timer,
+    maintenance,
+    running,
+    expiring,
+    stopped = false;
+  const viewers = new Map();
+  const put = (kind, id, value) => store.set(kind, id, value, forever);
+  const get = (id) => {
+    if (!idPattern.test(id || "")) throw new AuthError("ticket_not_found", 404);
+    const ticket = store.get("ticket", id);
+    if (!ticket) throw new AuthError("ticket_not_found", 404);
+    return ticket;
+  };
+  function staff(user, ticket, capability = "tickets.view") {
+    const current = rolePolicy.apply(user);
+    if (
+      !current.capabilities[capability] ||
+      (ticket?.type === "staff" && !rolePolicy.isManager(current))
+    )
+      throw new AuthError("ticket_access_denied");
+    return current;
+  }
+  function authorize(user, ticket, staffView = false, capability) {
+    if (staffView) return staff(user, ticket, capability);
+    if (!user || ticket.owner.id !== user.id)
+      throw new AuthError("ticket_not_found", 404);
+    return user;
+  }
+  function announce(ticket) {
+    events.emit("changed", { id: ticket.id, revision: ticket.revision });
+    void pump();
+  }
+  function queue(ticket, kind, ref = ticket.id) {
+    const id = `${ticket.id}:${kind}:${ref}`;
+    put("ticket-outbox", id, {
+      id,
+      generation: randomUUID(),
+      ticketId: ticket.id,
+      kind,
+      ref,
+      attempts: 0,
+      after: 0,
+    });
+  }
+  function audit(ticket, user, action, detail, internal = false) {
+    ticket.revision++;
+    ticket.updatedAt = now();
+    const entry = {
+      id: randomUUID(),
+      at: now(),
+      actor: publicActor(user),
+      action,
+      detail,
+      internal,
+    };
+    put(
+      `ticket-history:${ticket.id}`,
+      `${String(ticket.revision).padStart(12, "0")}:${entry.id}`,
+      entry,
+    );
+    put("ticket", ticket.id, ticket);
+  }
+  function mediaView(file, staffView, ticketId) {
+    if (file.internal && !staffView) return null;
+    return {
+      id: file.id,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      expired: file.expiresAt <= now() || file.purged,
+      url: `${staffView ? "/api/tickets" : "/help/api/tickets"}/${ticketId}/attachments/${file.id}`,
+    };
+  }
+  function view(user, id, staffView = false, before) {
+    const ticket = get(id);
+    authorize(user, ticket, staffView);
+    const page = store.page(
+      `ticket-messages:${id}`,
+      50,
+      0,
+      (message) =>
+        (!before || message.sequence < Number(before)) &&
+        (!message.internal || staffView),
+    );
+    const messages = page.items.reverse().map((message) => ({
+      ...message,
+      attachments: message.attachments
+        .map((fileId) =>
+          mediaView(store.get("ticket-media", fileId), staffView, id),
+        )
+        .filter(Boolean),
+    }));
+    const safe = {
+      id: ticket.id,
+      ign: ticket.ign,
+      type: ticket.type,
+      location: ticket.location,
+      description: ticket.description,
+      owner: ticket.owner,
+      origin: ticket.origin,
+      status: ticket.status,
+      claimedBy: ticket.claimedBy,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      revision: ticket.revision,
+      rating: ticket.rating,
+      path: ticketPath(ticket),
+      discordUrl: ticket.channelId
+        ? `https://discord.com/channels/${config.tickets.guildId}/${ticket.channelId}`
+        : null,
+      sync: ticket.discordArchivedAt
+        ? "archived"
+        : ticket.channelId
+          ? "connected"
+          : "pending",
+      messages,
+      hasOlder: page.total > messages.length,
+      history: store
+        .entries(`ticket-history:${id}`)
+        .map(([, entry]) => entry)
+        .filter((entry) => staffView || !entry.internal),
+      viewers: staffView
+        ? [
+            ...new Map(
+              [...(viewers.get(id)?.values() || [])].map((entry) => [
+                entry.actor.id,
+                entry.actor,
+              ]),
+            ).values(),
+          ]
+        : [],
+    };
+    if (staffView) {
+      safe.resolution = ticket.resolution
+        ? {
+            ...ticket.resolution,
+            attachments: ticket.resolution.attachments.map((fileId) =>
+              mediaView(store.get("ticket-media", fileId), true, id),
+            ),
+          }
+        : null;
+      safe.deliveryPending = store
+        .entries("ticket-outbox")
+        .filter(([, job]) => job.ticketId === id).length;
+    }
+    return safe;
+  }
+  function list(user, { closed = false, offset = 0 } = {}) {
+    staff(user);
+    return store.page(
+      "ticket",
+      50,
+      offset,
+      (ticket) =>
+        (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
+        (ticket.type !== "staff" || rolePolicy.isManager(user)),
+    );
+  }
+  function create(user, input, origin = "web") {
+    if (!user?.id || !["web", "discord"].includes(origin))
+      throw new AuthError("ticket_origin_disabled", 400);
+    if (
+      !ticketTypes.some((type) => type.id === input.type) ||
+      !/^[A-Za-z0-9_]{3,16}$/.test(input.ign || "")
+    )
+      throw new AuthError("invalid_ticket", 400);
+    const requestId = text(input.requestId, 36, 36);
+    if (!idPattern.test(requestId)) throw new AuthError("invalid_request", 400);
+    const prior = store.get("ticket-request", `${user.id}:${requestId}`);
+    if (prior) return get(prior.id);
+    if (
+      store
+        .entries("ticket")
+        .filter(
+          ([, ticket]) =>
+            ticket.owner.id === user.id && ticket.status !== "closed",
+        ).length >= 3
+    )
+      throw new AuthError("ticket_limit", 409);
+    const ticket = {
+      id: randomUUID(),
+      ign: input.ign,
+      type: input.type,
+      location: text(input.location, 2, 100),
+      description: text(input.description, 30, 4000),
+      owner: publicActor(user),
+      origin,
+      status: "pending",
+      claimedBy: null,
+      channelId: null,
+      createdAt: now(),
+      updatedAt: now(),
+      revision: 0,
+      sequence: 0,
+      rating: null,
+      resolution: null,
+    };
+    store.transaction(() => {
+      audit(ticket, user, "opened", "Ticket opened");
+      queue(ticket, "create");
+      put("ticket-request", `${user.id}:${requestId}`, { id: ticket.id });
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function files(ticket, user, ids, internal = false) {
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 5 ||
+      new Set(ids).size !== ids.length
+    )
+      throw new AuthError("invalid_attachment", 400);
+    if (
+      ids.reduce(
+        (total, id) => total + (store.get("ticket-media", id)?.size || 0),
+        0,
+      ) > ticketMessageUploadLimit
+    )
+      throw new AuthError("attachments_too_large", 413);
+    return ids.map((id) => {
+      const file = store.get("ticket-media", id);
+      if (
+        !file ||
+        file.ticketId !== ticket.id ||
+        file.uploader !== user.id ||
+        file.used ||
+        file.expiresAt <= now() ||
+        file.purged
+      )
+        throw new AuthError("invalid_attachment", 400);
+      file.used = true;
+      file.internal = internal;
+      put("ticket-media", id, file);
+      return id;
+    });
+  }
+  function reply(user, id, input, staffView = false) {
+    const ticket = get(id);
+    authorize(user, ticket, staffView, "tickets.reply");
+    if (!["pending", "claimed"].includes(ticket.status))
+      throw new AuthError("ticket_closed", 409);
+    if (!idPattern.test(input.requestId || ""))
+      throw new AuthError("invalid_request", 400);
+    const old = store.get(
+      "ticket-message-request",
+      `${id}:${user.id}:${input.requestId}`,
+    );
+    if (old) return old;
+    const content = text(
+      input.content || "",
+      input.attachments?.length ? 0 : 1,
+      2000,
+      "invalid_message",
+    );
+    let message;
+    store.transaction(() => {
+      message = {
+        id: randomUUID(),
+        sequence: ++ticket.sequence,
+        actor: publicActor(user),
+        staff: staffView,
+        content,
+        attachments: files(ticket, user, input.attachments || []),
+        at: now(),
+        origin: staffView ? "dashboard" : "web",
+        delivery: "pending",
+        deleted: false,
+      };
+      put(
+        `ticket-messages:${id}`,
+        String(message.sequence).padStart(12, "0"),
+        message,
+      );
+      put(
+        "ticket-message-request",
+        `${id}:${user.id}:${input.requestId}`,
+        message,
+      );
+      queue(ticket, "message", String(message.sequence).padStart(12, "0"));
+      audit(ticket, user, "message", "Message sent");
+    });
+    announce(ticket);
+    return message;
+  }
+  function claim(user, id) {
+    const ticket = get(id);
+    staff(user, ticket, "tickets.claim");
+    if (ticket.claimedBy?.id === user.id) return ticket;
+    if (ticket.status !== "pending" || ticket.claimedBy)
+      throw new AuthError("ticket_already_claimed", 409);
+    store.transaction(() => {
+      ticket.claimedBy = publicActor(user);
+      ticket.status = "claimed";
+      audit(ticket, user, "claimed", `${user.name} claimed the ticket`);
+      queue(ticket, "status");
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function closeTicket(user, id, input, staffView = false) {
+    const ticket = get(id);
+    authorize(user, ticket, staffView, "tickets.close");
+    if (ticket.status === "closed") return ticket;
+    if (!staffView && ticket.status === "awaiting_resolution") return ticket;
+    const resolution = staffView
+      ? {
+          summary: text(input.summary, 20, 4000, "resolution_required"),
+          commands: text(input.commands, 4, 2000, "commands_required"),
+          actor: publicActor(user),
+          at: now(),
+        }
+      : null;
+    store.transaction(() => {
+      ticket.status = staffView ? "closed" : "awaiting_resolution";
+      ticket.closedAt = now();
+      if (resolution) {
+        resolution.attachments = files(
+          ticket,
+          user,
+          input.attachments || [],
+          true,
+        );
+        ticket.resolution = resolution;
+      }
+      audit(
+        ticket,
+        user,
+        "closed",
+        staffView
+          ? "Staff recorded the resolution and closed the ticket"
+          : "Player closed the ticket; staff resolution is pending",
+      );
+      queue(ticket, "status");
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function rate(user, id, rating) {
+    const ticket = get(id);
+    authorize(user, ticket);
+    if (
+      !["closed", "awaiting_resolution"].includes(ticket.status) ||
+      !Number.isInteger(rating) ||
+      rating < 1 ||
+      rating > 5
+    )
+      throw new AuthError("invalid_rating", 400);
+    if (ticket.rating !== null)
+      throw new AuthError("ticket_already_rated", 409);
+    store.transaction(() => {
+      ticket.rating = rating;
+      audit(ticket, user, "rated", `Player rated the help ${rating}/5`);
+    });
+    announce(ticket);
+    return ticket;
+  }
+  async function upload(
+    user,
+    id,
+    bytes,
+    name,
+    type,
+    staffView = false,
+    internal = false,
+  ) {
+    const ticket = get(id);
+    if (
+      stopped ||
+      ticket.status === "closed" ||
+      (!internal && ticket.status === "awaiting_resolution")
+    )
+      throw new AuthError("ticket_closed", 409);
+    authorize(
+      user,
+      get(id),
+      staffView,
+      internal ? "tickets.close" : "tickets.reply",
+    );
+    if (!transport) throw new AuthError("ticket_sync_unavailable", 503);
+    const metadata = await transport.upload(bytes, name, type);
+    // validate again after the upload. a closure may have raced it.
+    const file = {
+      ...metadata,
+      id: randomUUID(),
+      ticketId: id,
+      uploader: user.id,
+      internal,
+      used: false,
+      createdAt: now(),
+      expiresAt: now() + ticketMediaDays * 86400000,
+    };
+    put("ticket-media", file.id, file);
+    authorize(
+      user,
+      get(id),
+      staffView,
+      internal ? "tickets.close" : "tickets.reply",
+    );
+    if (
+      get(id).status === "closed" ||
+      (!internal && get(id).status === "awaiting_resolution")
+    )
+      throw new AuthError("ticket_closed", 409);
+    return mediaView(file, staffView, id);
+  }
+  function media(user, id, fileId, staffView = false) {
+    authorize(user, get(id), staffView);
+    const file = store.get("ticket-media", fileId);
+    if (
+      !file ||
+      file.ticketId !== id ||
+      (file.internal && !staffView) ||
+      (!file.used && file.uploader !== user.id)
+    )
+      throw new AuthError("ticket_not_found", 404);
+    if (file.purged || file.expiresAt <= now())
+      throw new AuthError("attachment_expired", 410);
+    return file;
+  }
+  function linked(channelId) {
+    const ref = store.get("ticket-channel", channelId);
+    return ref ? get(ref.id) : null;
+  }
+  function bind(id, channelId) {
+    const ticket = get(id);
+    ticket.channelId = channelId;
+    store.transaction(() => {
+      put("ticket", id, ticket);
+      put("ticket-channel", channelId, { id });
+    });
+    announce(ticket);
+  }
+  function ingest(id, incoming) {
+    const ticket = get(id),
+      ref = store.get("ticket-discord-message", incoming.id);
+    if (ref) {
+      const message = store.get(`ticket-messages:${id}`, ref.key);
+      if (
+        message.origin !== "discord" ||
+        (message.content === incoming.content &&
+          message.deleted === Boolean(incoming.deleted))
+      )
+        return;
+      Object.assign(message, {
+        content: incoming.deleted ? "Message deleted" : incoming.content,
+        deleted: Boolean(incoming.deleted),
+        editedAt: now(),
+      });
+      store.transaction(() => {
+        put(`ticket-messages:${id}`, ref.key, message);
+        audit(
+          ticket,
+          incoming.actor || message.actor,
+          incoming.deleted ? "message_deleted" : "message_edited",
+          "Discord message updated",
+        );
+      });
+      announce(ticket);
+      return;
+    }
+    if (incoming.deleted || !["pending", "claimed"].includes(ticket.status))
+      return;
+    store.transaction(() => {
+      const attachments = (incoming.attachments || []).map((metadata) => {
+        const file = {
+          ...metadata,
+          id: randomUUID(),
+          ticketId: id,
+          uploader: incoming.actor.id,
+          internal: false,
+          used: true,
+          createdAt: now(),
+          expiresAt: now() + ticketMediaDays * 86400000,
+        };
+        put("ticket-media", file.id, file);
+        return file.id;
+      });
+      const message = {
+        id: randomUUID(),
+        sequence: ++ticket.sequence,
+        actor: publicActor(incoming.actor),
+        staff: Boolean(incoming.staff),
+        content: (incoming.content || "").slice(0, 2000),
+        attachments,
+        at: incoming.at || now(),
+        origin: "discord",
+        delivery: "delivered",
+        discordId: incoming.id,
+        deleted: false,
+      };
+      const key = String(message.sequence).padStart(12, "0");
+      put(`ticket-messages:${id}`, key, message);
+      put("ticket-discord-message", incoming.id, { ticketId: id, key });
+      ticket.lastDiscordId = incoming.id;
+      audit(ticket, incoming.actor, "message", "Discord message received");
+    });
+    announce(ticket);
+  }
+  async function pump() {
+    if (!transport || stopped || running) return running;
+    running = Promise.resolve()
+      .then(async () => {
+        for (const [key, job] of store
+          .entries("ticket-outbox")
+          .filter(([, job]) => job.after <= now())
+          .slice(0, 20)) {
+          const ticket = get(job.ticketId);
+          if (job.kind !== "create" && !ticket.channelId) continue;
+          try {
+            if (job.kind === "create") await transport.create(ticket);
+            else if (job.kind === "status") await transport.status(ticket);
+            else {
+              const message = store.get(
+                `ticket-messages:${ticket.id}`,
+                job.ref,
+              );
+              const delivered = await transport.message(
+                ticket,
+                message,
+                message.attachments.map((id) => store.get("ticket-media", id)),
+              );
+              store.transaction(() => {
+                message.discordId = delivered.id;
+                message.delivery = "delivered";
+                put(`ticket-messages:${ticket.id}`, job.ref, message);
+                put("ticket-discord-message", delivered.id, {
+                  ticketId: ticket.id,
+                  key: job.ref,
+                });
+                const current = get(ticket.id);
+                current.revision++;
+                put("ticket", ticket.id, current);
+              });
+            }
+            // a concurrent status change replaces this job. keep that newer version.
+            if (store.get("ticket-outbox", key)?.generation === job.generation)
+              store.delete("ticket-outbox", key);
+            events.emit("changed", {
+              id: ticket.id,
+              revision: get(ticket.id).revision,
+            });
+          } catch (error) {
+            job.attempts++;
+            job.after =
+              now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));
+            job.failure = error.code || "discord_unavailable";
+            if (store.get("ticket-outbox", key)?.generation === job.generation)
+              put("ticket-outbox", key, job);
+            console.error(
+              "Ticket Discord delivery is pending:",
+              job.kind,
+              job.failure,
+            );
+          }
+        }
+      })
+      .finally(() => {
+        running = null;
+      });
+    return running;
+  }
+  async function expire() {
+    if (!transport || stopped || expiring) return expiring;
+    expiring = Promise.resolve()
+      .then(async () => {
+        for (const [id, file] of store.entries("ticket-media")) {
+          if (
+            !file.purged &&
+            (file.expiresAt <= now() ||
+              (!file.used && file.createdAt + 3600000 <= now()))
+          ) {
+            try {
+              await transport.removeMedia(file);
+              file.purged = true;
+              put("ticket-media", id, file);
+            } catch {
+              console.error("Ticket attachment removal is pending.");
+            }
+          }
+        }
+        for (const [, ticket] of store.entries("ticket")) {
+          if (
+            ticket.status === "closed" &&
+            ticket.channelId &&
+            ticket.closedAt + ticketMediaDays * 86400000 <= now()
+          ) {
+            try {
+              await transport.removeClosed(ticket);
+              store.delete("ticket-channel", ticket.channelId);
+              ticket.channelId = null;
+              ticket.discordArchivedAt = now();
+              put("ticket", ticket.id, ticket);
+            } catch {
+              console.error("Closed ticket channel removal is pending.");
+            }
+          }
+        }
+      })
+      .finally(() => {
+        expiring = null;
+      });
+    return expiring;
+  }
+  return {
+    get,
+    list,
+    view,
+    create,
+    reply,
+    claim,
+    closeTicket,
+    rate,
+    media,
+    upload,
+    ingest,
+    linked,
+    bind,
+    events,
+    store,
+    staff,
+    authorize,
+    attach(value) {
+      transport = value;
+    },
+    all() {
+      return store.entries("ticket").map(([, ticket]) => ticket);
+    },
+    attention(user) {
+      staff(user);
+      return {
+        kind: "tickets",
+        name: "Drakora support",
+        count: store
+          .entries("ticket")
+          .filter(
+            ([, ticket]) =>
+              ticket.status !== "closed" &&
+              (ticket.type !== "staff" || rolePolicy.isManager(user)),
+          ).length,
+        available: true,
+        checkedAt: now(),
+        href: "/tickets",
+      };
+    },
+    messages(id) {
+      return store
+        .entries(`ticket-messages:${id}`)
+        .map(([, message]) => message)
+        .sort((a, b) => a.sequence - b.sequence);
+    },
+    watch(id, user, staffView, listener) {
+      authorize(user, get(id), staffView);
+      const key = randomUUID();
+      if (staffView) {
+        if (!viewers.has(id)) viewers.set(id, new Map());
+        viewers.get(id).set(key, { actor: publicActor(user) });
+      }
+      const receive = (event) => {
+        if (event.id === id) listener(event);
+      };
+      events.on("changed", receive);
+      events.emit("changed", { id });
+      return () => {
+        events.off("changed", receive);
+        const room = viewers.get(id);
+        room?.delete(key);
+        if (!room?.size) viewers.delete(id);
+        events.emit("changed", { id });
+      };
+    },
+    challenge(sessionId, returnPath) {
+      const challenge = token();
+      store.set(
+        "ticket-challenge",
+        digest(challenge),
+        { session: digest(sessionId), returnPath },
+        now() + 600000,
+      );
+      return challenge;
+    },
+    challengeGet(challenge) {
+      return typeof challenge === "string"
+        ? store.get("ticket-challenge", digest(challenge))
+        : undefined;
+    },
+    handoff(challenge, identity) {
+      const pending = store.take("ticket-challenge", digest(challenge));
+      if (!pending) throw new AuthError("invalid_login_state", 400);
+      const handoff = token();
+      store.set(
+        "ticket-handoff",
+        digest(handoff),
+        { ...pending, identity: publicActor(identity) },
+        now() + 60000,
+      );
+      return `${config.applications.publicOrigin}/help/auth/consume?handoff=${handoff}`;
+    },
+    consume(handoff, sessionId) {
+      const pending =
+        typeof handoff === "string"
+          ? store.get("ticket-handoff", digest(handoff))
+          : undefined;
+      if (!pending || pending.session !== digest(sessionId))
+        throw new AuthError("invalid_handoff", 400);
+      store.delete("ticket-handoff", digest(handoff));
+      return pending;
+    },
+    pump,
+    expire,
+    start() {
+      timer = setInterval(() => void pump(), 1000);
+      timer.unref();
+      maintenance = setInterval(() => void expire(), 60000);
+      maintenance.unref();
+      void pump();
+    },
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      clearInterval(maintenance);
+      events.emit("shutdown");
+      await Promise.all([running, expiring]);
+      events.removeAllListeners();
+      viewers.clear();
+    },
+  };
+}

@@ -36,6 +36,7 @@ export function discordOffice(config, store, dependencies = {}) {
       GatewayIntentBits.GuildPresences,
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.GuildMessages,
+      ...(config.tickets ? [GatewayIntentBits.MessageContent] : []),
     ],
     makeCache: Options.cacheWithLimits({ MessageManager: 0 }),
     allowedMentions: { parse: [] },
@@ -388,6 +389,7 @@ export function discordOffice(config, store, dependencies = {}) {
     };
   }
   return {
+    gateway: client,
     snapshot,
     overviewQueues: discordOverview(config, client, () => ready),
     meetings,

@@ -1,0 +1,231 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { randomBytes, randomUUID } from "node:crypto";
+import express from "express";
+import { openStore } from "../server/store.js";
+import { ticketService } from "../server/tickets.js";
+import { ticketRouter } from "../server/ticket-routes.js";
+import { rolePermissions } from "../server/role-permissions.js";
+import { config as fixture } from "./fixture.js";
+import { AuthError } from "../server/discord.js";
+
+test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidence and live streams", async (t) => {
+  const config = {
+    ...fixture,
+    staffOrigin: "https://staff.example.invalid",
+    applications: { publicOrigin: "https://example.invalid" },
+    tickets: { guildId: "2" },
+  };
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  const policy = rolePermissions(config, store),
+    service = ticketService(config, store, policy);
+  const player = { id: "100", name: "Player" },
+    helper = policy.apply({ id: "200", name: "Helper", roles: ["10", "23"] });
+  let signedIn = true,
+    uploads = 0;
+  const transport = {
+    async assertMember() {},
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async status() {},
+    async message() {
+      return { id: randomUUID() };
+    },
+    async upload(bytes, name, type) {
+      uploads++;
+      return {
+        name,
+        type,
+        size: bytes.length,
+        channelId: "400",
+        messageId: "500",
+        attachmentId: "600",
+      };
+    },
+    async bytes() {
+      return Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    },
+  };
+  service.attach(transport);
+  const app = express();
+  app.set("trust proxy", 1);
+  app.use((req, _res, next) => {
+    req.sessionID = "fixture";
+    req.session = {
+      ticketIdentity: signedIn ? player : null,
+      ticketUntil: Date.now() + 60000,
+      csrf: "fixture",
+      save: (callback) => callback(),
+    };
+    next();
+  });
+  app.use(
+    ticketRouter(config, service, transport, {
+      database: store,
+      dist: "/does-not-exist",
+    }),
+  );
+  app.use(
+    ticketRouter(config, service, transport, {
+      staffView: true,
+      database: store,
+      dist: "/does-not-exist",
+      authorize: async () => helper,
+      mutation: (req) => {
+        if (
+          req.headers.origin !== config.staffOrigin ||
+          req.headers["x-csrf-token"] !== "fixture"
+        )
+          throw new AuthError("invalid_request");
+      },
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  t.after(async () => {
+    await service.stop();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+  });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = (path, body, extra = {}) =>
+    fetch(base + path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        Origin: config.applications.publicOrigin,
+        "X-CSRF-Token": "fixture",
+        "Content-Type": "application/json",
+        ...extra,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const data = {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description: "A detailed description of the issue and how to reproduce it.",
+  };
+  const listResponse = await call("/help/api/tickets");
+  assert.equal(listResponse.status, 200);
+  assert.ok(Array.isArray((await listResponse.json()).items));
+  let response = await call("/help/api/tickets", data, {
+    "X-CSRF-Token": "wrong",
+  });
+  assert.equal(response.status, 403);
+  response = await call("/help/api/tickets", data);
+  assert.equal(response.status, 201);
+  const id = (await response.json()).path.split("/").at(-1);
+  signedIn = false;
+  response = await call(`/help/api/tickets/${id}`);
+  assert.equal(response.status, 401);
+  signedIn = true;
+  const other = service.create(
+    { id: "999", name: "Other" },
+    { ...data, requestId: randomUUID() },
+  );
+  assert.equal((await call(`/help/api/tickets/${other.id}`)).status, 404);
+  response = await call(`/help/api/tickets/${id}/messages`, {
+    content: "Hello from the owner",
+    requestId: randomUUID(),
+  });
+  assert.equal(response.status, 201);
+  const attachment = (
+    bytes,
+    name,
+    type,
+    path = `/help/api/tickets/${id}/attachments`,
+  ) =>
+    fetch(base + path, {
+      method: "POST",
+      headers: {
+        Origin: path.startsWith("/api")
+          ? config.staffOrigin
+          : config.applications.publicOrigin,
+        "X-CSRF-Token": "fixture",
+        "Content-Type": "application/octet-stream",
+        "X-File-Name": encodeURIComponent(name),
+        "X-File-Type": type,
+      },
+      body: bytes,
+    });
+  assert.equal(
+    (
+      await attachment(
+        Buffer.from("<script>steal()</script>"),
+        "proof.png",
+        "image/png",
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await attachment(Buffer.from("payload"), "../secret.txt", "text/plain"))
+      .status,
+    400,
+  );
+  assert.equal(uploads, 0);
+  const proofResponse = await attachment(
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    "proof.png",
+    "image/png",
+    `/api/tickets/${id}/attachments?internal=1`,
+  );
+  assert.equal(proofResponse.status, 201);
+  const proof = await proofResponse.json();
+  assert.equal(
+    (await call(`/help/api/tickets/${id}/attachments/${proof.id}?staff=1`))
+      .status,
+    404,
+  );
+  assert.equal(
+    (await call(`/api/tickets/${id}/attachments/${proof.id}`)).status,
+    200,
+  );
+  const controller = new AbortController();
+  const stream = await fetch(`${base}/help/api/tickets/${id}/events`, {
+    signal: controller.signal,
+  });
+  assert.ok(stream.headers.get("content-type").startsWith("text/event-stream"));
+  const reader = stream.body.getReader();
+  await reader.read();
+  service.reply(player, id, {
+    requestId: randomUUID(),
+    content: "Live update",
+  });
+  const event = await reader.read();
+  assert.ok(new TextDecoder().decode(event.value).includes("data:"));
+  controller.abort();
+  await reader.cancel().catch(() => {});
+  response = await call(
+    `/api/tickets/${id}/close`,
+    {
+      summary:
+        "PRIVATE: restored the affected player and confirmed the issue is resolved.",
+      commands: "None",
+      attachments: [proof.id],
+    },
+    { Origin: config.staffOrigin },
+  );
+  assert.equal(response.status, 200);
+  response = await call(`/help/api/tickets/${id}`);
+  const playerView = await response.json();
+  assert.equal(playerView.resolution, undefined);
+  response = await call(`/help/api/tickets/${id}/transcript`);
+  assert.match(
+    response.headers.get("content-security-policy"),
+    /sandbox allow-downloads/,
+  );
+  assert.match(response.headers.get("content-disposition"), /^attachment;/);
+  assert.equal(response.status, 200);
+  assert.ok(
+    response.headers.get("content-disposition").startsWith("attachment;"),
+  );
+  assert.ok(!(await response.text()).includes("PRIVATE:"));
+  response = await call(`/api/tickets/${id}/transcript`);
+  assert.ok((await response.text()).includes("PRIVATE:"));
+  response = await call(`/help/api/tickets/${id}/rating`, { rating: 5 });
+  assert.equal(response.status, 200);
+});

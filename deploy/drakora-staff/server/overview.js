@@ -3,7 +3,7 @@ import { applicationReviewAccess, mailAccess } from "./roles.js";
 
 export function overviewService(
   config,
-  { applications, mail, queues, probe } = {},
+  { applications, mail, queues, probe, tickets } = {},
 ) {
   const network = networkMonitor(config.overview?.servers, probe);
   let mailSnapshot;
@@ -57,11 +57,17 @@ export function overviewService(
             ? applications.attention()
             : null,
         email,
-        queues: discord,
+        queues: [
+          ...discord,
+          ...(tickets && user.capabilities?.["tickets.view"]
+            ? [tickets.attention(user)]
+            : []),
+        ],
         queueKinds: [
-          ...new Set(
-            (config.overview?.queues ?? []).map((queue) => queue.kind),
-          ),
+          ...new Set([
+            ...(config.overview?.queues ?? []).map((queue) => queue.kind),
+            ...(tickets ? ["tickets"] : []),
+          ]),
         ],
       };
     },

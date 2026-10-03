@@ -1,5 +1,39 @@
 export const staffPermissions = [
   [
+    "tickets.view",
+    "Tickets",
+    "View support tickets",
+    "Read private player tickets and intake details.",
+  ],
+  [
+    "tickets.reply",
+    "Tickets",
+    "Reply to tickets",
+    "Send messages and attachments to players.",
+    ["tickets.view"],
+  ],
+  [
+    "tickets.claim",
+    "Tickets",
+    "Claim tickets",
+    "Take responsibility for an unclaimed ticket.",
+    ["tickets.view"],
+  ],
+  [
+    "tickets.close",
+    "Tickets",
+    "Resolve tickets",
+    "Record the work and commands used, attach proof, and close tickets.",
+    ["tickets.view"],
+  ],
+  [
+    "logs.view",
+    "Logs",
+    "View ticket logs",
+    "Read ticket history and private staff transcripts. Staff reports remain limited to Managers and Founders.",
+    ["tickets.view"],
+  ],
+  [
     "dashboard.view",
     "Dashboard",
     "Open the staff dashboard",

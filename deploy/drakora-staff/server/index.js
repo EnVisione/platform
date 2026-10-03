@@ -45,6 +45,9 @@ import { timePreferences, timePreferenceRouter } from "./time-preferences.js";
 import { overviewService } from "./overview.js";
 import { websiteService, websiteAccess, communityStatus } from "./website.js";
 import { publicWebsiteRouter, websiteEditorRouter } from "./website-routes.js";
+import { ticketService } from "./tickets.js";
+import { ticketDiscord } from "./ticket-discord.js";
+import { ticketRouter } from "./ticket-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -79,6 +82,14 @@ const applications = applicationDatabase
     )
   : undefined;
 const rolePolicy = rolePermissions(config, store);
+const ticketPath = process.env.TICKET_DATA_PATH ?? "/tickets";
+if (config.tickets) mkdirSync(ticketPath, { recursive: true, mode: 0o700 });
+const ticketDatabase = config.tickets
+  ? openStore(`${ticketPath}/tickets.sqlite`, config.tickets.databaseKey)
+  : undefined;
+const tickets = ticketDatabase
+  ? ticketService(config, ticketDatabase.store, rolePolicy)
+  : undefined;
 const discord = discordClient(config, store, fetch, rolePolicy.apply);
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
@@ -108,8 +119,12 @@ async function workspaceConfig() {
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
+const ticketTransport = tickets
+  ? ticketDiscord(config, tickets, office.gateway, rolePolicy)
+  : undefined;
 const overview = overviewService(config, {
   applications,
+  tickets,
   mail,
   queues: office?.overviewQueues,
 });
@@ -198,6 +213,16 @@ const applicationSession = applicationDatabase
     })
   : undefined;
 const sockets = new Set();
+const ticketSession = ticketDatabase
+  ? session({
+      name: "__Host-drakora_ticket",
+      store: ticketDatabase.sessions,
+      secret: config.sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { ...cookieOptions, maxAge: 7 * 86400000 },
+    })
+  : undefined;
 
 app.use((req, res, next) => {
   res.set({
@@ -222,15 +247,19 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) =>
-  config.website &&
+  ticketSession &&
   req.headers.host === applicationHost &&
-  !req.path.startsWith("/apply")
-    ? next()
-    : (req.headers.host === todoHost
-        ? todoSession
-        : req.headers.host === applicationHost
-          ? applicationSession
-          : staffSession)(req, res, next),
+  req.path.startsWith("/help/")
+    ? ticketSession(req, res, next)
+    : config.website &&
+        req.headers.host === applicationHost &&
+        !req.path.startsWith("/apply")
+      ? next()
+      : (req.headers.host === todoHost
+          ? todoSession
+          : req.headers.host === applicationHost
+            ? applicationSession
+            : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -263,6 +292,18 @@ if (website) {
   );
 }
 
+if (tickets) {
+  const publicTickets = ticketRouter(config, tickets, ticketTransport, {
+    dist,
+    database: ticketDatabase.store,
+  });
+  app.use((req, res, next) =>
+    req.headers.host === applicationHost
+      ? publicTickets(req, res, next)
+      : next(),
+  );
+}
+
 if (applications) {
   const publicApplications = applicationRouter(config, applications, dist);
   app.use((req, res, next) =>
@@ -290,6 +331,8 @@ function safeNext(value) {
       "/office",
       "/tracker",
       "/calendar",
+      "/tickets",
+      "/logs",
     ].includes(value)
   )
     return value;
@@ -305,7 +348,7 @@ function safeNext(value) {
     return value;
   if (
     typeof value === "string" &&
-    /^\/applications\/[a-f0-9-]{36}$/.test(value)
+    /^\/(applications|tickets)\/[a-f0-9-]{36}$/.test(value)
   )
     return value;
   return "/";
@@ -351,6 +394,8 @@ function publicUser(user) {
     capabilities: user.capabilities,
     rolesPanel: Boolean(user.capabilities["roles.view"]),
     website: Boolean(website && websiteAccess(config, user)),
+    tickets: Boolean(tickets && user.capabilities["tickets.view"]),
+    logs: Boolean(tickets && user.capabilities["logs.view"]),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     workspaceOrigin: config.todoOrigin,
@@ -375,6 +420,26 @@ function requireMutation(req) {
     !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
   )
     throw new AuthError("invalid_request");
+}
+
+if (tickets) {
+  const staffTickets = ticketRouter(config, tickets, ticketTransport, {
+    staffView: true,
+    authorize: async (req) => {
+      if (!req.session.userId || req.session.until <= Date.now())
+        throw new AuthError("login_required", 401);
+      const user = await ticketTransport.staffUser(req.session.userId);
+      if (!user?.permissions.dashboard)
+        throw new AuthError("dashboard_role_required");
+      return user;
+    },
+    mutation: requireMutation,
+    dist,
+    database: store,
+  });
+  app.use((req, res, next) =>
+    req.headers.host === staffHost ? staffTickets(req, res, next) : next(),
+  );
 }
 
 if (website) {
@@ -671,6 +736,31 @@ app.use(async (req, res, next) => {
 app.get("/auth/discord", async (req, res) => {
   const state = newToken();
   const next = safeNext(req.query.next);
+  if (req.query.purpose === "ticket") {
+    if (!tickets?.challengeGet(req.query.challenge))
+      throw new AuthError("invalid_login_state");
+    const identity =
+      req.session.userId && req.session.until > Date.now()
+        ? store.get("user", req.session.userId)
+        : null;
+    if (identity)
+      return res.redirect(tickets.handoff(req.query.challenge, identity));
+    req.session.ticketOAuth = {
+      challenge: req.query.challenge,
+      state: hash(state),
+      until: Date.now() + 600000,
+    };
+    await save(req);
+    const authorize = new URL("https://discord.com/oauth2/authorize");
+    authorize.search = new URLSearchParams({
+      client_id: config.discordClientId,
+      redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+      response_type: "code",
+      scope: "identify email guilds.members.read",
+      state,
+    });
+    return res.redirect(authorize.href);
+  }
   if (req.query.purpose === "application") {
     const challenge = applications?.getChallenge(req.query.challenge);
     if (!challenge) throw new AuthError("invalid_login_state");
@@ -728,6 +818,28 @@ app.get("/auth/discord", async (req, res) => {
 
 app.get("/auth/discord/callback", async (req, res) => {
   const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (
+    req.session.ticketOAuth &&
+    safeEqual(hash(state), req.session.ticketOAuth.state)
+  ) {
+    const pending = req.session.ticketOAuth;
+    delete req.session.ticketOAuth;
+    await save(req);
+    try {
+      if (pending.until < Date.now() || typeof req.query.code !== "string")
+        throw new AuthError("invalid_login_state");
+      return res.redirect(
+        tickets.handoff(
+          pending.challenge,
+          await discord.identity(req.query.code),
+        ),
+      );
+    } catch {
+      return res.redirect(
+        `${config.applications.publicOrigin}/help/new?error=discord_cancelled`,
+      );
+    }
+  }
   if (
     req.session.applicationOAuth &&
     safeEqual(hash(state), req.session.applicationOAuth.state)
@@ -870,6 +982,9 @@ app.use(
     staffHost,
     onPolicyChange() {
       void office?.emailAlerts?.refreshPermissions();
+      void ticketTransport
+        ?.refreshPermissions()
+        .catch(() => console.error("Ticket permission refresh is pending."));
       for (const socket of sockets) {
         const user = store.get("user", socket.userId);
         const current = user && rolePolicy.apply(user);
@@ -1363,6 +1478,7 @@ server.on("upgrade", (req, socket, head) => {
 const sweep = setInterval(async () => {
   store.clean();
   applicationDatabase?.store.clean();
+  ticketDatabase?.store.clean();
   for (const socket of sockets) {
     try {
       if (
@@ -1393,18 +1509,22 @@ server.listen(3000, "0.0.0.0", () =>
 );
 todoSync?.start();
 applications?.start();
+tickets?.start();
 async function stop() {
   clearInterval(sweep);
   clearInterval(assignmentTimer);
   await assignments?.close();
   await todoSync?.close();
   await applications?.close();
+  await tickets?.stop();
+  await ticketTransport?.close();
   await office?.close();
   await mail?.close();
   for (const socket of sockets) socket.destroy();
   server.close(() => {
     store.close();
     applicationDatabase?.store.close();
+    ticketDatabase?.store.close();
     process.exit(0);
   });
 }

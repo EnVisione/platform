@@ -76,7 +76,7 @@ Deny View Channel and Connect to everyone. Allow View Channel, Connect, and Spea
 
 The bot needs View Channel, Manage Channels, Manage Roles for channel permission overwrites, Connect, Speak, Send Messages, Embed Links, Read Message History, and permission to mention the Todo role. Limit its permissions to this category where practical. The bot must be able to edit the configured role's overwrites. The service validates channel types and category membership before mutations.
 
-The Office uses Guilds, Guild Members, Guild Presences, Guild Voice States, and Guild Messages Gateway intents. The two privileged intents must be enabled in Discord's Developer Portal. Message Content Intent is unnecessary. The browser refreshes its view every five seconds. Invisible members appear offline. The roster includes all non-bot staff server members for authorized Todo users, with active staff highlighted separately. Voice state remains in memory.
+The Office uses Guilds, Guild Members, Guild Presences, Guild Voice States, and Guild Messages Gateway intents. The two privileged intents must be enabled in Discord's Developer Portal. Configured support tickets additionally require Message Content Intent. The browser refreshes its view every five seconds. Invisible members appear offline. The roster includes all non-bot staff server members for authorized Todo users, with active staff highlighted separately. Voice state remains in memory.
 
 Last active combines observed online presence and message creation timestamps from the staff guild and optional `activityGuildIds`, with at most two distinct guilds in total. Only current staff guild members contribute records. Direct messages, bots, webhooks, system messages, and other guilds are excluded. Message bodies are not inspected or retained, and the gateway disables its message cache. Timestamps are kept in the encrypted staff database for ninety days. A message updates the exact timestamp even within the presence write interval; older events cannot rewind newer activity.
 
@@ -279,3 +279,38 @@ Home contains a welcome title and introduction, an announcements heading, empty-
 `GET /api/website` and `PUT /api/website` require Dashboard access and a configured Admin, Manager or Founder role. Writes recheck current Discord roles, require the staff origin and session CSRF token, and limit JSON to 256 KiB. A transaction compares the submitted revision with the saved revision before writing; stale saves return 409 and leave the editor's draft intact. Staff can keep unsaved edits while navigating within the dashboard. Leaving or reloading warns about those edits.
 
 Discord counts come from the main guild's `approximate_presence_count` through the existing bot token. Concurrent requests share one fetch, normally at most once per minute, with a five-second timeout. Rate-limit responses delay the next request. Counts older than a minute are labeled as a previous check and expire after fifteen minutes without a successful reading. No Minecraft endpoint is queried for public counts, and no Discord message, invitation or membership is created by this feature. Public content and status responses cache for fifteen seconds; versioned assets cache immutably.
+
+## Support tickets
+
+Support is optional and uses the existing Discord bot connection. Configure it only after enabling the bot's Message Content Intent and ensuring it can create private channels, manage channel permissions and webhooks, read messages, send embeds and files, and delete attachment messages in the community guild. Preserve the existing Gateway intents. Configure the same community guild as `roleSync.guildId` and a valid archive category in that guild:
+
+```json
+{
+  "tickets": {
+    "guildId": "COMMUNITY_GUILD_ID",
+    "archiveCategoryId": "ARCHIVE_CATEGORY_ID",
+    "databaseKey": "SEPARATE_32_BYTE_BASE64_KEY",
+    "minecraftEnabled": false
+  }
+}
+```
+
+Generate a distinct ticket encryption key; do not reuse the staff or application database key. Set `STAFF_TICKETS_DATA_PATH` to a private persistent directory owned by the container's user. It mounts at `/tickets`, with encrypted ticket records, messages, history, media references, sessions and delivery jobs in `tickets.sqlite`. Back up the database and its private encryption key through the normal protected backup process. Ticket data never goes into Huly's database.
+
+The bot creates a private Drakora Support category and a ticket-attachments channel in the configured archive category. The archive attachment channel is limited to the bot, Managers and Founders; web access to every file checks the ticket owner or staff permissions independently. New tickets allow the owner and configured support staff to view and reply. Staff reports grant channel access only to the owner, Managers and Founders. Discord administrators retain Discord's platform permission bypass. Existing channels from other ticket bots are not imported or modified.
+
+`/ticket` is a guild command available throughout the community Discord. A category selector and modal gather the intake details before the ticket is saved. Website intake at `/help/new` connects the player's Discord identity through the staff OAuth callback and a short-lived, single-use handoff bound to the opening browser. The player must belong to the community Discord. Private ticket links follow `/help/{minecraft-username}/{random-ticket-id}`; the link alone does not authorize access.
+
+Ticket permissions in Roles separate viewing, replying, claiming, resolving and log access. Defaults admit community support staff, including Helpers, with Dashboard access. Staff report access remains limited to Managers and Founders even when ordinary ticket permissions are granted to another rank. Mutations validate current Discord roles, origin and CSRF. Streams check permission and session validity again while open. Staff viewing indicators are derived from active ticket streams.
+
+The support portal reuses a valid staff sign-in for player identity. Ticket staff actions check the current staff-guild membership through the existing bot connection, avoiding repeated calls to Discord's low-volume user OAuth membership endpoint.
+
+Tickets begin Waiting for staff and become Being helped when claimed. Claims cannot overwrite another staff member's claim. A player closure stops replies and leaves a staff resolution outstanding. Staff closure requires an explanation of the work and outcome, plus the commands used or None. Staff can paste or select proof attachments. Private resolution text, commands and proof never appear in the player transcript. Closed tickets disappear from the active list and remain in Logs. Players may rate the support once, from one to five, and request a downloadable HTML transcript. Discord transcript requests use a DM, with a private web download if DMs are closed. Staff can regenerate either transcript type.
+
+Web replies commit to the ticket database before Discord delivery. Web streams update immediately; Discord Gateway events update the same record. A durable outbox retries failed channel creation, messages and status changes with bounded backoff. Webhook replies carry the actor's display name and avatar, disable mentions, and retain a stable message reference for recovery after an ambiguous send. Discord message identifiers prevent echoed messages from being imported twice. A background Discord scan recovers missed incoming messages after reconnect. Keep the bot's message-reading permissions intact; a pending-delivery indicator appears in the staff view when Discord cannot accept updates.
+
+Web uploads accept PNG, JPEG, WebP, GIF, PDF, ZIP, TXT and LOG, up to eight MiB each and five files totaling twenty MiB per message. Incoming Discord files can be downloaded up to twenty MiB. Files are served through authorized portal endpoints and signed Discord CDN links are refreshed by fetching the source message. Non-image files download rather than execute on the portal origin. HTML transcripts embed available images and files for offline viewing, with a twenty-four MiB total embedding limit; larger exports point to the private web ticket for the remaining downloads. Keep downloaded transcripts private.
+
+Attachments expire thirty days after upload. Cleanup deletes the saved Discord message and any webhook mirror, preserving the canonical text and attachment-expired entry. Removing an original Discord attachment may remove its Discord message; the ticket database keeps its text. Unused uploads are removed after one hour. Closed Discord channels are removed thirty days after closure; the private web record and staff logs remain. Downloaded HTML copies are independent files and cannot be revoked after delivery. Text, rating and history remain permanent unless an operator deliberately removes the corresponding database records.
+
+Minecraft ticket creation and delivery are disabled. There is no public Minecraft ingestion endpoint. A future integration must verify the game identity and permit in-game delivery only when the ticket was opened in Minecraft. Until then, online status, last online and playtime read Not connected, and Logs labels staff-command and server-log sources Not connected.
