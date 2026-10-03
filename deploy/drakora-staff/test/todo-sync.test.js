@@ -61,6 +61,8 @@ function fixture(t, options = {}) {
     },
   ];
   const issues = [];
+  const labelDefinitions = [];
+  const labelReferences = [];
   const comments = [];
   const messages = new Map([
     [
@@ -84,6 +86,7 @@ function fixture(t, options = {}) {
   let lostMessageResponse = false;
   let lostThreadResponse = false;
   let lostOpenResponse = false;
+  let lostRenameResponse = false;
   const store = {
     get: (kind, id) => structuredClone(records.get(`${kind}:${id}`)),
     set: (kind, id, value) =>
@@ -219,6 +222,10 @@ function fixture(t, options = {}) {
               };
             }
             Object.assign(item, body);
+            if (body.name !== undefined && lostRenameResponse) {
+              lostRenameResponse = false;
+              throw new Error("Lost rename response");
+            }
             if (body.archived === false && lostOpenResponse) {
               lostOpenResponse = false;
               throw new Error("Lost opening response");
@@ -240,7 +247,7 @@ function fixture(t, options = {}) {
       const actual = key
         .split(".")
         .reduce((current, part) => current?.[part], doc);
-      return actual === value;
+      return value?.$in ? value.$in.includes(actual) : actual === value;
     });
   const client = {
     async findAll(cls, query) {
@@ -257,7 +264,11 @@ function fixture(t, options = {}) {
                   ? issues.filter((doc) => matches(doc, query))
                   : cls === commentClass
                     ? comments.filter((doc) => matches(doc, query))
-                    : undefined;
+                    : cls === "tags:class:TagElement"
+                      ? labelDefinitions.filter((doc) => matches(doc, query))
+                      : cls === "tags:class:TagReference"
+                        ? labelReferences.filter((doc) => matches(doc, query))
+                        : undefined;
       assert.ok(docs, `Unexpected class ${cls}`);
       return structuredClone(docs);
     },
@@ -376,6 +387,10 @@ function fixture(t, options = {}) {
     project,
     issues,
     comments,
+    people,
+    social,
+    labelDefinitions,
+    labelReferences,
     messages,
     store,
     writes,
@@ -387,6 +402,7 @@ function fixture(t, options = {}) {
     loseMessage: () => (lostMessageResponse = true),
     loseThread: () => (lostThreadResponse = true),
     loseOpen: () => (lostOpenResponse = true),
+    loseRename: () => (lostRenameResponse = true),
     closed: () => closeCount,
   };
 }
@@ -433,6 +449,201 @@ test("Tracker and Discord assignments and status tags synchronize both ways with
   assert.ok(
     s.requests.slice(count).every((request) => request.method === "GET"),
   );
+});
+
+test("a linked staff assignee without a forum tag gets one persistent tag and can be assigned from either side", async (t) => {
+  const s = fixture(t);
+  s.thread.applied_tags = ["34"];
+  s.people.push({
+    _id: "sakura",
+    name: ",Sakura",
+    personUuid: "sakura-account",
+  });
+  s.social.push({
+    _id: "sakura-social",
+    attachedTo: "sakura",
+    type: "oidc",
+    value: "discord:103",
+  });
+  await s.sync.sync();
+  s.issues[0].assignee = "sakura";
+  await s.sync.sync();
+  const tag = s.forum.available_tags.find((tag) => tag.name === "Sakura");
+  assert.ok(tag?.moderated);
+  assert.equal(s.store.get("discord-todo-tags", "20")[tag.id], "103");
+  assert.deepEqual(s.thread.applied_tags.toSorted(), ["34", tag.id].toSorted());
+  await s.sync.sync();
+  assert.equal(
+    s.forum.available_tags.filter((tag) => tag.name === "Sakura").length,
+    1,
+  );
+  s.issues[0].assignee = null;
+  await s.sync.sync();
+  s.thread.applied_tags.push(tag.id);
+  await s.sync.sync();
+  assert.equal(s.issues[0].assignee, "sakura");
+});
+
+test("Discord tag limits keep unrepresentable assignments pending without removing other tags", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.forum.available_tags = s.forum.available_tags.filter(
+    (tag) => tag.id !== "32",
+  );
+  while (s.forum.available_tags.length < 20)
+    s.forum.available_tags.push({
+      id: String(400 + s.forum.available_tags.length),
+      name: "Other tag",
+    });
+  s.issues[0].assignee = "envy";
+  await assert.rejects(s.sync.sync(), /available forum tag/);
+  assert.equal(s.forum.available_tags.length, 20);
+  assert.deepEqual(s.thread.applied_tags, []);
+  const b = fixture(t);
+  for (let i = 0; i < 5; i++) {
+    const id = String(400 + i);
+    b.forum.available_tags.push({ id, name: "Other tag" });
+    b.thread.applied_tags.push(id);
+  }
+  await b.sync.sync();
+  b.issues[0].assignee = "envy";
+  await assert.rejects(b.sync.sync(), /exceed five tags/);
+  assert.equal(b.thread.applied_tags.length, 5);
+});
+
+test("Void labels and priorities decorate only Discord titles and merge with Discord title edits", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  const issue = s.issues[0];
+  s.labelDefinitions.push({
+    _id: "void-label",
+    targetClass: issueClass,
+    title: "Void",
+  });
+  s.labelReferences.push({
+    _id: "label-reference",
+    space: "dev",
+    attachedTo: issue._id,
+    tag: "void-label",
+    title: "Former label name",
+  });
+  issue.priority = 2;
+  await s.sync.sync();
+  assert.equal(s.thread.name, "[VOID] [HIGH] Update staff information");
+  assert.equal(issue.title, "Update staff information");
+  assert.equal(issue.status, "pending");
+  s.thread.name = "[VOID] [HIGH] Revised task";
+  issue.priority = 4;
+  await s.sync.sync();
+  assert.equal(s.thread.name, "[VOID] [LOW] Revised task");
+  assert.equal(issue.title, "Revised task");
+  for (const [priority, prefix] of [
+    [0, ""],
+    [1, "[URGENT] "],
+    [2, "[HIGH] "],
+    [3, "[MEDIUM] "],
+    [4, "[LOW] "],
+  ]) {
+    issue.priority = priority;
+    await s.sync.sync();
+    assert.equal(s.thread.name, `[VOID] ${prefix}Revised task`);
+    assert.equal(issue.title, "Revised task");
+    const count = s.requests.length;
+    await s.sync.sync();
+    assert.ok(
+      s.requests.slice(count).every((request) => request.method === "GET"),
+    );
+  }
+  s.labelDefinitions[0].title = "Other";
+  await s.sync.sync();
+  assert.equal(s.thread.name, "[LOW] Revised task");
+  s.labelDefinitions[0].title = "VOID";
+  await s.sync.sync();
+  assert.equal(s.thread.name, "[VOID] [LOW] Revised task");
+  s.labelReferences.length = 0;
+  issue.priority = 0;
+  await s.sync.sync();
+  assert.equal(s.thread.name, "Revised task");
+});
+
+test("failed and interrupted title delivery never imports managed prefixes into Tracker", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  const issue = s.issues[0];
+  issue.priority = 2;
+  s.loseRename();
+  await assert.rejects(s.sync.sync(), /Lost rename response/);
+  assert.equal(s.thread.name, "[HIGH] Update staff information");
+  assert.equal(issue.title, "Update staff information");
+  issue.priority = 3;
+  s.failures.set("PATCH /api/v10/channels/100", { status: 500 });
+  await assert.rejects(s.sync.sync(), /HTTP 500/);
+  assert.equal(s.thread.name, "[HIGH] Update staff information");
+  issue.priority = 4;
+  await assert.rejects(s.sync.sync(), /HTTP 500/);
+  assert.equal(issue.title, "Update staff information");
+  s.failures.clear();
+  await s.sync.sync();
+  assert.equal(s.thread.name, "[LOW] Update staff information");
+  assert.equal(issue.title, "Update staff information");
+});
+
+test("decorated titles preserve full Unicode Tracker titles and unmanaged bracketed names", async (t) => {
+  const s = fixture(t);
+  s.thread.name = "[HIGH] Checklist";
+  await s.sync.sync();
+  assert.equal(s.issues[0].title, "[HIGH] Checklist");
+  assert.equal(s.thread.name, "[HIGH] Checklist");
+  const title = "😀".repeat(120);
+  s.issues[0].title = title;
+  s.issues[0].priority = 1;
+  await s.sync.sync();
+  assert.equal(Array.from(s.thread.name).length, 100);
+  assert.equal(s.thread.name, "[URGENT] " + "😀".repeat(91));
+  const count = s.requests.length;
+  await s.sync.sync();
+  assert.equal(s.issues[0].title, title);
+  assert.ok(
+    s.requests.slice(count).every((request) => request.method === "GET"),
+  );
+  s.issues.length = 0;
+  await s.sync.sync();
+  assert.equal(s.store.get("discord-todo-title", "100"), undefined);
+});
+
+test("new Tracker posts recover decorated titles after an interrupted creation", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.issues.push({
+    _id: "native",
+    _class: issueClass,
+    space: "dev",
+    title: "New native task",
+    identifier: "DEV-2",
+    status: "pending",
+    assignee: "envy",
+    priority: 2,
+  });
+  s.labelDefinitions.push({
+    _id: "void-label",
+    targetClass: issueClass,
+    title: "Void",
+  });
+  s.labelReferences.push({
+    space: "dev",
+    attachedTo: "native",
+    tag: "void-label",
+  });
+  s.loseThread();
+  await assert.rejects(s.sync.sync(), /Lost thread response/);
+  await s.sync.sync();
+  const id = s.store.get("huly-todo", "native").threadId;
+  assert.equal(s.threads.get(id).name, "[VOID] [HIGH] New native task");
+  assert.equal(
+    s.issues.find((issue) => issue._id === "native").title,
+    "New native task",
+  );
+  assert.equal(s.threads.size, 2);
 });
 
 test("legacy links keep Tracker edits on adoption and then follow changes in either platform", async (t) => {

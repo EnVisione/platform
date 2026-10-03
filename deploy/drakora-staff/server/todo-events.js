@@ -15,11 +15,15 @@ export function trackerEvents(
     if (!tx || typeof tx !== "object") return false;
     if (tx.tx) return relevant(tx.tx);
     if (Array.isArray(tx.txes)) return tx.txes.some(relevant);
+    if (tx.objectClass === "tags:class:TagElement")
+      return tx.objectSpace === "core:space:Workspace";
     return (
       projects.has(tx.objectSpace) &&
-      ["tracker:class:Issue", "chunter:class:ChatMessage"].includes(
-        tx.objectClass,
-      )
+      [
+        "tracker:class:Issue",
+        "chunter:class:ChatMessage",
+        "tags:class:TagReference",
+      ].includes(tx.objectClass)
     );
   }
   return connect(

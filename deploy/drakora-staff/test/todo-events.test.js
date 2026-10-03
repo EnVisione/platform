@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { trackerEvents } from "../server/todo-events.js";
 
-test("native issue and comment events wake mapped projects and renew reconnect credentials", async () => {
+test("native issue, comment and label events wake mapped projects and renew reconnect credentials", async () => {
   let notify;
   let options;
   let changes = 0;
@@ -45,8 +45,19 @@ test("native issue and comment events wake mapped projects and renew reconnect c
     txes: [{ objectClass: "tracker:class:Issue", objectSpace: "dev" }],
   });
   assert.equal(changes, 3);
+  notify({ objectClass: "tags:class:TagReference", objectSpace: "other" });
+  notify({ objectClass: "tags:class:TagElement", objectSpace: "other" });
+  assert.equal(changes, 3);
+  notify({
+    tx: { objectClass: "tags:class:TagReference", objectSpace: "dev" },
+  });
+  notify({
+    objectClass: "tags:class:TagElement",
+    objectSpace: "core:space:Workspace",
+  });
+  assert.equal(changes, 5);
   await options.onConnect();
-  assert.equal(changes, 4);
+  assert.equal(changes, 6);
   options.socketFactory("ws://transactor:3333/?sessionId=first");
   options.socketFactory("ws://transactor:3333/?sessionId=second");
   assert.deepEqual(urls, [

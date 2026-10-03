@@ -4,6 +4,9 @@ import { trackerEvents } from "./todo-events.js";
 
 const issueClass = "tracker:class:Issue";
 const projectClass = "tracker:class:Project";
+const tagClass = "tags:class:TagElement";
+const tagReferenceClass = "tags:class:TagReference";
+const priorityLabels = [undefined, "URGENT", "HIGH", "MEDIUM", "LOW"];
 const sourceLabel = "embedded:embedded:Discord post";
 const expiry = Number.MAX_SAFE_INTEGER;
 const statusNames = {
@@ -60,6 +63,59 @@ export function discordTodoSync(
   let botId;
   const publicText = (value, fallback) =>
     discordText(value, config.todoPublicTextExclusions, fallback);
+
+  function displayTitle(title, issue, voidIssues) {
+    const labels = [
+      ...(voidIssues.has(issue._id) ? ["VOID"] : []),
+      ...(priorityLabels[issue.priority]
+        ? [priorityLabels[issue.priority]]
+        : []),
+    ];
+    const prefix = labels.map((label) => `[${label}] `).join("");
+    return {
+      title,
+      prefix,
+      name:
+        prefix +
+        Array.from(publicText(title))
+          .slice(0, 100 - prefix.length)
+          .join(""),
+    };
+  }
+
+  function sourceTitle(thread, saved) {
+    const displays = [saved?.current, saved?.previous].filter(Boolean);
+    const exact = displays.find((display) => display.name === thread.name);
+    if (exact) return exact.title;
+    const decorated = displays.find(
+      (display) => display.prefix && thread.name.startsWith(display.prefix),
+    );
+    return decorated ? thread.name.slice(decorated.prefix.length) : thread.name;
+  }
+
+  function prepareTitle(thread, display, saved, title) {
+    if (
+      saved?.current?.name === display.name &&
+      saved.current.title === display.title
+    )
+      return;
+    const displays = [saved?.current, saved?.previous].filter(Boolean);
+    const observed =
+      displays.find((candidate) => candidate.name === thread.name) ??
+      displays.find(
+        (candidate) =>
+          candidate.prefix && thread.name.startsWith(candidate.prefix),
+      );
+    store.set(
+      "discord-todo-title",
+      thread.id,
+      {
+        current: display,
+        previous: { name: thread.name, prefix: observed?.prefix ?? "", title },
+      },
+      expiry,
+    );
+  }
 
   async function discord(path, { method = "GET", body, missingCode } = {}) {
     const route = `${method} ${path.split("?")[0].replace(/\/messages\/\d+$/, "/messages/:id")}`;
@@ -402,6 +458,7 @@ export function discordTodoSync(
         missingCode: 10003,
       });
     store.delete("discord-todo-archive", threadId);
+    store.delete("discord-todo-title", threadId);
     if (issue)
       await client.removeCollection(
         issue._class,
@@ -461,6 +518,22 @@ export function discordTodoSync(
         if (!statusByName.has(name))
           throw new Error(`Huly issue status ${name} is missing`);
       const people = await identities(client);
+      const labelDefinitions = await trackerDocs(client, tagClass, {
+        targetClass: issueClass,
+      });
+      const voidLabels = new Set(
+        labelDefinitions
+          .filter((label) => normalize(label.title) === "void")
+          .map((label) => label._id),
+      );
+      const labelReferences = await trackerDocs(client, tagReferenceClass, {
+        space: { $in: config.todoForums.map((forum) => forum.projectId) },
+      });
+      const voidIssues = new Set(
+        labelReferences
+          .filter((reference) => voidLabels.has(reference.tag))
+          .map((reference) => reference.attachedTo),
+      );
       const projects = new Map();
       const mappings = new Map();
       for (const forum of config.todoForums) {
@@ -542,6 +615,8 @@ export function discordTodoSync(
               }
             }
             const source = sourceValues(thread, channel, mapping);
+            const titleState = store.get("discord-todo-title", thread.id);
+            source.title = sourceTitle(thread, titleState);
             const imported = !issue;
             issue ??= await createIssue(
               client,
@@ -607,8 +682,11 @@ export function discordTodoSync(
               people,
             );
             const threadUpdate = {};
-            const title = publicText(next.title).slice(0, 100);
-            if (title !== thread.name) threadUpdate.name = title;
+            const display = displayTitle(next.title, issue, voidIssues);
+            if (display.name !== thread.name) {
+              prepareTitle(thread, display, titleState, source.title);
+              threadUpdate.name = display.name;
+            }
             if (
               JSON.stringify(tags.toSorted()) !==
               JSON.stringify((thread.applied_tags ?? []).toSorted())
@@ -631,9 +709,15 @@ export function discordTodoSync(
             record = {
               issueId: issue._id,
               forumId: channel.id,
-              discord: { ...next, title: thread.name },
+              discord: next,
             };
             store.set("discord-todo", thread.id, record, expiry);
+            store.set(
+              "discord-todo-title",
+              thread.id,
+              { current: display },
+              expiry,
+            );
             store.set("huly-todo", issue._id, { threadId: thread.id }, expiry);
             await syncComments({
               client,
@@ -680,10 +764,11 @@ export function discordTodoSync(
               values,
               people,
             );
+            const display = displayTitle(issue.title, issue, voidIssues);
             const post = await discord(`/channels/${forum.channelId}/threads`, {
               method: "POST",
               body: {
-                name: publicText(issue.title).slice(0, 100),
+                name: display.name,
                 applied_tags: tags,
                 message: {
                   embeds: [
@@ -705,11 +790,17 @@ export function discordTodoSync(
               {
                 issueId: issue._id,
                 forumId: channel.id,
-                discord: { ...values, title: post.name },
+                discord: values,
               },
               expiry,
             );
             store.set("huly-todo", issue._id, { threadId: post.id }, expiry);
+            store.set(
+              "discord-todo-title",
+              post.id,
+              { current: display },
+              expiry,
+            );
             await client.createMixin(
               issue._id,
               issue._class,
