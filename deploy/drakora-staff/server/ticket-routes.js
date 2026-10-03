@@ -223,6 +223,10 @@ export function ticketRouter(
           return () => service.events.off("changed", receive);
         })();
     const shutdown = () => res.end();
+    const revoked = (id) => {
+      if (staffView && id === user.id) res.end();
+    };
+    service.events.on("staff-access-revoked", revoked);
     service.events.once("shutdown", shutdown);
     let checking = false,
       ended = false;
@@ -257,6 +261,7 @@ export function ticketRouter(
       clearInterval(heartbeat);
       unwatch();
       service.events.off("shutdown", shutdown);
+      service.events.off("staff-access-revoked", revoked);
       const remaining = (streams.get(user.id) || 1) - 1;
       if (remaining) streams.set(user.id, remaining);
       else streams.delete(user.id);

@@ -90,7 +90,19 @@ const ticketDatabase = config.tickets
 const tickets = ticketDatabase
   ? ticketService(config, ticketDatabase.store, rolePolicy)
   : undefined;
-const discord = discordClient(config, store, fetch, rolePolicy.apply);
+const discord = discordClient(
+  config,
+  store,
+  fetch,
+  rolePolicy.apply,
+  config.office
+    ? {
+        member: (id) => office.staffMember(id),
+        available: () => office.staffAvailable(),
+      }
+    : undefined,
+);
+const sockets = new Set();
 const mail = mailboxService(config, store);
 const activity = memberActivity(store);
 const huly = hulyClient(config, store);
@@ -122,6 +134,13 @@ const office = config.office
 const ticketTransport = tickets
   ? ticketDiscord(config, tickets, office.gateway, rolePolicy)
   : undefined;
+office?.onAccessChanged((packet) => {
+  const access = discord.observe(packet);
+  if (!access?.revoked) return;
+  for (const socket of sockets)
+    if (socket.userId === access.id) socket.destroy();
+  tickets?.events.emit("staff-access-revoked", access.id);
+});
 const overview = overviewService(config, {
   applications,
   tickets,
@@ -212,7 +231,6 @@ const applicationSession = applicationDatabase
       cookie: { ...cookieOptions, maxAge: 7 * 86400000 },
     })
   : undefined;
-const sockets = new Set();
 const ticketSession = ticketDatabase
   ? session({
       name: "__Host-drakora_ticket",
@@ -361,15 +379,15 @@ async function signedIn(
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
   if (req.headers.host === todoHost) {
-    const parent = store.get("session", req.session.staffSessionId ?? "");
-    if (
-      !parent ||
-      parent.userId !== req.session.userId ||
-      parent.until < Date.now()
-    )
-      throw new AuthError("login_required", 401);
+    workspaceSession.validate(
+      req.session.staffSessionId ?? "",
+      req.session.userId,
+    );
   }
   let user = await discord.check(req.session.userId, forceDiscord);
+  if ((req.session.accessEpoch || 0) !== (user.accessEpoch || 0))
+    throw new AuthError("login_required", 401);
+  if (!user.staffMember) throw new AuthError("staff_server_required");
   if (!user.permissions.dashboard)
     throw new AuthError("dashboard_role_required");
   const link = minecraft.get(user.id);
@@ -428,10 +446,11 @@ if (tickets) {
     authorize: async (req) => {
       if (!req.session.userId || req.session.until <= Date.now())
         throw new AuthError("login_required", 401);
-      const user = await ticketTransport.staffUser(req.session.userId);
-      if (!user?.permissions.dashboard)
-        throw new AuthError("dashboard_role_required");
-      return user;
+      return signedIn(req, {
+        allowUnlinked: true,
+        syncHuly: false,
+        forceDiscord: !["GET", "HEAD"].includes(req.method),
+      });
     },
     mutation: requireMutation,
     dist,
@@ -594,9 +613,11 @@ app.use(async (req, res, next) => {
       throw new AuthError("minecraft_name_required", 428);
     user = await huly.sync(user);
     await regenerate(req);
+    workspaceSession.validate(handoff.staffSession, handoff.userId);
     Object.assign(req.session, {
       userId: user.id,
       staffSessionId: handoff.staffSession,
+      accessEpoch: user.accessEpoch || 0,
       until: handoff.until,
     });
     await save(req);
@@ -629,9 +650,10 @@ app.use(async (req, res, next) => {
       );
       throw new AuthError("invalid_handoff");
     }
-    const parent = store.get("session", handoff.staffSession);
-    if (!parent || parent.userId !== handoff.userId)
-      throw new AuthError("login_required", 401);
+    const parent = workspaceSession.validate(
+      handoff.staffSession,
+      handoff.userId,
+    );
     const user = await discord.check(handoff.userId, true);
     if (!user.permissions.dashboard)
       throw new AuthError("dashboard_role_required");
@@ -640,10 +662,12 @@ app.use(async (req, res, next) => {
     if (!user.permissions.todo)
       throw new AuthError("staff_permission_required");
     await regenerate(req);
+    workspaceSession.validate(handoff.staffSession, handoff.userId);
     Object.assign(req.session, {
       userId: user.id,
       staffSessionId: handoff.staffSession,
       until: parent.until,
+      accessEpoch: user.accessEpoch || 0,
     });
     await save(req);
     const inviteId = await huly.invite(user);
@@ -877,6 +901,7 @@ app.get("/auth/discord/callback", async (req, res) => {
   Object.assign(req.session, {
     userId: user.id,
     until: Date.now() + 43200000,
+    accessEpoch: user.accessEpoch || 0,
     csrf: newToken(),
   });
   await save(req);

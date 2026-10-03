@@ -43,7 +43,9 @@ const messages = {
     "Your Discord session has expired. Please sign in again.",
   login_required: "Please sign in to continue.",
   dashboard_role_required:
-    "You need the Dashboard role in the Drakora Discord server to sign in.",
+    "You need the Dashboard role in the Drakora Staff Discord server to sign in.",
+  staff_server_required:
+    "Join the Drakora Staff Discord server before signing in. A rank in the main server does not grant staff access.",
   invalid_login_state:
     "This sign-in link has expired. Start a new sign-in below.",
   invalid_handoff:

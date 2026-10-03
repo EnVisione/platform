@@ -4,7 +4,20 @@ import { AuthError } from "./discord.js";
 const hash = (code) => createHash("sha256").update(code).digest("hex");
 
 export function workspaceSessions(store) {
+  function validate(staffSession, userId) {
+    const parent = store.get("session", staffSession);
+    const user = store.get("user", userId);
+    if (
+      !parent ||
+      parent.userId !== userId ||
+      parent.until <= Date.now() ||
+      (parent.accessEpoch || 0) !== (user?.accessEpoch || 0)
+    )
+      throw new AuthError("login_required", 401);
+    return parent;
+  }
   return {
+    validate,
     issue(staffSession, userId, view) {
       const code = randomBytes(32).toString("base64url");
       store.set(
@@ -20,13 +33,7 @@ export function workspaceSessions(store) {
         throw new AuthError("invalid_handoff");
       const handoff = store.take("workspace-handoff", hash(code));
       if (!handoff) throw new AuthError("invalid_handoff");
-      const parent = store.get("session", handoff.staffSession);
-      if (
-        !parent ||
-        parent.userId !== handoff.userId ||
-        parent.until <= Date.now()
-      )
-        throw new AuthError("login_required", 401);
+      const parent = validate(handoff.staffSession, handoff.userId);
       return { ...handoff, until: parent.until };
     },
   };

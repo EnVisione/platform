@@ -39,6 +39,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const staffGuild = await client.guilds.fetch(config.guildId);
     try {
       const member = await staffGuild.members.fetch({ user: id, force: true });
+      if (member.pending || member.user.bot) return null;
       return rolePolicy.apply({
         ...actor(member.user, member),
         roles: [...member.roles.cache.keys()],
@@ -48,18 +49,30 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       throw error;
     }
   }
-  function roleOverwrites(restricted = false) {
-    return (config.roleSync?.roles || [])
-      .filter((mapping) => {
-        const roles = [mapping.staffId, config.accessRoles.dashboard];
-        const user = rolePolicy.apply({ id: mapping.staffId, roles });
-        return (
+  async function staffMembers() {
+    const staffGuild = await client.guilds.fetch(config.guildId);
+    const members = await staffGuild.members.fetch();
+    return [...members.values()]
+      .filter((member) => !member.pending && !member.user.bot)
+      .map((member) =>
+        rolePolicy.apply({
+          id: member.id || member.user.id,
+          roles: [...member.roles.cache.keys()],
+        }),
+      );
+  }
+  function overwrites(members, owner, restricted = false) {
+    const staff = members
+      .filter(
+        (user) =>
+          user.id !== owner &&
+          user.id !== client.user.id &&
           user.capabilities["tickets.view"] &&
-          (!restricted || rolePolicy.isManager(user))
-        );
-      })
-      .map((mapping) => ({
-        id: mapping.mainId,
+          (!restricted || rolePolicy.isManager(user)),
+      )
+      .map((user) => ({
+        id: user.id,
+        type: 1,
         allow: [
           P.ViewChannel,
           P.SendMessages,
@@ -68,13 +81,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           P.EmbedLinks,
         ],
       }));
-  }
-  function overwrites(owner, restricted = false) {
     return [
-      { id: settings.guildId, deny: [P.ViewChannel] },
-      ...roleOverwrites(restricted),
+      { id: settings.guildId, type: 0, deny: [P.ViewChannel] },
+      ...staff,
       {
         id: client.user.id,
+        type: 1,
         allow: [
           P.ViewChannel,
           P.SendMessages,
@@ -90,6 +102,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         ? [
             {
               id: owner,
+              type: 1,
               allow: [
                 P.ViewChannel,
                 P.SendMessages,
@@ -102,10 +115,31 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         : []),
     ];
   }
+  function ticketOverwrites(ticket, members) {
+    const permissions = overwrites(
+      members,
+      ticket.owner.id,
+      ticket.type === "staff",
+    );
+    if (["closed", "awaiting_resolution"].includes(ticket.status))
+      for (const permission of permissions)
+        if (permission.id !== client.user.id) {
+          permission.allow = (permission.allow || []).filter(
+            (bit) => bit !== P.SendMessages && bit !== P.AttachFiles,
+          );
+          permission.deny = [
+            ...(permission.deny || []),
+            P.SendMessages,
+            P.AttachFiles,
+          ];
+        }
+    return permissions;
+  }
   async function initialize() {
     if (!client.isReady()) throw new AuthError("ticket_sync_unavailable", 503);
     const main = await guild(),
-      channels = await main.channels.fetch();
+      channels = await main.channels.fetch(),
+      members = await staffMembers();
     const archived = channels.get(settings.archiveCategoryId);
     if (!archived || archived.type !== ChannelType.GuildCategory)
       throw new Error("Ticket archive category is unavailable");
@@ -121,7 +155,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       category = await main.channels.create({
         name: "Drakora Support",
         type: ChannelType.GuildCategory,
-        permissionOverwrites: overwrites(),
+        permissionOverwrites: overwrites(members),
       });
     let media =
       channels.get(saved.mediaId) ||
@@ -137,11 +171,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         type: ChannelType.GuildText,
         parent: archived.id,
         topic: "Drakora ticket attachments. Removed after 30 days.",
-        permissionOverwrites: overwrites(null, true),
+        permissionOverwrites: overwrites(members, null, true),
       });
     saved.categoryId = category.id;
     saved.mediaId = media.id;
     save("channels", saved);
+    save("permissions-pending", { generation: randomUUID() });
     const commands = await main.commands.fetch();
     const command = {
       name: "ticket",
@@ -263,7 +298,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async create(ticket) {
       await ready();
-      const main = await guild();
+      const main = await guild(),
+        members = await staffMembers();
       await main.members.fetch(ticket.owner.id);
       const channels = await main.channels.fetch();
       let target = ticket.channelId
@@ -278,6 +314,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           parent: state().categoryId,
           topic: marker(ticket.id),
           permissionOverwrites: overwrites(
+            members,
             ticket.owner.id,
             ticket.type === "staff",
           ),
@@ -313,6 +350,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async status(ticket) {
       await ready();
+      const members = await staffMembers();
       const target = await channel(ticket.channelId),
         saved = service.store.get("ticket-discord", ticket.id);
       const intro = await target.messages.fetch(saved.introId);
@@ -321,21 +359,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         components: controls(ticket),
         allowedMentions: { parse: [] },
       });
-      const closed = ["closed", "awaiting_resolution"].includes(ticket.status);
-      const permissions = overwrites(ticket.owner.id, ticket.type === "staff");
-      if (closed)
-        for (const permission of permissions)
-          if (permission.id !== client.user.id) {
-            permission.allow = (permission.allow || []).filter(
-              (bit) => bit !== P.SendMessages && bit !== P.AttachFiles,
-            );
-            permission.deny = [
-              ...(permission.deny || []),
-              P.SendMessages,
-              P.AttachFiles,
-            ];
-          }
-      await target.permissionOverwrites.set(permissions);
+      await target.permissionOverwrites.set(ticketOverwrites(ticket, members));
       // closed channels no longer consume the support category channel limit.
       if (
         ticket.status === "closed" &&
@@ -495,20 +519,42 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   }
   function refreshPermissions() {
     if (stopped || refreshing) return refreshing;
-    const pending = service.store.get("ticket-discord", "permissions-pending");
-    if (!pending) return;
+    if (!service.store.get("ticket-discord", "permissions-pending")) return;
     refreshing = Promise.resolve()
       .then(async () => {
         await ready();
-        const saved = state();
-        await (
-          await channel(saved.mediaId)
-        ).permissionOverwrites.set(overwrites(null, true));
-        for (const ticket of service.all().filter((ticket) => ticket.channelId))
-          await transport.status(service.get(ticket.id));
+        const pending = service.store.get(
+            "ticket-discord",
+            "permissions-pending",
+          ),
+          saved = state(),
+          members = await staffMembers();
+        const targets = [
+          { id: saved.categoryId, permissions: overwrites(members) },
+          { id: saved.mediaId, permissions: overwrites(members, null, true) },
+          ...service
+            .all()
+            .filter((ticket) => ticket.channelId)
+            .map((ticket) => ({
+              id: ticket.channelId,
+              permissions: ticketOverwrites(ticket, members),
+            })),
+        ];
+        const main = await guild();
+        let failed = false;
+        for (const target of targets) {
+          try {
+            await (
+              await main.channels.fetch(target.id)
+            ).permissionOverwrites.set(target.permissions);
+          } catch {
+            failed = true;
+          }
+        }
+        if (failed) throw new Error("Ticket permission refresh is incomplete");
         if (
           service.store.get("ticket-discord", "permissions-pending")
-            ?.generation === pending.generation
+            ?.generation === pending?.generation
         )
           service.store.delete("ticket-discord", "permissions-pending");
       })
@@ -522,7 +568,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     if (recovering) return recovering;
     recovering = (async () => {
       await ready();
-      await refreshPermissions();
+      try {
+        await refreshPermissions();
+      } catch {
+        console.error("Ticket permission refresh is pending.");
+      }
       for (const ticket of service
         .all()
         .filter((ticket) => ticket.channelId)
@@ -826,6 +876,20 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       console.error("Ticket message ingestion is pending."),
     );
   const handleRaw = (event) => {
+    if (
+      event.d?.guild_id === config.guildId &&
+      [
+        "GUILD_MEMBER_ADD",
+        "GUILD_MEMBER_UPDATE",
+        "GUILD_MEMBER_REMOVE",
+      ].includes(event.t)
+    ) {
+      save("permissions-pending", { generation: randomUUID() });
+      void refreshPermissions().catch(() =>
+        console.error("Ticket permission refresh is pending."),
+      );
+      return;
+    }
     if (
       !["MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK"].includes(
         event.t,

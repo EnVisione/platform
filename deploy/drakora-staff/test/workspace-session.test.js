@@ -74,3 +74,29 @@ test("dashboard history keeps supported pages local and leaves external and down
   ])
     assert.equal(dashboardDestination(path, origin), null);
 });
+
+test("revoked sessions and outstanding workspace handoffs remain invalid after access is granted again", (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  const sessions = workspaceSessions(store),
+    until = Date.now() + 60000;
+  store.set("user", "staff", { id: "staff", accessEpoch: 0 });
+  store.set(
+    "session",
+    "parent",
+    { userId: "staff", accessEpoch: 0, until },
+    until,
+  );
+  const code = sessions.issue("parent", "staff", "calendar");
+  assert.ok(sessions.validate("parent", "staff"));
+  store.set("user", "staff", { id: "staff", accessEpoch: 1 });
+  assert.throws(() => sessions.take(code), /login_required/);
+  assert.throws(() => sessions.validate("parent", "staff"), /login_required/);
+  store.set(
+    "session",
+    "new-login",
+    { userId: "staff", accessEpoch: 1, until },
+    until,
+  );
+  assert.ok(sessions.take(sessions.issue("new-login", "staff", "calendar")));
+});

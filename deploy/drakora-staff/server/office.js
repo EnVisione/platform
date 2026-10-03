@@ -4,6 +4,7 @@ import {
   ChannelType,
   PermissionFlagsBits,
   Options,
+  Routes,
 } from "discord.js";
 import { meetingService } from "./meetings.js";
 import { AuthError } from "./discord.js";
@@ -71,6 +72,7 @@ export function discordOffice(config, store, dependencies = {}) {
   let attempts = 0;
   let stopped = false;
   let roleListener = () => {};
+  let accessListener = () => {};
   let todoListener = () => {};
   const voiceLink = (id) =>
     `https://discord.com/channels/${config.guildId}/${id}`;
@@ -294,7 +296,9 @@ export function discordOffice(config, store, dependencies = {}) {
       )
         todoListener();
     }
-    if (stopped || !roleSync) return;
+    if (stopped) return;
+    accessListener(packet);
+    if (!roleSync) return;
     const data = packet.d;
     if (![config.guildId, config.roleSync.guildId].includes(data?.guild_id))
       return;
@@ -313,13 +317,6 @@ export function discordOffice(config, store, dependencies = {}) {
       !Array.isArray(data.roles)
     )
       return;
-    if (data.guild_id === config.guildId) {
-      const user = store.get("user", data.user.id);
-      if (user) {
-        user.checkedAt = 0;
-        store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
-      }
-    }
     const member = {
       guildId: data.guild_id,
       id: data.user.id,
@@ -374,8 +371,8 @@ export function discordOffice(config, store, dependencies = {}) {
           joinUrl: voiceLink(room.id),
           joinable: Boolean(
             available &&
-              allowed &&
-              (room.kind === "voice" || state.status === "live"),
+            allowed &&
+            (room.kind === "voice" || state.status === "live"),
           ),
           startedAt: state.status === "live" ? state.startedAt : undefined,
           hostId: state.status === "live" ? state.hostId : undefined,
@@ -396,6 +393,18 @@ export function discordOffice(config, store, dependencies = {}) {
     roleSync,
     emailAlerts,
     roleAdministration: discordRoleAdministration(config, client),
+    staffAvailable: () => ready && Boolean(guild?.available),
+    async staffMember(id) {
+      try {
+        return await client.rest.get(Routes.guildMember(config.guildId, id));
+      } catch (error) {
+        if (error.code === 10007) return undefined;
+        throw new AuthError("discord_unavailable", 503);
+      }
+    },
+    onAccessChanged(listener) {
+      accessListener = listener;
+    },
     onRolesChanged(listener) {
       roleListener = listener;
     },

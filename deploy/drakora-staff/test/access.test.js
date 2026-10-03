@@ -132,6 +132,101 @@ test("Discord role removal is applied and API errors never grant access", async 
   status = 404;
   assert.equal((await client.check("42", true)).permissions.todo, false);
 });
+
+test("staff-server membership is required at login and bot checks fail closed", async (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  let member,
+    available = true;
+  const client = discordClient(
+    config,
+    store,
+    async (url) => {
+      if (url.endsWith("/oauth2/token"))
+        return Response.json({ access_token: "test", expires_in: 3600 });
+      assert.ok(url.endsWith("/users/@me"));
+      return Response.json({
+        id: "42",
+        verified: true,
+        email: "staff@example.invalid",
+        username: "staff",
+      });
+    },
+    undefined,
+    {
+      available: () => available,
+      member: async () => member,
+    },
+  );
+  await assert.rejects(client.login("code"), { code: "staff_server_required" });
+  member = { roles: [accessRoles.dashboard], pending: true };
+  await assert.rejects(client.login("code"), { code: "staff_server_required" });
+  member = { roles: [accessRoles.dashboard] };
+  assert.equal((await client.login("code")).staffMember, true);
+  available = false;
+  await assert.rejects(client.check("42"), {
+    code: "discord_unavailable",
+    status: 503,
+  });
+});
+
+test("gateway revocation ends exact staff sessions and wins against in-flight role checks", async (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  const until = Date.now() + 60000;
+  store.set("user", "42", {
+    id: "42",
+    tokens: { access_token: "test" },
+    tokenExpires: until,
+    checkedAt: 0,
+  });
+  for (const [id, session] of [
+    ["staff", { userId: "42", until }],
+    ["workspace", { userId: "42", staffSessionId: "staff", until }],
+    ["other", { userId: "43", until }],
+    ["player", { ticketIdentity: { id: "42" }, until }],
+  ])
+    store.set("session", id, session, until);
+  let resolveMember;
+  const client = discordClient(config, store, undefined, undefined, {
+    available: () => true,
+    member: () =>
+      new Promise((resolve) => {
+        resolveMember = resolve;
+      }),
+  });
+  const checking = client.check("42", true);
+  const event = {
+    t: "GUILD_MEMBER_REMOVE",
+    d: { guild_id: config.guildId, user: { id: "42" } },
+  };
+  assert.equal(
+    client.observe({ ...event, d: { ...event.d, guild_id: "main" } }),
+    undefined,
+  );
+  assert.ok(store.get("session", "staff"));
+  assert.deepEqual(client.observe(event), { id: "42", revoked: true });
+  resolveMember({ roles: [accessRoles.dashboard] });
+  const user = await checking;
+  assert.equal(user.staffMember, false);
+  assert.equal(user.permissions.dashboard, false);
+  assert.equal(user.accessEpoch, 1);
+  assert.equal(store.get("session", "staff"), undefined);
+  assert.equal(store.get("session", "workspace"), undefined);
+  assert.ok(store.get("session", "other"));
+  assert.ok(store.get("session", "player"));
+  client.observe({
+    t: "GUILD_MEMBER_ADD",
+    d: { ...event.d, roles: [accessRoles.dashboard] },
+  });
+  assert.equal(store.get("user", "42").accessEpoch, 1);
+  client.observe({
+    t: "GUILD_MEMBER_UPDATE",
+    d: { ...event.d, roles: ["23"] },
+  });
+  assert.equal(store.get("user", "42").permissions.dashboard, false);
+  assert.equal(store.get("user", "42").accessEpoch, 2);
+});
 test("last active records presence and invisible messages and survives a restart", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "drakora-activity-"));
   const path = join(dir, "test.sqlite");

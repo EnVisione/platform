@@ -14,6 +14,7 @@ export function discordClient(
   store,
   fetcher = fetch,
   applyPermissions = (user) => user,
+  membership,
 ) {
   const pending = new Map();
   async function token(params) {
@@ -65,14 +66,15 @@ export function discordClient(
     };
     store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
     const admitted = await check(user.id, true);
+    if (!admitted.staffMember) throw new AuthError("staff_server_required");
     if (!admitted.permissions.dashboard)
       throw new AuthError("dashboard_role_required");
     return admitted;
   }
-  async function refresh(id, force) {
+  async function refresh(id) {
     const user = store.get("user", id);
     if (!user?.tokens) throw new AuthError("discord_login_required", 401);
-    if (!force && Date.now() - user.checkedAt < 60000) return user;
+    const revision = user.accessRevision || 0;
     if (user.tokenExpires < Date.now() + 30000) {
       user.tokens = await token({
         grant_type: "refresh_token",
@@ -80,10 +82,15 @@ export function discordClient(
       });
       user.tokenExpires = Date.now() + user.tokens.expires_in * 1000;
     }
-    const member = await api(
-      `/users/@me/guilds/${config.guildId}/member`,
-      user.tokens.access_token,
-    );
+    const member = membership
+      ? await membership.member(id)
+      : await api(
+          `/users/@me/guilds/${config.guildId}/member`,
+          user.tokens.access_token,
+        );
+    const latest = store.get("user", id);
+    if ((latest?.accessRevision || 0) !== revision) return latest;
+    user.staffMember = Boolean(member && !member.pending);
     user.roles = member?.pending ? [] : (member?.roles ?? []);
     user.permissions = permissions(config, user.roles);
     if (member?.user) {
@@ -96,12 +103,66 @@ export function discordClient(
     return user;
   }
   async function check(id, force = false) {
+    if (membership && !membership.available())
+      throw new AuthError("discord_unavailable", 503);
+    const cached = store.get("user", id);
+    if (
+      !force &&
+      cached?.staffMember !== undefined &&
+      Date.now() - cached.checkedAt < 60000
+    )
+      return applyPermissions(cached);
     if (!pending.has(id))
       pending.set(
         id,
-        refresh(id, force).finally(() => pending.delete(id)),
+        refresh(id).finally(() => pending.delete(id)),
       );
-    return applyPermissions(await pending.get(id));
+    const user = await pending.get(id);
+    const latest = store.get("user", id);
+    return applyPermissions(
+      (latest?.accessRevision || 0) !== (user.accessRevision || 0)
+        ? latest
+        : user,
+    );
+  }
+  function observe(packet) {
+    const member = packet.d;
+    if (
+      member?.guild_id !== config.guildId ||
+      !member.user?.id ||
+      ![
+        "GUILD_MEMBER_ADD",
+        "GUILD_MEMBER_UPDATE",
+        "GUILD_MEMBER_REMOVE",
+      ].includes(packet.t) ||
+      (packet.t !== "GUILD_MEMBER_REMOVE" && !Array.isArray(member.roles))
+    )
+      return;
+    const user = store.get("user", member.user.id);
+    const roles =
+      packet.t === "GUILD_MEMBER_REMOVE" || member.pending ? [] : member.roles;
+    const current = applyPermissions({
+      ...(user || {}),
+      id: member.user.id,
+      roles,
+      permissions: permissions(config, roles),
+    });
+    const revoked = !current.permissions.dashboard;
+    if (user) {
+      Object.assign(user, {
+        roles,
+        permissions: current.permissions,
+        staffMember: packet.t !== "GUILD_MEMBER_REMOVE" && !member.pending,
+        checkedAt: 0,
+        accessRevision: (user.accessRevision || 0) + 1,
+        accessEpoch: (user.accessEpoch || 0) + Number(revoked),
+      });
+      store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
+    }
+    if (revoked)
+      for (const [id, session] of store.entries("session"))
+        if (session.userId === member.user.id) store.delete("session", id);
+    return { id: member.user.id, revoked };
   }
   async function identity(code) {
     const tokens = await token({
@@ -125,5 +186,5 @@ export function discordClient(
       roles: member?.pending ? [] : (member?.roles ?? []),
     };
   }
-  return { login, check, identity };
+  return { login, check, identity, observe };
 }

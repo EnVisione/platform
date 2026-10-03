@@ -136,6 +136,18 @@ test("removing a rank while the peer is absent replaces a pending assignment", a
   assert.deepEqual(app.roles("2"), ["99"]);
 });
 
+test("a revoked main-server rank cannot be granted from an old queue when staff membership begins", async (t) => {
+  const app = setup(t, [snapshot("2", ["123"])]);
+  await app.sync.initialize();
+  await app.update(snapshot("2", []));
+  await app.restart();
+  const joined = snapshot("1", ["99"]);
+  app.roster.set("1:42", joined);
+  await app.sync.join(joined);
+  assert.deepEqual(app.roles("1"), ["99"]);
+  assert.equal(app.roles("1").includes("10"), false);
+});
+
 test("membership screening waits for completion before giving a pending rank", async (t) => {
   const app = setup(t, [
     snapshot("1", ["23"]),

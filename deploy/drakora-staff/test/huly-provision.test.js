@@ -251,6 +251,22 @@ test("a failed provisioning request remains an error and is retried on the next 
     2,
   );
 });
+
+test("an in-flight Huly reconciliation cannot overwrite a staff access revocation", async () => {
+  const fixture = clientFixture();
+  const original = structuredClone(fixture.user);
+  const syncing = fixture.client.sync(original);
+  Object.assign(fixture.user, {
+    accessRevision: 1,
+    accessEpoch: 1,
+    roles: [],
+    permissions: { ...fixture.user.permissions, dashboard: false, todo: false },
+  });
+  await assert.rejects(syncing, { code: "login_required", status: 401 });
+  assert.equal(fixture.user.permissions.dashboard, false);
+  assert.equal(fixture.user.accessEpoch, 1);
+  assert.equal(fixture.user.syncedAt, undefined);
+});
 test("the pinned account patch preserves private invitations and fails on an incompatible image", () => {
   const original = `loginInfo = await (0, import_account.joinWithProvider)(\n            socialKey,\n            signUpDisabled\n          );\n        ensurePerson: (0, import_utils6.wrap)(ensurePerson),`;
   const patched = patchAccount(original);

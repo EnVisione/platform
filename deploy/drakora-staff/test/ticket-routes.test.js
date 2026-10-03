@@ -197,6 +197,26 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   });
   const event = await reader.read();
   assert.ok(new TextDecoder().decode(event.value).includes("data:"));
+  const staffStream = await fetch(`${base}/api/tickets/${id}/events`, {
+    signal: controller.signal,
+  });
+  const staffReader = staffStream.body.getReader();
+  await staffReader.read();
+  service.events.emit("staff-access-revoked", "999");
+  service.reply(player, id, {
+    requestId: randomUUID(),
+    content: "Staff view still open",
+  });
+  assert.equal((await staffReader.read()).done, false);
+  await reader.read();
+  service.events.emit("staff-access-revoked", helper.id);
+  assert.equal((await staffReader.read()).done, true);
+  service.reply(player, id, {
+    requestId: randomUUID(),
+    content: "Player view remains open",
+  });
+  assert.equal((await reader.read()).done, false);
+  assert.equal(service.events.listenerCount("staff-access-revoked"), 1);
   controller.abort();
   await reader.cancel().catch(() => {});
   response = await call(

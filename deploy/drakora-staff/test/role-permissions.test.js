@@ -33,12 +33,10 @@ function setup(t) {
 }
 const input = (policy) => ({
   revision: policy.read(actor("20")).revision,
-  roles: policy
-    .read(actor("20"))
-    .roles.map((role) => ({
-      id: role.id,
-      permissions: { ...role.permissions },
-    })),
+  roles: policy.read(actor("20")).roles.map((role) => ({
+    id: role.id,
+    permissions: { ...role.permissions },
+  })),
 });
 function change(input, rank, key, value) {
   input.roles.find((role) => role.id === rank).permissions[key] = value;
@@ -115,6 +113,7 @@ test("policy changes take effect on a cached Discord session without another Dis
       tokens: {},
       tokenExpires: Date.now() + 3600000,
       checkedAt: Date.now(),
+      staffMember: true,
     },
     Number.MAX_SAFE_INTEGER,
   );

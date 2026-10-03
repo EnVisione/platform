@@ -157,19 +157,28 @@ function setupDiscord(t) {
       async create() {},
     },
   };
+  const staffMembers = new Collection(
+    [
+      ["200", "Manager", ["10", "28"]],
+      ["201", "Helper", ["10", "23"]],
+    ].map(([id, name, roles]) => [
+      id,
+      {
+        id,
+        user: { ...user, id },
+        displayName: name,
+        roles: { cache: new Collection(roles.map((role) => [role, {}])) },
+      },
+    ]),
+  );
   const staffGuild = {
     members: {
-      async fetch({ user: id }) {
-        return {
-          user: { ...user, id },
-          roles: {
-            cache: new Collection([
-              ["10", {}],
-              ["28", {}],
-            ]),
-          },
-          displayName: "Manager",
-        };
+      async fetch(query) {
+        if (!query) return staffMembers;
+        const member = staffMembers.get(query.user);
+        if (!member)
+          throw Object.assign(new Error("Unknown member"), { code: 10007 });
+        return member;
       },
     },
   };
@@ -191,6 +200,7 @@ function setupDiscord(t) {
     policy,
     client,
     channels,
+    staffMembers,
     user,
     get sends() {
       return sends;
@@ -229,7 +239,7 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   );
   assert.ok(
     target.overwrites
-      .find((value) => value.id === "main-23")
+      .find((value) => value.id === "201" && value.type === 1)
       .allow.includes(P.ViewChannel),
   );
   const outgoing = service.reply(
@@ -279,8 +289,9 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   });
   await service.pump();
   const privateTarget = channels.get(service.get(privateTicket.id).channelId);
-  assert.ok(privateTarget.overwrites.some((value) => value.id === "main-28"));
-  assert.ok(!privateTarget.overwrites.some((value) => value.id === "main-23"));
+  assert.ok(privateTarget.overwrites.some((value) => value.id === "200"));
+  assert.ok(!privateTarget.overwrites.some((value) => value.id === "201"));
+  assert.ok(!target.overwrites.some((value) => value.id.startsWith("main-")));
   let modal;
   client.emit("interactionCreate", {
     guildId: "2",
@@ -391,4 +402,71 @@ test("Discord reconnect backfills multiple pages and reconciles edits and deleti
     service.messages(other.id)[0].content,
     "Edited after closure while disconnected",
   );
+});
+
+test("ticket visibility follows screened staff membership and Dashboard access instead of main-server ranks", async (t) => {
+  const { service, transport, client, channels, user, staffMembers, config } =
+    setupDiscord(t);
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    ign: "Jojo",
+    type: "general",
+    location: "Void",
+    description:
+      "Verify that staff access is removed from existing Discord tickets.",
+  });
+  await transport.create(ticket);
+  await service.pump();
+  await transport.recover();
+  const target = channels.get(service.get(ticket.id).channelId);
+  const category = [...channels.values()].find(
+    (value) => value.name === "Drakora Support",
+  );
+  assert.equal(await transport.staffUser("300"), null);
+  assert.ok(!target.overwrites.some((value) => value.id === "300"));
+  assert.ok(target.overwrites.some((value) => value.id === "201"));
+  const helper = staffMembers.get("201");
+  helper.roles.cache.delete(config.accessRoles.dashboard);
+  client.emit("raw", {
+    t: "GUILD_MEMBER_UPDATE",
+    d: { guild_id: config.guildId, user: { id: "201" }, roles: ["23"] },
+  });
+  await transport.recover();
+  assert.equal((await transport.staffUser("201")).permissions.dashboard, false);
+  for (const channel of [target, category]) {
+    assert.ok(!channel.overwrites.some((value) => value.id === "201"));
+    assert.ok(
+      !channel.overwrites.some((value) => value.id.startsWith("main-")),
+    );
+  }
+  assert.ok(target.overwrites.some((value) => value.id === user.id));
+  const updateCategory = category.permissionOverwrites.set;
+  category.permissionOverwrites.set = async () => {
+    throw new Error("Missing permission");
+  };
+  staffMembers.delete("200");
+  await assert.rejects(transport.refreshPermissions(), /refresh is incomplete/);
+  assert.ok(!target.overwrites.some((value) => value.id === "200"));
+  assert.ok(service.store.get("ticket-discord", "permissions-pending"));
+  category.permissionOverwrites.set = updateCategory;
+  await transport.recover();
+  assert.equal(
+    service.store.get("ticket-discord", "permissions-pending"),
+    undefined,
+  );
+  helper.roles.cache.set(config.accessRoles.dashboard, {});
+  helper.pending = true;
+  await transport.refreshPermissions();
+  assert.equal(await transport.staffUser("201"), null);
+  assert.ok(!target.overwrites.some((value) => value.id === "201"));
+  helper.pending = false;
+  await transport.refreshPermissions();
+  assert.ok(target.overwrites.some((value) => value.id === "201"));
+  staffMembers.delete("201");
+  client.emit("raw", {
+    t: "GUILD_MEMBER_REMOVE",
+    d: { guild_id: config.guildId, user: { id: "201" } },
+  });
+  await transport.recover();
+  assert.ok(!target.overwrites.some((value) => value.id === "201"));
 });
