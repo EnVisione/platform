@@ -68,6 +68,22 @@ export function mailRouter({ service, authorize, requireMutation, staffHost }) {
     requireMutation(req);
     next();
   });
+  router.post("/messages/:uid/open", async (req, res) =>
+    res.json(
+      await service.detail(
+        {
+          uid: req.params.uid,
+          folder: req.query.folder,
+          validity: req.query.validity,
+        },
+        Boolean(req.mailUser.capabilities?.["mail.flags"]),
+      ),
+    ),
+  );
+  router.post("/trash", express.json({ limit: "8kb" }), async (req, res) => {
+    await authorize(req, "mail.delete");
+    res.json(await service.trash(req.body));
+  });
   router.post("/flags", express.json({ limit: "8kb" }), async (req, res) => {
     await authorize(req, "mail.flags");
     res.json(await service.flags(req.body));

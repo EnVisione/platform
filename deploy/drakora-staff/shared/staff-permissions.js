@@ -134,6 +134,13 @@ export const staffPermissions = [
     ["mail.view"],
   ],
   [
+    "mail.delete",
+    "Email",
+    "Delete email",
+    "Move shared email to Trash.",
+    ["mail.view"],
+  ],
+  [
     "mail.send",
     "Email",
     "Send email",

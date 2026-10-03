@@ -13,6 +13,8 @@ const errors = {
   mail_changed:
     "This mailbox changed. Refresh the inbox and open the message again.",
   mail_not_found: "This message is no longer available in this mailbox.",
+  mail_trash_unavailable:
+    "Trash is unavailable. The email has not been deleted. Try again later.",
   invalid_mail_request:
     "Check the addresses, subject and message. Use email addresses separated by commas.",
   invalid_request:
@@ -585,7 +587,8 @@ export function Mail({ csrf, capabilities }) {
     [detailError, setDetailError] = useState(null),
     [notice, setNotice] = useState(null);
   const [draft, setDraft] = useState(null),
-    [flagBusy, setFlagBusy] = useState(false);
+    [flagBusy, setFlagBusy] = useState(false),
+    [deleteBusy, setDeleteBusy] = useState(false);
   const [replyHost, setReplyHost] = useState(null);
   const [draftOpen, setDraftOpen] = useState(0);
   const [sentReply, setSentReply] = useState(null);
@@ -666,11 +669,29 @@ export function Mail({ csrf, capabilities }) {
     setMessage(null);
     setDetailError(null);
     request(
-      `/messages/${selected.uid}?${new URLSearchParams({ folder: selected.folder, validity: selected.validity })}`,
-      { signal: controller.signal },
+      `/messages/${selected.uid}/open?${new URLSearchParams({ folder: selected.folder, validity: selected.validity })}`,
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf },
+        signal: controller.signal,
+      },
     )
       .then((result) => {
-        if (!controller.signal.aborted) setMessage(result);
+        if (controller.signal.aborted) return;
+        setMessage(result);
+        setList((previous) =>
+          previous?.folder === result.folder &&
+          previous?.validity === result.validity
+            ? {
+                ...previous,
+                items: previous.items.map((item) =>
+                  item.uid === result.uid
+                    ? { ...item, seen: result.seen }
+                    : item,
+                ),
+              }
+            : previous,
+        );
       })
       .catch((failure) => {
         if (!controller.signal.aborted) setDetailError(errorText(failure));
@@ -679,7 +700,7 @@ export function Mail({ csrf, capabilities }) {
         if (!controller.signal.aborted) setMessageLoading(false);
       });
     return () => controller.abort();
-  }, [selected]);
+  }, [selected, csrf]);
   function changeFolder(path) {
     setFolder(path);
     setOffset(0);
@@ -687,7 +708,7 @@ export function Mail({ csrf, capabilities }) {
     setMessage(null);
   }
   async function changeFlag(flag, value, current = message) {
-    if (!current || flagBusy) return;
+    if (!current || flagBusy || deleteBusy) return;
     setFlagBusy(true);
     setError(null);
     try {
@@ -726,6 +747,29 @@ export function Mail({ csrf, capabilities }) {
       setFlagBusy(false);
     }
   }
+  async function deleteMessage(current) {
+    if (deleteBusy || flagBusy) return;
+    setDeleteBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await request("/trash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({
+          folder: current.folder,
+          uid: current.uid,
+          validity: current.validity,
+        }),
+      });
+      setNotice("Email moved to Trash.");
+      setRefresh((value) => value + 1);
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
   function compose(kind) {
     if (draft) {
       setDraftOpen((previous) => previous + 1);
@@ -745,6 +789,8 @@ export function Mail({ csrf, capabilities }) {
     setNotice(null);
   }
   const currentFolder = folders.find((entry) => entry.path === folder);
+  const canDelete =
+    capabilities["mail.delete"] && currentFolder?.specialUse !== "\\Trash";
   const folderTitle =
     folderNames[currentFolder?.specialUse] ?? currentFolder?.name ?? "Inbox";
   return (
@@ -909,14 +955,14 @@ export function Mail({ csrf, capabilities }) {
                 list.items.map((item) => (
                   <div
                     key={item.uid}
-                    className={`mail-message-row${item.seen ? "" : " unread"}`}
+                    className={`mail-message-row${item.seen ? "" : " unread"}${canDelete ? " with-delete" : ""}`}
                   >
                     {capabilities["mail.flags"] ? (
                       <button
                         className={`mail-row-star${item.starred ? " starred" : ""}`}
                         aria-label={`${item.starred ? "Remove star from" : "Star"} ${item.subject}`}
                         aria-pressed={item.starred}
-                        disabled={flagBusy}
+                        disabled={flagBusy || deleteBusy}
                         onClick={() =>
                           changeFlag("starred", !item.starred, {
                             ...item,
@@ -938,6 +984,7 @@ export function Mail({ csrf, capabilities }) {
                     )}
                     <button
                       className="mail-message-open"
+                      disabled={deleteBusy}
                       onClick={() => {
                         setMessage(null);
                         setDetailError(null);
@@ -980,6 +1027,28 @@ export function Mail({ csrf, capabilities }) {
                         {rowDate(item.date)}
                       </time>
                     </button>
+                    {canDelete && (
+                      <button
+                        className="mail-row-delete"
+                        aria-label={`Delete ${item.subject}`}
+                        title="Move to Trash"
+                        disabled={deleteBusy || flagBusy}
+                        onClick={() =>
+                          deleteMessage({
+                            ...item,
+                            folder,
+                            validity: list.validity,
+                          })
+                        }
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            fill="currentColor"
+                            d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-1 12H7L6 9Zm4 2v8h1v-8h-1Zm3 0v8h1v-8h-1Z"
+                          />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 ))
               ) : (
@@ -1016,6 +1085,7 @@ export function Mail({ csrf, capabilities }) {
                 setSelected(null);
                 setMessage(null);
                 setDetailError(null);
+                if (unread) setRefresh((value) => value + 1);
               }}
             >
               ← Back to {folderTitle.toLowerCase()}

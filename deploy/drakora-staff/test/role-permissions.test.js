@@ -75,6 +75,7 @@ test("defaults admit dashboard staff to the workspace and preserve role boundari
   ]) {
     const caps = policy.apply(actor(rank)).capabilities;
     assert.equal(caps["mail.view"], ["20", "28", "21"].includes(rank));
+    assert.equal(caps["mail.delete"], ["20", "28", "21"].includes(rank));
     assert.equal(caps["roles.view"], ["20", "28"].includes(rank));
     assert.equal(caps["applications.approve"], ["20", "28"].includes(rank));
     assert.equal(
@@ -92,7 +93,12 @@ test("persisted permissions separate read-only email from sending and combine mu
   const restarted = rolePermissions(settings, store);
   const sr = restarted.apply(actor("29"));
   assert.equal(sr.capabilities["mail.view"], true);
-  for (const key of ["mail.send", "mail.attachments", "mail.flags"])
+  for (const key of [
+    "mail.send",
+    "mail.attachments",
+    "mail.flags",
+    "mail.delete",
+  ])
     assert.equal(sr.capabilities[key], false);
   assert.equal(
     restarted.apply(actor("29", ["10", "11", "21"])).capabilities["mail.send"],
@@ -100,6 +106,17 @@ test("persisted permissions separate read-only email from sending and combine mu
   );
   assert.equal(restarted.history(actor("20")).items[0].actor.id, "28");
   assert.equal(store.get("role-permissions", "current").revision, 1);
+});
+
+test("delete permission can be revoked independently of read status and email viewing", (t) => {
+  const { policy } = setup(t);
+  const edit = input(policy);
+  change(edit, "21", "mail.delete", false);
+  policy.save(actor("28"), edit);
+  const caps = policy.apply(actor("21")).capabilities;
+  assert.equal(caps["mail.view"], true);
+  assert.equal(caps["mail.flags"], true);
+  assert.equal(caps["mail.delete"], false);
 });
 
 test("policy changes take effect on a cached Discord session without another Discord request", async (t) => {

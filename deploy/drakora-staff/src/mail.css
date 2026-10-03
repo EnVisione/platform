@@ -263,6 +263,31 @@
 .mail-message-row.unread {
   background: #303238;
 }
+.mail-message-row.with-delete {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+.mail-row-delete {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: #383a40;
+  color: #b5bac1;
+  cursor: pointer;
+}
+.mail-row-delete svg {
+  width: 20px;
+  height: 20px;
+}
+.mail-row-delete:hover {
+  color: #f2f3f5;
+  background: #4c3034;
+}
 .mail-message-row:hover {
   background: #33353b;
 }
@@ -1117,6 +1142,9 @@ button.mail-row-star:hover {
   .mail-message-row {
     grid-template-columns: 32px minmax(0, 1fr);
     padding: 0 12px 0 6px;
+  }
+  .mail-message-row.with-delete {
+    grid-template-columns: 32px minmax(0, 1fr) 44px;
   }
   .mail-message-open {
     grid-template-columns: minmax(0, 1fr) auto;

@@ -51,6 +51,7 @@ function harness(t, overrides = {}) {
     fetches: [],
     sends: [],
     flags: [],
+    moves: [],
     records: Array.from({ length: 37 }, (_, index) => ({
       uid: index + 1,
       envelope: {
@@ -101,18 +102,31 @@ function harness(t, overrides = {}) {
       if (state.connectError) throw new Error("private connection detail");
     }
     async list() {
-      return [
-        { path: "Labels/Personal", name: "Personal", flags: new Set() },
-        { path: "Labels/drakora.org", name: "drakora.org", flags: new Set() },
-        {
-          path: "INBOX",
-          name: "Inbox",
-          flags: new Set(),
-          specialUse: "\\Inbox",
-        },
-        { path: "Sent", name: "Sent", flags: new Set(), specialUse: "\\Sent" },
-        { path: "Hidden", name: "Hidden", flags: new Set(["\\Noselect"]) },
-      ];
+      return (
+        state.folders ?? [
+          { path: "Labels/Personal", name: "Personal", flags: new Set() },
+          { path: "Labels/drakora.org", name: "drakora.org", flags: new Set() },
+          {
+            path: "INBOX",
+            name: "Inbox",
+            flags: new Set(),
+            specialUse: "\\Inbox",
+          },
+          {
+            path: "Sent",
+            name: "Sent",
+            flags: new Set(),
+            specialUse: "\\Sent",
+          },
+          {
+            path: "Trash",
+            name: "Trash",
+            flags: new Set(),
+            specialUse: "\\Trash",
+          },
+          { path: "Hidden", name: "Hidden", flags: new Set(["\\Noselect"]) },
+        ]
+      );
     }
     async getMailboxLock(folder, options) {
       this.folder = folder;
@@ -165,11 +179,15 @@ function harness(t, overrides = {}) {
     }
     async messageFlagsAdd(uid, flags) {
       state.flags.push({ uid, flags, add: true });
-      return true;
+      return state.flagResult ?? true;
     }
     async messageFlagsRemove(uid, flags) {
       state.flags.push({ uid, flags, add: false });
       return true;
+    }
+    async messageMove(uid, folder, options) {
+      state.moves.push({ uid, folder, options });
+      return state.moveResult ?? { destination: folder };
     }
     async logout() {
       this.loggedOut++;
@@ -351,7 +369,7 @@ test("mail list scopes configured identities, bounds fetches and paginates newes
   assert.equal(state.clients[0].loggedOut, 1);
   assert.deepEqual(
     (await service.folders()).map((folder) => folder.path),
-    ["INBOX", "Sent", "Labels/drakora.org"],
+    ["INBOX", "Sent", "Trash", "Labels/drakora.org"],
   );
   await assert.rejects(service.list({ folder: "Labels/Personal", offset: 0 }), {
     code: "mail_not_found",
@@ -510,6 +528,106 @@ test("flag operations mutate only Seen and Flagged and always release the lock",
   });
 });
 
+test("opening marks a successfully loaded message read once in the same connection", async (t) => {
+  const { service, state } = harness(t);
+  assert.equal((await service.detail(key)).seen, false);
+  assert.deepEqual(state.flags, []);
+  const opened = await service.detail(key, true);
+  assert.equal(opened.seen, true);
+  assert.equal(opened.text, "Hello player");
+  assert.equal(state.clients.length, 2);
+  assert.equal(state.clients[1].readOnly, false);
+  await service.detail(key, true);
+  assert.deepEqual(state.flags, [{ uid: 4, flags: ["\\Seen"], add: true }]);
+  await service.detail(key, false);
+  assert.equal(state.clients.at(-1).readOnly, true);
+});
+
+test("opening never marks failed, stale or private messages read", async (t) => {
+  const { service, state } = harness(t);
+  await assert.rejects(service.detail({ ...key, validity: "50" }, true), {
+    code: "mail_changed",
+  });
+  state.bodies[1] = "x".repeat(1048577);
+  await assert.rejects(service.detail(key, true), { code: "mail_too_large" });
+  state.records.find((record) => record.uid === key.uid).envelope.to = [
+    { address: "personal@example.invalid" },
+  ];
+  await assert.rejects(service.detail(key, true), { code: "mail_not_found" });
+  assert.deepEqual(state.flags, []);
+  assert.ok(
+    state.clients.every(
+      (client) => client.released === 1 && client.loggedOut === 1,
+    ),
+  );
+});
+
+test("failed read flag update does not report the email as read", async (t) => {
+  const { service, state } = harness(t, { flagResult: false });
+  await assert.rejects(service.detail(key, true), { code: "mail_changed" });
+  assert.equal(
+    state.records.find((record) => record.uid === key.uid).flags.has("\\Seen"),
+    false,
+  );
+});
+
+test("deletion moves only the scoped exact UID to server-selected Trash", async (t) => {
+  const { service, state } = harness(t);
+  assert.deepEqual(await service.trash({ ...key, destination: "Personal" }), {
+    ok: true,
+  });
+  assert.deepEqual(state.moves, [
+    { uid: 4, folder: "Trash", options: { uid: true } },
+  ]);
+  assert.equal(state.clients[0].readOnly, false);
+  assert.equal(state.clients[0].released, 1);
+  assert.equal(state.clients[0].loggedOut, 1);
+  assert.deepEqual(state.flags, []);
+});
+
+test("deletion rejects stale, missing, personal, hidden and already trashed messages", async (t) => {
+  const { service, state } = harness(t);
+  for (const [input, code] of [
+    [{ ...key, validity: "50" }, "mail_changed"],
+    [{ ...key, uid: 999 }, "mail_not_found"],
+    [{ ...key, folder: "Labels/Personal" }, "mail_not_found"],
+    [{ ...key, uid: "4:*" }, "invalid_mail_request"],
+    [{ ...key, folder: "Trash" }, "invalid_mail_request"],
+  ])
+    await assert.rejects(service.trash(input), { code });
+  state.records.find((record) => record.uid === key.uid).envelope.to = [
+    { address: "personal@example.invalid" },
+  ];
+  await assert.rejects(service.trash(key), { code: "mail_not_found" });
+  assert.deepEqual(state.moves, []);
+  assert.deepEqual(state.flags, []);
+  assert.ok(state.clients.every((client) => client.loggedOut === 1));
+});
+
+test("unavailable Trash and failed moves preserve failure instead of expunging", async (t) => {
+  const { service, state } = harness(t, {
+    folders: [
+      { path: "INBOX", name: "Inbox", flags: new Set(), specialUse: "\\Inbox" },
+    ],
+  });
+  await assert.rejects(service.trash(key), { code: "mail_trash_unavailable" });
+  assert.deepEqual(state.moves, []);
+  state.folders.push({
+    path: "Trash",
+    name: "Trash",
+    flags: new Set(),
+    specialUse: "\\Trash",
+  });
+  state.moveResult = false;
+  await assert.rejects(service.trash(key), { code: "mail_changed" });
+  assert.deepEqual(state.flags, []);
+  assert.ok(
+    state.clients.every(
+      (client) => client.released === 1 && client.loggedOut === 1,
+    ),
+  );
+});
+
 test("Bridge failures expose no credentials, email contents or SMTP responses", async (t) => {
   const { service, state } = harness(t, { fetchError: true });
   await assert.rejects(service.detail(key), {
@@ -615,7 +733,8 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
   const app = express();
   let roles = ["10", "20"],
     signedIn = true,
-    readOnly = false;
+    readOnly = false,
+    deleteAllowed = true;
   app.use(
     "/api/mail",
     mailRouter({
@@ -627,8 +746,17 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
           id: "42",
           roles,
           permissions: permissions(fixture, roles),
+          capabilities: {
+            "mail.view": mailAccess(settings, {
+              roles,
+              permissions: permissions(fixture, roles),
+            }),
+            "mail.flags": !readOnly,
+          },
         };
         if (readOnly && capability !== "mail.view")
+          throw new AuthError("mail_role_required");
+        if (capability === "mail.delete" && !deleteAllowed)
           throw new AuthError("mail_role_required");
         if (!mailAccess(settings, user))
           throw new AuthError("mail_role_required");
@@ -721,6 +849,63 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
     403,
   );
   assert.equal((await call("/messages?folder=INBOX&offset=-1")).status, 400);
+  assert.equal(
+    (
+      await call("/messages/4/open?folder=INBOX&validity=51", {
+        method: "POST",
+        headers: { "X-CSRF-Token": "wrong" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call("/messages/4/open?folder=INBOX&validity=51", {
+        method: "POST",
+        headers: { Origin: "https://other.invalid" },
+      })
+    ).status,
+    403,
+  );
+  const opened = await call("/messages/4/open?folder=INBOX&validity=51", {
+    method: "POST",
+  });
+  assert.equal(opened.status, 200);
+  assert.equal((await opened.json()).seen, true);
+  assert.equal(
+    (
+      await call("/trash", {
+        method: "POST",
+        headers: { "X-CSRF-Token": "wrong" },
+        body: JSON.stringify(key),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call("/trash", {
+        method: "POST",
+        headers: { Origin: "https://other.invalid" },
+        body: JSON.stringify(key),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await call("/trash", { method: "POST", body: JSON.stringify(key) }))
+      .status,
+    200,
+  );
+  assert.equal(state.moves.length, 1);
+  deleteAllowed = false;
+  assert.equal(
+    (await call("/trash", { method: "POST", body: JSON.stringify(key) }))
+      .status,
+    403,
+  );
+  assert.equal(state.moves.length, 1);
+  deleteAllowed = true;
   const attachment = await call(
     "/messages/4/attachments/3?folder=INBOX&validity=51",
   );
@@ -744,6 +929,18 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
     (await call("/messages/4?folder=INBOX&validity=51")).status,
     200,
   );
+  const readOnlyOpened = await call(
+    "/messages/5/open?folder=INBOX&validity=51",
+    { method: "POST" },
+  );
+  assert.equal(readOnlyOpened.status, 200);
+  assert.equal((await readOnlyOpened.json()).seen, false);
+  assert.equal(
+    (await call("/trash", { method: "POST", body: JSON.stringify(key) }))
+      .status,
+    403,
+  );
+  assert.equal(state.moves.length, 1);
   assert.equal(
     (await call("/messages/4/attachments/3?folder=INBOX&validity=51")).status,
     403,
@@ -762,7 +959,7 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
       .status,
     403,
   );
-  assert.equal(state.flags.length, 0);
+  assert.equal(state.flags.length, 1);
   readOnly = false;
   roles = ["10", "23"];
   assert.equal((await call("/")).status, 403);

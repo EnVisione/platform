@@ -316,7 +316,7 @@ export function mailboxService(config, store, dependencies = {}) {
       const current = String(client.mailbox.uidValidity);
       if (validity !== undefined && validity !== current)
         throw new AuthError("mail_changed", 409);
-      return await action(current);
+      return await action(current, folders);
     } finally {
       lock.release();
     }
@@ -383,8 +383,12 @@ export function mailboxService(config, store, dependencies = {}) {
   async function inMessage(input, readOnly, action) {
     messageKey(input);
     return connection((client) =>
-      mailbox(client, input.folder, input.validity, readOnly, () =>
-        action(client),
+      mailbox(
+        client,
+        input.folder,
+        input.validity,
+        readOnly,
+        (_current, folders) => action(client, folders),
       ),
     );
   }
@@ -588,8 +592,8 @@ export function mailboxService(config, store, dependencies = {}) {
         }),
       );
     },
-    detail(input) {
-      return inMessage(input, true, async (client) => {
+    detail(input, markRead = false) {
+      return inMessage(input, !markRead, async (client) => {
         const record = await scopedMessage(client, input, {
           envelope: true,
           flags: true,
@@ -653,6 +657,14 @@ export function mailboxService(config, store, dependencies = {}) {
             type: part.type,
             size: part.size,
           }));
+        if (markRead && !record.flags?.has("\\Seen")) {
+          const changed = await client.messageFlagsAdd(record.uid, ["\\Seen"], {
+            uid: true,
+          });
+          if (!changed) throw new AuthError("mail_changed", 409);
+          record.flags ??= new Set();
+          record.flags.add("\\Seen");
+        }
         return {
           ...summary(record),
           folder: input.folder,
@@ -716,6 +728,19 @@ export function mailboxService(config, store, dependencies = {}) {
               uid: true,
             });
         if (!changed) throw new AuthError("mail_changed", 409);
+        return { ok: true };
+      });
+    },
+    trash(input) {
+      return inMessage(input, false, async (client, folders) => {
+        await scopedMessage(client, input, { uid: true });
+        const trash = folders.find((entry) => entry.specialUse === "\\Trash");
+        if (!trash) throw new AuthError("mail_trash_unavailable", 503);
+        if (trash.path === input.folder) throw invalid();
+        const moved = await client.messageMove(Number(input.uid), trash.path, {
+          uid: true,
+        });
+        if (!moved) throw new AuthError("mail_changed", 409);
         return { ok: true };
       });
     },
