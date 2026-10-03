@@ -43,6 +43,8 @@ import { mailboxService } from "./mailbox.js";
 import { mailRouter } from "./mail-routes.js";
 import { timePreferences, timePreferenceRouter } from "./time-preferences.js";
 import { overviewService } from "./overview.js";
+import { websiteService, websiteAccess, communityStatus } from "./website.js";
+import { publicWebsiteRouter, websiteEditorRouter } from "./website-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -66,6 +68,7 @@ const applicationDatabase = config.applications
   : undefined;
 const minecraft = minecraftRegistry(store);
 const timeSettings = timePreferences(store);
+const website = config.website ? websiteService(config, store) : undefined;
 const applications = applicationDatabase
   ? applicationService(
       config,
@@ -219,11 +222,15 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) =>
-  (req.headers.host === todoHost
-    ? todoSession
-    : req.headers.host === applicationHost
-      ? applicationSession
-      : staffSession)(req, res, next),
+  config.website &&
+  req.headers.host === applicationHost &&
+  !req.path.startsWith("/apply")
+    ? next()
+    : (req.headers.host === todoHost
+        ? todoSession
+        : req.headers.host === applicationHost
+          ? applicationSession
+          : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -242,6 +249,19 @@ app.use((req, res, next) => {
     );
   next();
 });
+
+if (website) {
+  const publicWebsite = publicWebsiteRouter(
+    website,
+    communityStatus(config),
+    dist,
+  );
+  app.use((req, res, next) =>
+    req.headers.host === applicationHost
+      ? publicWebsite(req, res, next)
+      : next(),
+  );
+}
 
 if (applications) {
   const publicApplications = applicationRouter(config, applications, dist);
@@ -266,6 +286,7 @@ function safeNext(value) {
       "/applications/editor",
       "/email",
       "/roles",
+      "/website",
       "/office",
       "/tracker",
       "/calendar",
@@ -329,6 +350,7 @@ function publicUser(user) {
     mail: mailAccess(config, user),
     capabilities: user.capabilities,
     rolesPanel: Boolean(user.capabilities["roles.view"]),
+    website: Boolean(website && websiteAccess(config, user)),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     workspaceOrigin: config.todoOrigin,
@@ -353,6 +375,22 @@ function requireMutation(req) {
     !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
   )
     throw new AuthError("invalid_request");
+}
+
+if (website) {
+  const editor = websiteEditorRouter(
+    website,
+    (req) =>
+      signedIn(req, {
+        syncHuly: false,
+        forceDiscord: !["GET", "HEAD"].includes(req.method),
+      }),
+    requireMutation,
+    dist,
+  );
+  app.use((req, res, next) =>
+    req.headers.host === staffHost ? editor(req, res, next) : next(),
+  );
 }
 
 function accountFromToken(token) {

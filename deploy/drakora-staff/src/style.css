@@ -896,6 +896,8 @@ button:disabled {
 
   .mobile-nav {
     display: flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     gap: 12px;
     margin-left: auto;
     color: var(--accent);

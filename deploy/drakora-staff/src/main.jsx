@@ -10,6 +10,7 @@ import logo from "./assets/drakora-logo.png";
 import { accentForeground } from "../shared/accent.js";
 import { dashboardDestination } from "../shared/dashboard-navigation.js";
 import { Overview } from "./overview.jsx";
+import { WebsiteEditor } from "./website-editor.jsx";
 import {
   DashboardClock,
   LocalClock,
@@ -60,6 +61,7 @@ function safeTarget(value) {
       "/applications/editor",
       "/email",
       "/roles",
+      "/website",
       "/office",
       "/tracker",
       "/calendar",
@@ -572,6 +574,7 @@ function App() {
   );
   const page = new URL(route, location.origin).pathname;
   const [mailOpened, setMailOpened] = useState(page === "/email");
+  const [websiteOpened, setWebsiteOpened] = useState(page === "/website");
   const navigateDashboard = useCallback((target) => {
     const path = dashboardDestination(target, location.origin);
     if (!path) return;
@@ -579,11 +582,13 @@ function App() {
       history.pushState(null, "", path);
     setRoute(`${location.pathname}${location.search}`);
     if (location.pathname === "/email") setMailOpened(true);
+    if (location.pathname === "/website") setWebsiteOpened(true);
   }, []);
   useEffect(() => {
     const receive = () => {
       setRoute(`${location.pathname}${location.search}`);
       if (location.pathname === "/email") setMailOpened(true);
+      if (location.pathname === "/website") setWebsiteOpened(true);
     };
     window.addEventListener("popstate", receive);
     return () => window.removeEventListener("popstate", receive);
@@ -596,6 +601,7 @@ function App() {
   const accountsPage = page === "/accounts";
   const emailPage = page === "/email";
   const rolesPage = page === "/roles";
+  const websitePage = page === "/website";
   const applicationsPage =
     page === "/applications" || page.startsWith("/applications/");
   useEffect(() => {
@@ -729,7 +735,7 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || workspaceView ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || workspaceView ? "" : " active"}`}
             href="/"
             aria-current={
               settingsPage ||
@@ -737,6 +743,7 @@ function App() {
               applicationsPage ||
               emailPage ||
               rolesPage ||
+              websitePage ||
               workspaceView
                 ? undefined
                 : "page"
@@ -801,6 +808,15 @@ function App() {
               <span aria-hidden="true">⚙</span>Settings
             </a>
           )}
+          {user.website && (
+            <a
+              className={`nav-item${websitePage ? " active" : ""}`}
+              href="/website"
+              aria-current={websitePage ? "page" : undefined}
+            >
+              <span aria-hidden="true">▧</span>Website
+            </a>
+          )}
         </nav>
         <div className="account-bar">
           {user.avatar ? (
@@ -836,7 +852,9 @@ function App() {
                       ? "Email"
                       : rolesPage
                         ? "Roles"
-                        : "Overview"}
+                        : websitePage
+                          ? "Website"
+                          : "Overview"}
           </h1>
           <nav className="mobile-nav" aria-label="Mobile navigation">
             {(settingsPage ||
@@ -844,6 +862,7 @@ function App() {
               applicationsPage ||
               emailPage ||
               rolesPage ||
+              websitePage ||
               workspaceView) && <a href="/">Overview</a>}
             {user.todo &&
               dashboardTools
@@ -862,6 +881,7 @@ function App() {
             )}
             {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
             {user.mail && !emailPage && <a href="/email">Email</a>}
+            {user.website && !websitePage && <a href="/website">Website</a>}
           </nav>
           <DashboardClock format={preferences.format} timeZone={timeZone} />
           <button className="signout" onClick={logout} disabled={busy}>
@@ -878,7 +898,7 @@ function App() {
                   ? "dashboard dashboard-mail"
                   : rolesPage
                     ? "dashboard dashboard-roles"
-                    : settingsPage || accountsPage
+                    : settingsPage || accountsPage || websitePage
                       ? "dashboard"
                       : "dashboard dashboard-overview"
           }
@@ -904,10 +924,21 @@ function App() {
               <Mail csrf={state.csrf} capabilities={user.capabilities} />
             </div>
           )}
+          {user.website && websiteOpened && (
+            <div hidden={!websitePage}>
+              <WebsiteEditor csrf={state.csrf} />
+            </div>
+          )}
           {workspaceView ? (
             !user.todo && (
               <p className="notice">
                 Your roles do not have permission to open this workspace.
+              </p>
+            )
+          ) : websitePage ? (
+            !user.website && (
+              <p className="notice">
+                Website editing requires Admin, Manager or Founder rank.
               </p>
             )
           ) : rolesPage ? (

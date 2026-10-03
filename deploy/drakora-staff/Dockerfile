@@ -3,7 +3,7 @@ WORKDIR /app
 RUN npm install --global pnpm@11.19.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
-COPY index.html vite.config.js ./
+COPY index.html public.html vite.config.js ./
 COPY src ./src
 COPY shared ./shared
 RUN pnpm build && pnpm prune --prod

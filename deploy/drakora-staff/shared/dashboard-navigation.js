@@ -15,6 +15,7 @@ export function dashboardDestination(href, origin) {
       "/accounts",
       "/email",
       "/roles",
+      "/website",
       "/settings",
       "/applications",
       "/applications/editor",

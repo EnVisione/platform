@@ -6,6 +6,10 @@
   "discordBotToken": "REPLACE_BOT_TOKEN",
   "guildId": "REPLACE_GUILD_ID",
   "activityGuildIds": ["REPLACE_COMMUNITY_GUILD_ID"],
+  "website": {
+    "discordGuildId": "REPLACE_COMMUNITY_GUILD_ID",
+    "discordInvite": "https://discord.gg/REPLACE_INVITE"
+  },
   "overview": {
     "servers": [
       {

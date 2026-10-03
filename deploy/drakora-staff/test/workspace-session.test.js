@@ -55,6 +55,7 @@ test("dashboard history keeps supported pages local and leaves external and down
     "/settings",
     "/accounts",
     "/roles",
+    "/website",
     "/applications",
     "/applications/editor",
     "/applications/12345678-1234-1234-1234-123456789012?name=Staff",

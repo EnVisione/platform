@@ -29,6 +29,41 @@ export function validateConfig(config) {
     );
   const snowflake = (value) =>
     typeof value === "string" && /^\d{1,20}$/.test(value);
+  if (config.website !== undefined) {
+    if (
+      !config.website ||
+      typeof config.website !== "object" ||
+      Array.isArray(config.website) ||
+      !config.applications ||
+      !snowflake(config.website.discordGuildId) ||
+      typeof config.discordBotToken !== "string" ||
+      !config.discordBotToken
+    )
+      throw new Error(
+        "Configure public applications, a community Discord guild and bot for the website",
+      );
+    let invite;
+    try {
+      invite = new URL(config.website.discordInvite);
+    } catch {
+      throw new Error("Configure an HTTPS Discord invite for the website");
+    }
+    if (
+      invite.protocol !== "https:" ||
+      invite.username ||
+      invite.password ||
+      invite.port ||
+      invite.search ||
+      invite.hash ||
+      !(
+        (invite.hostname === "discord.gg" &&
+          /^\/[a-zA-Z0-9_-]+$/.test(invite.pathname)) ||
+        (invite.hostname === "discord.com" &&
+          /^\/invite\/[a-zA-Z0-9_-]+$/.test(invite.pathname))
+      )
+    )
+      throw new Error("Configure an HTTPS Discord invite for the website");
+  }
   if (config.overview !== undefined) {
     if (
       !config.overview ||
