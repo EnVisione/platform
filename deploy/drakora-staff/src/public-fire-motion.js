@@ -3,15 +3,45 @@ export function attachFireMotion(layer, environment = window) {
   const reducedMotion = environment.matchMedia(
     "(prefers-reduced-motion: reduce)",
   );
+  const smoke = Array.from(layer.querySelectorAll(".public-fire-smoke-rise"));
   let frame = 0;
   let x = 0;
   let y = 0;
+  let pointerX = 0;
+  let pointerY = 0;
+
+  function disperseSmoke() {
+    const pushes = smoke.map((cloud) => {
+      const bounds = cloud.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return [cloud, 0, 0, 0];
+      const dx = bounds.left + bounds.width / 2 - pointerX;
+      const dy = bounds.top + bounds.height / 2 - pointerY;
+      const distance = Math.hypot(dx, dy);
+      const strength = Math.max(0, 1 - distance / 260);
+      return [
+        cloud,
+        (distance ? dx / distance : 1) * strength * 84,
+        (distance ? dy / distance : 0) * strength * 84,
+        strength * 0.65,
+      ];
+    });
+    for (const [cloud, pushX, pushY, scatter] of pushes) {
+      cloud.style.setProperty("--smoke-push-x", `${pushX}px`);
+      cloud.style.setProperty("--smoke-push-y", `${pushY}px`);
+      cloud.style.setProperty("--smoke-scatter", String(scatter));
+    }
+  }
 
   function reset() {
     environment.cancelAnimationFrame(frame);
     frame = 0;
     layer.style.setProperty("--fire-x", "0px");
     layer.style.setProperty("--fire-y", "0px");
+    for (const cloud of smoke) {
+      cloud.style.setProperty("--smoke-push-x", "0px");
+      cloud.style.setProperty("--smoke-push-y", "0px");
+      cloud.style.setProperty("--smoke-scatter", "0");
+    }
   }
 
   function synchronize() {
@@ -29,18 +59,21 @@ export function attachFireMotion(layer, environment = window) {
       return;
     }
     x = Math.max(
-      -12,
-      Math.min(12, (event.clientX / environment.innerWidth - 0.5) * 24),
+      -18,
+      Math.min(18, (event.clientX / environment.innerWidth - 0.5) * 36),
     );
     y = Math.max(
-      -6,
-      Math.min(6, (event.clientY / environment.innerHeight - 0.5) * 12),
+      -9,
+      Math.min(9, (event.clientY / environment.innerHeight - 0.5) * 18),
     );
+    pointerX = event.clientX;
+    pointerY = event.clientY;
     if (frame) return;
     frame = environment.requestAnimationFrame(() => {
       frame = 0;
       layer.style.setProperty("--fire-x", `${x}px`);
       layer.style.setProperty("--fire-y", `${y}px`);
+      disperseSmoke();
     });
   }
 

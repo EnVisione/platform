@@ -11,6 +11,17 @@ function fixture(reduced = false) {
   const frames = new Map();
   const styles = new Map();
   const classes = new Set();
+  const smoke = [
+    { left: 100, top: 250, width: 180, height: 260 },
+    { left: 900, top: 450, width: 180, height: 260 },
+  ].map((bounds) => {
+    const values = new Map();
+    return {
+      values,
+      style: { setProperty: (name, value) => values.set(name, value) },
+      getBoundingClientRect: () => bounds,
+    };
+  });
   let nextFrame = 0;
   environment.document = document;
   environment.innerWidth = 1200;
@@ -22,6 +33,7 @@ function fixture(reduced = false) {
   };
   environment.cancelAnimationFrame = (id) => frames.delete(id);
   const layer = {
+    querySelectorAll: () => smoke,
     style: { setProperty: (name, value) => styles.set(name, value) },
     classList: {
       toggle(name, enabled) {
@@ -53,6 +65,7 @@ function fixture(reduced = false) {
     styles,
     classes,
     layer,
+    smoke,
     send,
     mouse,
     flush,
@@ -68,8 +81,8 @@ test("mouse input stays bounded and shares one pending frame", () => {
     f.mouse(2400, 1600);
     assert.equal(f.frames.size, 1);
     f.flush();
-    assert.equal(f.styles.get("--fire-x"), "12px");
-    assert.equal(f.styles.get("--fire-y"), "6px");
+    assert.equal(f.styles.get("--fire-x"), "18px");
+    assert.equal(f.styles.get("--fire-y"), "9px");
     f.send(f.environment, "pointermove", {
       pointerType: "touch",
       clientX: 0,
@@ -78,14 +91,49 @@ test("mouse input stays bounded and shares one pending frame", () => {
     assert.equal(f.frames.size, 0);
     f.mouse(-1200, -800);
     f.flush();
-    assert.equal(f.styles.get("--fire-x"), "-12px");
-    assert.equal(f.styles.get("--fire-y"), "-6px");
+    assert.equal(f.styles.get("--fire-x"), "-18px");
+    assert.equal(f.styles.get("--fire-y"), "-9px");
     f.send(f.environment, "pointerout", { relatedTarget: null });
     assert.equal(f.styles.get("--fire-x"), "0px");
   } finally {
     stop();
   }
   assert.equal(f.frames.size, 0);
+});
+
+test("nearby smoke parts away from the mouse while distant clouds remain still", () => {
+  const f = fixture();
+  const stop = attachFireMotion(f.layer, f.environment);
+  try {
+    f.mouse(190, 380);
+    f.flush();
+    const near = f.smoke[0].values;
+    const far = f.smoke[1].values;
+    assert.equal(near.get("--smoke-push-x"), "84px");
+    assert.equal(near.get("--smoke-scatter"), "0.65");
+    assert.equal(far.get("--smoke-push-x"), "0px");
+    assert.equal(far.get("--smoke-scatter"), "0");
+    f.mouse(190, 520);
+    f.flush();
+    assert.ok(parseFloat(near.get("--smoke-push-y")) < 0);
+    assert.ok(Math.abs(parseFloat(near.get("--smoke-push-y"))) <= 84);
+    f.send(f.environment, "pointermove", {
+      pointerType: "touch",
+      clientX: 190,
+      clientY: 380,
+    });
+    assert.equal(f.frames.size, 0);
+    f.mouse(600, 400);
+    f.flush();
+    assert.equal(near.get("--smoke-scatter"), "0");
+    f.mouse(190, 380);
+    f.flush();
+    f.send(f.environment, "pointerout", { relatedTarget: null });
+    assert.equal(near.get("--smoke-push-x"), "0px");
+    assert.equal(near.get("--smoke-scatter"), "0");
+  } finally {
+    stop();
+  }
 });
 
 test("reduced motion, hidden tabs and teardown stop pending movement", () => {
@@ -104,14 +152,22 @@ test("reduced motion, hidden tabs and teardown stop pending movement", () => {
     assert.equal(f.frames.size, 0);
     assert.equal(f.styles.get("--fire-x"), "0px");
     assert.ok(f.classes.has("is-paused"));
-    f.mouse(1200, 800);
+    assert.ok(
+      f.smoke.every((cloud) => cloud.values.get("--smoke-scatter") === "0"),
+    );
+    f.mouse(190, 380);
+    f.flush();
+    assert.equal(f.smoke[0].values.get("--smoke-scatter"), "0");
     assert.equal(f.frames.size, 0);
     f.document.hidden = false;
     f.send(f.document, "visibilitychange");
     assert.ok(!f.classes.has("is-paused"));
-    f.mouse(1200, 800);
+    f.mouse(190, 380);
+    f.flush();
+    assert.notEqual(f.smoke[0].values.get("--smoke-scatter"), "0");
     f.send(f.environment, "blur");
     assert.equal(f.frames.size, 0);
+    assert.equal(f.smoke[0].values.get("--smoke-scatter"), "0");
     f.mouse(1200, 800);
   } finally {
     stop();
@@ -125,4 +181,7 @@ test("reduced motion, hidden tabs and teardown stop pending movement", () => {
   assert.equal(f.frames.size, 0);
   assert.ok(!f.classes.has("is-paused"));
   assert.equal(f.styles.get("--fire-x"), "0px");
+  assert.ok(
+    f.smoke.every((cloud) => cloud.values.get("--smoke-push-x") === "0px"),
+  );
 });
