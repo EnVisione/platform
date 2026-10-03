@@ -92,32 +92,33 @@ export function discordTodoSync(
   }
 
   async function withThread(thread, action) {
-    const archived =
-      thread.thread_metadata?.archived ||
-      store.get("discord-todo-archive", thread.id);
-    let reopened = false;
+    let restore = store.get("discord-todo-archive", thread.id);
     const threadDiscord = async (path, options = {}) => {
       if (
-        archived &&
-        !reopened &&
         ["POST", "PATCH"].includes(options.method) &&
         (path === `/channels/${thread.id}` ||
           path.startsWith(`/channels/${thread.id}/messages`))
       ) {
-        store.set("discord-todo-archive", thread.id, true, expiry);
-        reopened = true;
-        await discord(`/channels/${thread.id}`, {
-          method: "PATCH",
-          body: { archived: false },
-        });
+        const current = await discord(`/channels/${thread.id}`);
+        if (current.thread_metadata?.archived) {
+          store.set("discord-todo-archive", thread.id, true, expiry);
+          restore = true;
+          await discord(`/channels/${thread.id}`, {
+            method: "PATCH",
+            body: { archived: false },
+          });
+        }
       }
       return discord(path, options);
     };
     try {
       return await action(threadDiscord);
     } finally {
-      if (archived) {
-        if (reopened || !thread.thread_metadata?.archived)
+      if (restore) {
+        const current = await discord(`/channels/${thread.id}`, {
+          missingCode: 10003,
+        });
+        if (current && !current.thread_metadata?.archived)
           await discord(`/channels/${thread.id}`, {
             method: "PATCH",
             body: { archived: true },

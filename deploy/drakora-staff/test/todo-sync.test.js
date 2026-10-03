@@ -161,6 +161,13 @@ function fixture(t, options = {}) {
       if (channelId && threads.has(channelId)) {
         if (path.includes("/messages")) {
           if (method === "POST") {
+            if (archived.has(channelId)) {
+              archived.delete(channelId);
+              threads.get(channelId).thread_metadata = {
+                ...threads.get(channelId).thread_metadata,
+                archived: false,
+              };
+            }
             const id = String(nextId++);
             result = {
               id,
@@ -739,6 +746,41 @@ test("an interrupted opening response still restores the archived post", async (
   await s.sync.sync();
   assert.deepEqual(s.thread.applied_tags, ["32"]);
   assert.equal(s.archived.has("100"), true);
+});
+
+test("a post archived after the initial listing is restored after a mirrored comment", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.nativeComment();
+  const findAll = s.client.findAll;
+  s.client.findAll = async function (...args) {
+    if (args[0] === commentClass) {
+      s.archived.add("100");
+      s.thread.thread_metadata = { archived: true, locked: true };
+    }
+    return findAll.apply(this, args);
+  };
+  await s.sync.sync();
+  assert.equal(s.messages.size, 2);
+  assert.equal(s.thread.thread_metadata.archived, true);
+  assert.equal(s.thread.thread_metadata.locked, true);
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
+});
+
+test("an already archived restoration checkpoint is cleared without another archived edit", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.archived.add("100");
+  s.thread.thread_metadata = { archived: true };
+  s.store.set("discord-todo-archive", "100", true);
+  const before = s.requests.length;
+  await s.sync.sync();
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
+  assert.equal(s.archived.has("100"), true);
+  assert.equal(
+    s.requests.slice(before).some((request) => request.method === "PATCH"),
+    false,
+  );
 });
 
 test("Discord rate limits delay event retries and periodic runs without another request", async (t) => {
