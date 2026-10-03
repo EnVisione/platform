@@ -48,21 +48,25 @@
   let issue: Issue | undefined
   let canEditDueDate = false
 
-  $: if (object?._class === time.class.ProjectToDo) {
-    issue = undefined
-    canEditDueDate = false
-    issueQuery.query(tracker.class.Issue, { _id: object.attachedTo as Ref<Issue> }, (result) => {
-      issue = result[0]
+  $: updateIssueQuery(object)
+
+  function updateIssueQuery(todo: ToDo | undefined): void {
+    if (todo?._class === time.class.ProjectToDo) {
+      issue = undefined
       canEditDueDate = false
-      const currentIssue = issue
-      void canEditIssue(currentIssue).then((result) => {
-        if (issue === currentIssue) canEditDueDate = result
+      issueQuery.query(tracker.class.Issue, { _id: todo.attachedTo as Ref<Issue> }, (result) => {
+        const currentIssue = result[0]
+        issue = currentIssue
+        canEditDueDate = false
+        void canEditIssue(currentIssue).then((result) => {
+          if (issue === currentIssue) canEditDueDate = result
+        })
       })
-    })
-  } else {
-    issueQuery.unsubscribe()
-    issue = undefined
-    canEditDueDate = true
+    } else {
+      issueQuery.unsubscribe()
+      issue = undefined
+      canEditDueDate = true
+    }
   }
   $: dueDate = object?._class === time.class.ProjectToDo ? issue?.dueDate : object?.dueDate
 
