@@ -76,12 +76,37 @@ button {
   top: 16px;
 }
 .public-header {
-  background: #252727;
-  border-bottom: 4px solid #373a31;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #171815;
+  padding-bottom: 36px;
+}
+.public-header::before,
+.public-header::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.public-header::before {
+  inset: -20px;
+  z-index: -2;
+  background: #252727 url("./assets/medieval-castle.svg") center 55% / cover
+    no-repeat;
+  filter: blur(12px);
+}
+.public-header::after {
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    to bottom,
+    rgba(12, 16, 13, 0.55),
+    rgba(12, 16, 13, 0.72) 60%,
+    #171815
+  );
 }
 .public-nav {
   padding: 14px 20px;
-  background: #151914;
 }
 .public-nav #public-links {
   display: flex;
@@ -97,7 +122,7 @@ button {
 }
 .public-nav a[aria-current="page"] {
   color: #fff;
-  background: #30372b;
+  background: rgba(48, 55, 43, 0.55);
 }
 .public-nav a.public-store-link {
   background: var(--red);
@@ -105,7 +130,7 @@ button {
 }
 .public-nav a:hover {
   color: #fff;
-  background: #343c36;
+  background: rgba(52, 60, 54, 0.65);
 }
 .public-nav a.public-store-link:hover {
   background: #c14b38;
@@ -120,12 +145,10 @@ button {
   align-items: center;
   gap: 40px;
   padding: 36px max(24px, calc((100% - 1120px) / 2));
-  min-height: 210px;
-  background: #252727 url("./assets/medieval-castle.svg") center 60% / auto
-    320px no-repeat;
+  min-height: 240px;
 }
 .home .public-masthead {
-  min-height: 250px;
+  min-height: 300px;
 }
 .public-brand {
   display: flex;
@@ -168,7 +191,6 @@ button {
 }
 .public-join,
 .public-discord {
-  background: #1b211b;
   padding: 18px 20px;
 }
 .public-join {
@@ -618,7 +640,6 @@ button {
     grid-template-columns: 1fr 1fr;
     gap: 28px 12px;
     min-height: auto;
-    background-size: auto 280px;
   }
   .public-brand {
     grid-column: 1 / -1;
