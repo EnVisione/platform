@@ -4,6 +4,7 @@
   import { getCurrentEmployee } from '@hcengineering/contact'
   import { getEmbeddedLabel } from '@hcengineering/platform'
   import { createQuery, IconWithEmoji } from '@hcengineering/presentation'
+  import task from '@hcengineering/task'
   import type { ToDo } from '@hcengineering/time'
   import tracker, { type Issue, type Project } from '@hcengineering/tracker'
   import view from '@hcengineering/view'
@@ -17,6 +18,7 @@
 
   const issuesQuery = createQuery()
   const todosQuery = createQuery()
+  const closedCategories = new Set([task.statusCategory.Won, task.statusCategory.Lost])
   let issues: WithLookup<Issue>[] = []
   let todos: ToDo[] = []
 
@@ -33,7 +35,7 @@
   })
 
   $: activeToDos = getActiveIssueToDos(todos)
-  $: groups = groupTrackerIssues(issues, filterValue)
+  $: groups = groupTrackerIssues(issues, filterValue, closedCategories)
 </script>
 
 <AccordionItem

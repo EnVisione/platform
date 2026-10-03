@@ -1,14 +1,17 @@
-import type { Ref, WithLookup } from '@hcengineering/core'
+import type { Ref, StatusCategory, WithLookup } from '@hcengineering/core'
 import type { ToDo } from '@hcengineering/time'
 import type { Issue, Project } from '@hcengineering/tracker'
 
 export function groupTrackerIssues(
   issues: WithLookup<Issue>[],
-  filterValue: string
+  filterValue: string,
+  closedCategories: ReadonlySet<Ref<StatusCategory>>
 ): [Ref<Project>, WithLookup<Issue>[]][] {
   const filter = filterValue.trim().toLowerCase()
   const groups = new Map<Ref<Project>, WithLookup<Issue>[]>()
   for (const issue of issues) {
+    const category = issue.$lookup?.status?.category as Ref<StatusCategory> | undefined
+    if (category !== undefined && closedCategories.has(category)) continue
     if (filter !== '' && !`${issue.identifier} ${issue.title}`.toLowerCase().includes(filter)) continue
     const group = groups.get(issue.space) ?? []
     group.push(issue)

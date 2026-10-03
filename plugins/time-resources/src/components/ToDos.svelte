@@ -50,7 +50,6 @@
 
   const user = getCurrentEmployee()
 
-  const doneQuery = createQuery()
   const inboxQuery = createQuery()
   const activeQuery = createQuery()
   const tagsQuery = createQuery()
@@ -88,11 +87,9 @@
 
   function update(mode: ToDosMode, currentDate: Date, ids: Ref<ToDo>[]): void {
     let activeQ: DocumentQuery<ToDo> | undefined = undefined
-    let doneQ: DocumentQuery<ToDo> | undefined = undefined
     let inboxQ: DocumentQuery<ToDo> | undefined = undefined
     if (mode === 'unplanned') {
       activeQ = undefined
-      doneQ = undefined
       inboxQ = {
         user,
         doneOn: null,
@@ -100,10 +97,6 @@
       }
     } else if (mode === 'planned') {
       inboxQ = undefined
-      doneQ = {
-        doneOn: { $gte: currentDate.setHours(0, 0, 0, 0), $lte: currentDate.setHours(23, 59, 59, 999) },
-        user
-      }
       activeQ = {
         user,
         doneOn: null,
@@ -115,10 +108,6 @@
         workslots: 0,
         user
       }
-      doneQ = {
-        doneOn: { $ne: null },
-        user
-      }
       activeQ = {
         user,
         doneOn: null,
@@ -128,11 +117,6 @@
       inboxQ = {
         doneOn: null,
         workslots: 0,
-        user,
-        _id: { $in: ids }
-      }
-      doneQ = {
-        doneOn: { $ne: null },
         user,
         _id: { $in: ids }
       }
@@ -177,32 +161,17 @@
       inboxQuery.unsubscribe()
       inbox = []
     }
-
-    if (doneQ !== undefined) {
-      doneQuery.query(
-        time.class.ToDo,
-        doneQ,
-        (res) => {
-          done = res
-        },
-        { limit: 200, sort: { doneOn: SortingOrder.Descending }, lookup: { _id: { workslots: time.class.WorkSlot } } }
-      )
-    } else {
-      doneQuery.unsubscribe()
-      done = []
-    }
   }
 
   $: update(mode, currentDate, ids)
 
   let inbox: WithLookup<ToDo>[] = []
-  let done: WithLookup<ToDo>[] = []
   let rawActive: WithLookup<ToDo>[] = []
   let todoValue: string = ''
 
   $: active = filterActive(mode, rawActive, currentDate)
 
-  $: groups = group(inbox, done, active, todoValue, mode)
+  $: groups = group(inbox, active, todoValue, mode)
 
   function filterActive(mode: ToDosMode, raw: WithLookup<ToDo>[], currentDate: Date): WithLookup<ToDo>[] {
     if (mode === 'planned') {
@@ -235,7 +204,6 @@
 
   function group(
     unplanned: WithLookup<ToDo>[],
-    done: WithLookup<ToDo>[],
     active: WithLookup<ToDo>[],
     filterValue: string,
     mode: ToDosMode
@@ -249,8 +217,7 @@
     const groups = new Map<IntlString, WithLookup<ToDo>[]>([
       [time.string.Scheduled, []],
       [time.string.Unplanned, unplanned.filter(filterOp)],
-      [time.string.ToDos, []],
-      [time.string.Done, done.filter(filterOp)]
+      [time.string.ToDos, []]
     ])
     const now = Date.now()
     const todos: {
