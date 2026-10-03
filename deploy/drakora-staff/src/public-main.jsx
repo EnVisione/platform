@@ -139,16 +139,19 @@ function HomePage({ home, discordInvite }) {
   return (
     <>
       <section className="public-welcome">
-        <div>
+        <div className="public-welcome-copy">
           <span className="public-eyebrow">
             YOUR NEXT ADVENTURE STARTS HERE
           </span>
           <h1>{home.title}</h1>
           <p>{home.introduction}</p>
+          <a href="/servers" className="public-button">
+            View servers <span aria-hidden="true">→</span>
+          </a>
         </div>
-        <a href="/servers" className="public-button">
-          View servers <span aria-hidden="true">→</span>
-        </a>
+        <div className="public-welcome-art" aria-hidden="true">
+          <img src={castle} alt="" />
+        </div>
       </section>
       <div className="public-home-grid">
         <section
