@@ -57,7 +57,7 @@ export function commentText(markup) {
 export async function trackerDocs(client, cls, query) {
   const docs = [];
   const seen = new Set();
-  for (let offset = 0; offset < 100000; ) {
+  for (let offset = 0; offset < 100000;) {
     const page = await client.findAll(cls, query, {
       limit: 1000,
       skip: offset,
@@ -89,6 +89,8 @@ export async function syncComments({
   botId,
   store,
   identities,
+  webhooks,
+  profile,
   textExclusions = [],
 }) {
   const messages = [];
@@ -129,6 +131,27 @@ export async function syncComments({
       missingCode: 10008,
     });
   const used = new Set();
+  const managedHooks = new Set(
+    store.entries("discord-todo-webhooks").map(([, hook]) => hook.id),
+  );
+  for (const pair of Object.values(state.pairs)) {
+    if (!pair.pending) continue;
+    const { part, webhookId, after } = pair.pending;
+    const sent = messages
+      .filter(
+        (message) =>
+          message.webhook_id === webhookId &&
+          BigInt(message.id) > BigInt(after),
+      )
+      .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))[0];
+    if (sent) {
+      pair.messageIds[part] = sent.id;
+      (pair.webhookIds ??= [])[part] = webhookId;
+      state.lastSentId = sent.id;
+    }
+    delete pair.pending;
+    save();
+  }
   for (const message of messages) {
     if (message.author?.id !== botId) continue;
     const match = /^Tracker comment (.+) part (\d+)$/.exec(
@@ -179,7 +202,8 @@ export async function syncComments({
   }
   for (const message of messages.toReversed()) {
     if (message.id === thread.id || used.has(message.id)) continue;
-    if (message.author?.id === botId) continue;
+    if (message.author?.id === botId || managedHooks.has(message.webhook_id))
+      continue;
     if (![0, 19].includes(message.type)) continue;
     const text = [
       message.content,
@@ -227,20 +251,37 @@ export async function syncComments({
       commentText(comment.message) || "(Empty comment)",
       textExclusions,
     );
-    const person = identities.bySocial.get(
+    let person = identities.bySocial.get(
       comment.createdBy ?? comment.modifiedBy,
     );
-    const author = discordText(
+    let author = discordText(
       person?.name ?? "Staff member",
       textExclusions,
       "Staff member",
     );
-    const fingerprint = hash(`${author}\n${text}`);
-    const chunks = Array.from(
-      { length: Math.ceil(text.length / 3800) },
-      (_, i) => text.slice(i * 3800, (i + 1) * 3800),
-    );
     const next = pair ?? { direction: "huly", messageIds: [] };
+    const legacy =
+      next.format === "bot" ||
+      next.messageIds.some(
+        (id) =>
+          byMessage.get(id)?.author?.id === botId &&
+          !byMessage.get(id)?.webhook_id,
+      );
+    next.format = legacy ? "bot" : "webhook";
+    const fingerprint = legacy ? hash(`${author}\n${text}`) : hash(text);
+    if (!legacy && next.hash !== fingerprint) {
+      person = await profile(person);
+      author = discordText(
+        person?.name ?? "Staff member",
+        textExclusions,
+        "Staff member",
+      );
+    }
+    const chunkSize = legacy ? 3800 : 2000;
+    const chunks = Array.from(
+      { length: Math.ceil(text.length / chunkSize) },
+      (_, i) => text.slice(i * chunkSize, (i + 1) * chunkSize),
+    );
     for (let i = 0; i < chunks.length; i++) {
       const footer = `${marker(comment._id)} part ${i + 1}`;
       let id =
@@ -250,35 +291,75 @@ export async function syncComments({
             message.author?.id === botId &&
             message.embeds?.[0]?.footer?.text === footer,
         )?.id;
-      const body = {
-        embeds: [
-          {
-            author: { name: `${author} · Tracker`.slice(0, 256) },
-            description: chunks[i],
-            color: 0x5865f2,
-            footer: { text: footer },
-            ...(comment.createdOn
-              ? { timestamp: new Date(comment.createdOn).toISOString() }
-              : {}),
-          },
-        ],
-        allowed_mentions: { parse: [] },
-      };
+      const body = legacy
+        ? {
+            embeds: [
+              {
+                author: { name: `${author} · Tracker`.slice(0, 256) },
+                description: chunks[i],
+                color: 0x5865f2,
+                footer: { text: footer },
+                ...(comment.createdOn
+                  ? { timestamp: new Date(comment.createdOn).toISOString() }
+                  : {}),
+              },
+            ],
+            allowed_mentions: { parse: [] },
+          }
+        : { content: chunks[i], embeds: [], allowed_mentions: { parse: [] } };
       if (!id) {
-        const posted = await discord(`/channels/${thread.id}/messages`, {
-          method: "POST",
-          body: {
-            ...body,
-            nonce: hash(`${comment._id}:${i}`).slice(0, 25),
-            enforce_nonce: true,
-          },
-        });
+        let posted;
+        if (legacy)
+          posted = await discord(`/channels/${thread.id}/messages`, {
+            method: "POST",
+            body: {
+              ...body,
+              nonce: hash(`${comment._id}:${i}`).slice(0, 25),
+              enforce_nonce: true,
+            },
+          });
+        else {
+          const hook = await webhooks.hook(thread.parent_id);
+          const after =
+            [state.lastSentId, ...messages.map((message) => message.id)]
+              .filter(Boolean)
+              .sort((a, b) => (BigInt(a) > BigInt(b) ? -1 : 1))[0] || "0";
+          next.pending = { part: i, webhookId: hook.id, after };
+          state.pairs[comment._id] = next;
+          save();
+          posted = await webhooks.request(
+            thread,
+            hook,
+            undefined,
+            {
+              ...body,
+              username: /discord|clyde/i.test(author)
+                ? "Staff member"
+                : Array.from(author).slice(0, 80).join(""),
+              ...(person?.avatar && author !== "Staff member"
+                ? { avatar_url: person.avatar }
+                : {}),
+            },
+            discord,
+          );
+          (next.webhookIds ??= [])[i] = hook.id;
+          state.lastSentId = posted.id;
+          delete next.pending;
+        }
         id = posted.id;
       } else if (next.hash !== fingerprint) {
-        await discord(`/channels/${thread.id}/messages/${id}`, {
-          method: "PATCH",
-          body,
-        });
+        if (legacy)
+          await discord(`/channels/${thread.id}/messages/${id}`, {
+            method: "PATCH",
+            body,
+          });
+        else {
+          const hook = await webhooks.hook(
+            thread.parent_id,
+            next.webhookIds?.[i] || byMessage.get(id)?.webhook_id,
+          );
+          await webhooks.request(thread, hook, id, body, discord);
+        }
       }
       next.messageIds[i] = id;
       state.pairs[comment._id] = next;

@@ -80,10 +80,12 @@ function fixture(t, options = {}) {
   const writes = [];
   const requests = [];
   const failures = new Map();
+  const webhooks = new Map();
   let nextId = 200;
   let closeCount = 0;
   let incomplete = false;
   let lostMessageResponse = false;
+  let lostWebhookResponse = false;
   let lostThreadResponse = false;
   let lostOpenResponse = false;
   let lostRenameResponse = false;
@@ -108,10 +110,16 @@ function fixture(t, options = {}) {
     todoForums: [{ channelId: "20", projectId: "dev" }],
   };
   const fetcher = async (url, options) => {
-    const { pathname: path } = new URL(url);
+    const { pathname: path, searchParams } = new URL(url);
     const method = options.method ?? "GET";
     const body = options.body ? JSON.parse(options.body) : undefined;
-    requests.push({ path, method, body });
+    requests.push({
+      path,
+      method,
+      body,
+      query: Object.fromEntries(searchParams),
+      authorization: options.headers.Authorization,
+    });
     const failure = failures.get(`${method} ${path}`);
     if (failure)
       return Response.json(
@@ -133,7 +141,63 @@ function fixture(t, options = {}) {
         has_more: incomplete,
       };
     else if (path === "/api/v10/users/@me") result = { id: "bot" };
-    else if (path === "/api/v10/channels/20") {
+    else if (/^\/api\/v10\/guilds\/1\/members\/10[12]$/.test(path)) {
+      const id = path.split("/").at(-1);
+      result = {
+        nick: id === "101" ? "EnVy" : "Hampe",
+        user: {
+          id,
+          username: id === "101" ? "EnVy" : "Hampe",
+          avatar: "a".repeat(32),
+        },
+      };
+    } else if (path === "/api/v10/channels/20/webhooks") {
+      if (method === "POST") {
+        result = {
+          id: String(nextId++),
+          type: 1,
+          channel_id: "20",
+          user: { id: "bot" },
+          token: "fixture",
+          name: body.name,
+        };
+        webhooks.set(result.id, result);
+        if (lostWebhookResponse) {
+          lostWebhookResponse = false;
+          throw new Error("Lost webhook response");
+        }
+      } else result = [...webhooks.values()];
+    } else if (path.startsWith("/api/v10/webhooks/")) {
+      const [, hookId, token, messageId] =
+        path.match(
+          /^\/api\/v10\/webhooks\/(\d+)(?:\/([^/]+)(?:\/messages\/(\d+))?)?$/,
+        ) ?? [];
+      const hook = webhooks.get(hookId);
+      if (!hook || (token && token !== hook.token))
+        return Response.json({ code: 10015 }, { status: 404 });
+      if (!token) result = hook;
+      else if (method === "POST") {
+        assert.equal(searchParams.get("wait"), "true");
+        const id = String(nextId++);
+        result = {
+          ...body,
+          id,
+          channel_id: searchParams.get("thread_id"),
+          type: 0,
+          webhook_id: hookId,
+          author: { id: hookId, username: body.username, bot: true },
+        };
+        messages.set(id, result);
+        if (lostMessageResponse) {
+          lostMessageResponse = false;
+          throw new Error("Lost message response");
+        }
+      } else if (method === "PATCH") {
+        result = messages.get(messageId);
+        if (!result) return Response.json({ code: 10008 }, { status: 404 });
+        Object.assign(result, body);
+      }
+    } else if (path === "/api/v10/channels/20") {
       if (method === "PATCH")
         forum.available_tags = body.available_tags.map((tag) => ({
           ...tag,
@@ -345,17 +409,19 @@ function fixture(t, options = {}) {
       closeCount++;
     },
   };
-  const sync = discordTodoSync(
-    config,
-    store,
-    { serviceToken: (account = "owner") => account },
-    {
-      fetcher,
-      openClient: async (_endpoint, _workspace, account) =>
-        Object.assign(Object.create(client), { account }),
-      ...options,
-    },
-  );
+  const start = () =>
+    discordTodoSync(
+      config,
+      store,
+      { serviceToken: (account = "owner") => account },
+      {
+        fetcher,
+        openClient: async (_endpoint, _workspace, account) =>
+          Object.assign(Object.create(client), { account }),
+        ...options,
+      },
+    );
+  const sync = start();
   t.after(() => sync.close());
   const nativeComment = (id = "native-comment", text = "Tracker reply") => {
     comments.push({
@@ -396,10 +462,18 @@ function fixture(t, options = {}) {
     writes,
     requests,
     failures,
+    webhooks,
+    restart: async () => {
+      await sync.close();
+      const restarted = start();
+      t.after(() => restarted.close());
+      return restarted;
+    },
     nativeComment,
     discordComment,
     setIncomplete: () => (incomplete = true),
     loseMessage: () => (lostMessageResponse = true),
+    loseWebhook: () => (lostWebhookResponse = true),
     loseThread: () => (lostThreadResponse = true),
     loseOpen: () => (lostOpenResponse = true),
     loseRename: () => (lostRenameResponse = true),
@@ -698,16 +772,22 @@ test("comments mirror both ways once with author attribution and native source e
   assert.equal(incoming.createdAccount, "envy-account");
   assert.equal(incoming.message, commentMarkup("Discord reply"));
   const outgoing = [...s.messages.values()].find(
-    (message) => message.author.id === "bot",
+    (message) => message.webhook_id,
   );
-  assert.match(outgoing.embeds[0].author.name, /EnVy/);
-  assert.equal(outgoing.embeds[0].description, "Tracker reply");
+  assert.equal(outgoing.author.username, "EnVy");
+  assert.equal(
+    outgoing.avatar_url,
+    `https://cdn.discordapp.com/avatars/101/${"a".repeat(32)}.png?size=256`,
+  );
+  assert.equal(outgoing.content, "Tracker reply");
+  assert.deepEqual(outgoing.embeds, []);
+  assert.deepEqual(outgoing.allowed_mentions, { parse: [] });
   s.messages.get("110").content = "Edited Discord reply";
   s.comments[0].message = commentMarkup("Edited Tracker reply");
   await s.sync.sync();
   assert.equal(incoming.message, commentMarkup("Edited Discord reply"));
   assert.equal(incoming.modifiedAccount, "envy-account");
-  assert.equal(outgoing.embeds[0].description, "Edited Tracker reply");
+  assert.equal(outgoing.content, "Edited Tracker reply");
   await s.sync.sync();
   assert.equal(s.comments.length, 2);
   assert.equal(s.messages.size, 3);
@@ -740,15 +820,26 @@ test("each linked Discord author uses their own native account and unknown autho
   );
 });
 
-test("lost Discord reply response recovers its marker after a restart without reposting", async (t) => {
+test("lost webhook reply response recovers its checkpoint after a restart without reposting", async (t) => {
   const s = fixture(t);
   await s.sync.sync();
   s.nativeComment();
   s.loseMessage();
   await assert.rejects(s.sync.sync(), /Lost message response/);
-  await s.sync.sync();
+  const restarted = await s.restart();
+  await restarted.sync();
   assert.equal(s.messages.size, 2);
   assert.equal(s.comments.length, 1);
+  assert.equal(
+    s.store.get("discord-todo-comments", "100").pairs["native-comment"].pending,
+    undefined,
+  );
+  assert.equal(
+    s.requests.filter(
+      (r) => r.method === "POST" && r.path.startsWith("/api/v10/webhooks/"),
+    ).length,
+    1,
+  );
 });
 
 test("comment deletion propagates from either copy and never resurrects", async (t) => {
@@ -758,7 +849,7 @@ test("comment deletion propagates from either copy and never resurrects", async 
   s.nativeComment();
   await s.sync.sync();
   const outgoing = [...s.messages.values()].find(
-    (message) => message.author.id === "bot",
+    (message) => message.webhook_id,
   );
   s.messages.delete(outgoing.id);
   s.comments.splice(
@@ -771,6 +862,153 @@ test("comment deletion propagates from either copy and never resurrects", async 
   await s.sync.sync();
   assert.equal(s.comments.length, 0);
   assert.equal(s.messages.size, 1);
+});
+
+test("identical consecutive replies remain distinct after an uncertain send and reuse the forum webhook", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.nativeComment("first", "Same reply");
+  s.nativeComment("second", "Same reply");
+  s.loseMessage();
+  await assert.rejects(s.sync.sync(), /Lost message response/);
+  await s.sync.sync();
+  const replies = [...s.messages.values()].filter((m) => m.webhook_id);
+  assert.equal(replies.length, 2);
+  assert.equal(replies[0].content, replies[1].content);
+  const state = s.store.get("discord-todo-comments", "100");
+  assert.notEqual(
+    state.pairs.first.messageIds[0],
+    state.pairs.second.messageIds[0],
+  );
+  assert.equal(
+    s.requests.filter(
+      (r) => r.path === "/api/v10/channels/20/webhooks" && r.method === "POST",
+    ).length,
+    1,
+  );
+  assert.equal(
+    s.requests.filter(
+      (r) => r.path === "/api/v10/channels/20/webhooks" && r.method === "GET",
+    ).length,
+    1,
+  );
+  assert.ok(
+    s.requests
+      .filter((r) => r.path.includes("/fixture"))
+      .every(
+        (r) => r.authorization === undefined && r.query.thread_id === "100",
+      ),
+  );
+  assert.equal(
+    s.requests.filter((r) => r.path === "/api/v10/guilds/1/members/101").length,
+    2,
+  );
+});
+
+test("historical bot replies keep their links through edits and deletion without being reposted", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.nativeComment();
+  s.messages.set("190", {
+    id: "190",
+    type: 0,
+    author: { id: "bot", bot: true },
+    embeds: [
+      {
+        author: { name: "EnVy · Tracker" },
+        description: "Tracker reply",
+        footer: { text: "Tracker comment native-comment part 1" },
+      },
+    ],
+  });
+  await s.sync.sync();
+  assert.equal(s.messages.size, 2);
+  assert.equal(s.webhooks.size, 0);
+  s.comments[0].message = commentMarkup("Edited historical reply");
+  await s.sync.sync();
+  assert.equal(
+    s.messages.get("190").embeds[0].description,
+    "Edited historical reply",
+  );
+  s.comments.length = 0;
+  await s.sync.sync();
+  assert.equal(s.messages.size, 1);
+});
+
+test("a removed forum webhook is recreated for new replies and rate records do not expose its token", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.nativeComment("first");
+  await s.sync.sync();
+  s.webhooks.clear();
+  s.nativeComment("second");
+  await assert.rejects(s.sync.sync(), /10015/);
+  assert.equal(s.store.entries("discord-todo-webhooks").length, 0);
+  await s.sync.sync();
+  assert.equal([...s.messages.values()].filter((m) => m.webhook_id).length, 2);
+  const hook = [...s.webhooks.values()][0];
+  const route = `/api/v10/webhooks/${hook.id}/${hook.token}`;
+  s.nativeComment("third");
+  s.failures.set(`POST ${route}`, { status: 429, retry_after: 10 });
+  await assert.rejects(s.sync.sync(), /HTTP 429/);
+  const waits = s.store.entries("discord-todo-rate");
+  assert.ok(waits.some(([key]) => key.endsWith("/:token")));
+  assert.ok(waits.every(([key]) => !key.includes(hook.token)));
+});
+
+test("lost webhook creation recovers only the bot owned hook without adopting another author's webhook", async (t) => {
+  const s = fixture(t);
+  s.webhooks.set("190", {
+    id: "190",
+    type: 1,
+    channel_id: "20",
+    user: { id: "someone-else" },
+    token: "other",
+    name: "Drakora Tracker",
+  });
+  await s.sync.sync();
+  s.nativeComment();
+  s.loseWebhook();
+  await assert.rejects(s.sync.sync(), /Lost webhook response/);
+  const restarted = await s.restart();
+  await restarted.sync();
+  const reply = [...s.messages.values()].find((m) => m.webhook_id);
+  assert.notEqual(reply.webhook_id, "190");
+  assert.equal(s.webhooks.size, 2);
+  assert.equal(
+    s.requests.filter(
+      (r) => r.method === "POST" && r.path === "/api/v10/channels/20/webhooks",
+    ).length,
+    1,
+  );
+});
+
+test("saved staff profiles and text exclusions apply to plain webhook replies", async (t) => {
+  const s = fixture(t);
+  s.store.set("user", "101", {
+    id: "101",
+    hulyAccount: "envy-account",
+    name: "Dashboard name",
+    avatar: "https://cdn.discordapp.com/avatars/101/saved.png",
+  });
+  await s.sync.sync();
+  s.nativeComment("first", "Hello @everyone");
+  await s.sync.sync();
+  const reply = [...s.messages.values()].find((m) => m.webhook_id);
+  assert.equal(reply.author.username, "Dashboard name");
+  assert.equal(
+    reply.avatar_url,
+    "https://cdn.discordapp.com/avatars/101/saved.png",
+  );
+  assert.deepEqual(reply.allowed_mentions, { parse: [] });
+  assert.ok(s.requests.every((r) => !r.path.includes("/members/")));
+  s.config.todoPublicTextExclusions = ["Dashboard name", "Private note"];
+  s.nativeComment("second", "Private note with details");
+  await s.sync.sync();
+  const neutral = [...s.messages.values()].filter((m) => m.webhook_id).at(-1);
+  assert.equal(neutral.author.username, "Staff member");
+  assert.equal(neutral.avatar_url, undefined);
+  assert.equal(neutral.content, "Staff update. Open Tracker for details.");
 });
 
 test("linked task deletion propagates both ways with durable tombstones", async (t) => {
@@ -1109,11 +1347,11 @@ test("long replies split and an interrupted copy is removed if its original was 
   await s.sync.sync();
   s.nativeComment("long", "x".repeat(8000));
   await s.sync.sync();
-  assert.equal(s.messages.size, 4);
+  assert.equal(s.messages.size, 5);
   assert.ok(
     [...s.messages.values()]
-      .filter((m) => m.embeds)
-      .every((m) => m.embeds[0].description.length <= 3800),
+      .filter((m) => m.webhook_id)
+      .every((m) => m.content.length <= 2000 && m.embeds.length === 0),
   );
   s.comments.length = 0;
   await s.sync.sync();

@@ -1,6 +1,8 @@
 import apiClient from "@hcengineering/api-client";
 import { discordText, syncComments, trackerDocs } from "./todo-comments.js";
 import { trackerEvents } from "./todo-events.js";
+import { trackerWebhooks } from "./todo-webhooks.js";
+import { discordAvatar } from "./avatar.js";
 
 const issueClass = "tracker:class:Issue";
 const projectClass = "tracker:class:Project";
@@ -61,6 +63,7 @@ export function discordTodoSync(
   );
   let closed = false;
   let botId;
+  let webhooks;
   const publicText = (value, fallback) =>
     discordText(value, config.todoPublicTextExclusions, fallback);
 
@@ -118,7 +121,10 @@ export function discordTodoSync(
   }
 
   async function discord(path, { method = "GET", body, missingCode } = {}) {
-    const route = `${method} ${path.split("?")[0].replace(/\/messages\/\d+$/, "/messages/:id")}`;
+    const route = `${method} ${path
+      .split("?")[0]
+      .replace(/(\/webhooks\/\d+)\/[^/]+/, "$1/:token")
+      .replace(/\/messages\/\d+$/, "/messages/:id")}`;
     if (
       Date.now() <
       Math.max(rateLimits.get("*") ?? 0, rateLimits.get(route) ?? 0)
@@ -129,7 +135,9 @@ export function discordTodoSync(
     const response = await fetcher(`https://discord.com/api/v10${path}`, {
       method,
       headers: {
-        Authorization: `Bot ${config.discordBotToken}`,
+        ...(!/^\/webhooks\/\d+\/[^/]+/.test(path)
+          ? { Authorization: `Bot ${config.discordBotToken}` }
+          : {}),
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -153,8 +161,11 @@ export function discordTodoSync(
     if (response.status === 404 && missingCode && data.code === missingCode)
       return undefined;
     if (!response.ok)
-      throw new Error(
-        `Discord to-do ${method} failed with HTTP ${response.status}${Number.isInteger(data.code) ? `, code ${data.code}` : ""}`,
+      throw Object.assign(
+        new Error(
+          `Discord to-do ${method} failed with HTTP ${response.status}${Number.isInteger(data.code) ? `, code ${data.code}` : ""}`,
+        ),
+        { code: data.code },
       );
     return data;
   }
@@ -165,7 +176,11 @@ export function discordTodoSync(
       if (
         ["POST", "PATCH"].includes(options.method) &&
         (path === `/channels/${thread.id}` ||
-          path.startsWith(`/channels/${thread.id}/messages`))
+          path.startsWith(`/channels/${thread.id}/messages`) ||
+          (path.startsWith("/webhooks/") &&
+            new URL(`https://discord.invalid${path}`).searchParams.get(
+              "thread_id",
+            ) === thread.id))
       ) {
         const current = await discord(`/channels/${thread.id}`);
         if (current.thread_metadata?.archived) {
@@ -264,6 +279,7 @@ export function discordTodoSync(
         name:
           user?.name ?? person.name.split(",").toReversed().join(" ").trim(),
         discordId: id,
+        avatar: user?.avatar,
         socialId: identity?._id,
         account: identity ? person.personUuid : undefined,
         names: [person.name, user?.name, user?.username].flatMap(aliases),
@@ -473,6 +489,7 @@ export function discordTodoSync(
   async function reconcile() {
     const { channels, threads } = await sourceThreads();
     botId ??= (await discord("/users/@me")).id;
+    webhooks ??= trackerWebhooks(store, discord, botId);
     const client = await openClient(
       "http://transactor:3333",
       config.hulyWorkspace,
@@ -480,6 +497,34 @@ export function discordTodoSync(
     );
     const failures = [];
     const authorClients = new Map();
+    const profiles = new Map();
+    const profile = async (person) => {
+      if (!person?.discordId || person.avatar) return person;
+      if (!profiles.has(person.discordId)) {
+        const member = await discord(
+          `/guilds/${config.guildId}/members/${person.discordId}`,
+          { missingCode: 10007 },
+        );
+        profiles.set(
+          person.discordId,
+          member?.user
+            ? {
+                ...person,
+                name:
+                  member.nick ||
+                  member.user.global_name ||
+                  member.user.username,
+                avatar: discordAvatar(
+                  member.user,
+                  config.guildId,
+                  member.avatar,
+                ),
+              }
+            : person,
+        );
+      }
+      return profiles.get(person.discordId);
+    };
     const authorClient = async (person) => {
       if (!person?.account || !person.socialId) return client;
       if (!authorClients.has(person.account)) {
@@ -728,6 +773,8 @@ export function discordTodoSync(
               botId,
               store,
               identities: people,
+              webhooks,
+              profile,
               textExclusions: config.todoPublicTextExclusions,
             });
           }),
@@ -819,6 +866,8 @@ export function discordTodoSync(
               botId,
               store,
               identities: people,
+              webhooks,
+              profile,
               textExclusions: config.todoPublicTextExclusions,
             });
           });
