@@ -24,6 +24,8 @@
   import WorkItemPresenter from './WorkItemPresenter.svelte'
   import ToDoCheckbox from './ToDoCheckbox.svelte'
   import ToDoPriorityPresenter from './ToDoPriorityPresenter.svelte'
+  import tracker, { type Issue } from '@hcengineering/tracker'
+  import type { Ref } from '@hcengineering/core'
 
   export let todo: WithLookup<ToDo>
   export let planned: boolean = true
@@ -32,7 +34,7 @@
   const client = getClient()
   let updating: Promise<any> | undefined = undefined
 
-  async function markDone (): Promise<void> {
+  async function markDone(): Promise<void> {
     await updating
     updating = client.update(todo, { doneOn: todo.doneOn == null ? Date.now() : null })
     await updating
@@ -41,6 +43,18 @@
 
   let events: WorkSlot[] = []
   const query = createQuery()
+  const issueQuery = createQuery()
+  let issue: Issue | undefined
+  $: if (todo._class === time.class.ProjectToDo) {
+    issue = undefined
+    issueQuery.query(tracker.class.Issue, { _id: todo.attachedTo as Ref<Issue> }, (result) => {
+      issue = result[0]
+    })
+  } else {
+    issueQuery.unsubscribe()
+    issue = undefined
+  }
+  $: dueDate = todo._class === time.class.ProjectToDo ? issue?.dueDate : todo.dueDate
   $: query.query(
     plugin.class.WorkSlot,
     {
@@ -53,14 +67,14 @@
   )
 
   let hovered = false
-  async function onMenuClick (ev: MouseEvent): Promise<void> {
+  async function onMenuClick(ev: MouseEvent): Promise<void> {
     hovered = true
     showMenu(ev, { object: todo }, () => {
       hovered = false
     })
   }
 
-  function open (e: MouseEvent): void {
+  function open(e: MouseEvent): void {
     showPanel(time.component.EditToDo, todo._id, todo._class, 'content')
   }
 
@@ -106,9 +120,9 @@
         <ToDoDuration {events} />
       </span>
     {/if}
-    {#if todo.dueDate}
+    {#if dueDate}
       <span class="font-regular-12 secondary-textColor">
-        {new Date(todo.dueDate).toLocaleDateString('default', { month: 'short', day: 'numeric' })}
+        {new Date(dueDate).toLocaleDateString('default', { month: 'short', day: 'numeric' })}
       </span>
     {/if}
   </div>

@@ -18,6 +18,7 @@
   import time from '../plugin'
 
   export let value: number | null | undefined
+  export let editable = true
 
   const dispatch = createEventDispatcher()
 
@@ -26,8 +27,8 @@
   $: buttonTitle = value ? new Date(value).toLocaleDateString() : undefined
   $: buttonLabel = buttonTitle === undefined ? ui.string.DueDate : undefined
 
-  function handleClick (e: MouseEvent) {
-    if (!opened) {
+  function handleClick(e: MouseEvent) {
+    if (editable && !opened) {
       opened = true
       showPopup(
         DatePopup,
@@ -59,5 +60,6 @@
   title={buttonTitle}
   label={buttonLabel}
   pressed={opened}
+  disabled={!editable}
   on:click={handleClick}
 />

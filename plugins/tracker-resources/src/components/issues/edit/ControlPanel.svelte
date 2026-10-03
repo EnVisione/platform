@@ -69,7 +69,7 @@
 
   let keys: KeyedAttribute[] = []
 
-  function updateKeys (_class: Ref<Class<Issue>>, ignoreKeys: string[]): void {
+  function updateKeys(_class: Ref<Class<Issue>>, ignoreKeys: string[]): void {
     const filtredKeys = getFiltredKeys(hierarchy, _class, ignoreKeys)
     keys = filtredKeys.filter((key) => !isCollectionAttr(hierarchy, key))
   }
@@ -84,7 +84,7 @@
 
   const allowedCollections = ['collaborators']
 
-  function getMixinKeys (mixin: Ref<Mixin<Doc>>): KeyedAttribute[] {
+  function getMixinKeys(mixin: Ref<Mixin<Doc>>): KeyedAttribute[] {
     const mixinClass = hierarchy.getClass(mixin)
     const filtredKeys = getFiltredKeys(
       hierarchy,
@@ -202,14 +202,12 @@
   </span>
   <MilestoneEditor value={issue} space={issue.space} size={'medium'} isEditable={!readonly} />
 
-  {#if issue.dueDate !== null}
-    <div class="divider" />
+  <div class="divider" />
 
-    <span class="labelOnPanel">
-      <Label label={tracker.string.DueDate} />
-    </span>
-    <DueDateEditor value={issue} width={'100%'} editable={!readonly} />
-  {/if}
+  <span class="labelOnPanel">
+    <Label label={tracker.string.DueDate} />
+  </span>
+  <DueDateEditor value={issue} width={'100%'} editable={!readonly} />
 
   {#if keys.length > 0}
     <div class="divider" />

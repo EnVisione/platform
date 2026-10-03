@@ -42,6 +42,7 @@
   import { getNearest } from '../utils'
   import CreateToDo from './CreateToDo.svelte'
   import ToDoGroup from './ToDoGroup.svelte'
+  import TrackerTasks from './TrackerTasks.svelte'
 
   export let mode: ToDosMode
   export let tag: Ref<TagElement> | undefined
@@ -64,11 +65,11 @@
 
   $: updateTags(mode, tag)
 
-  function togglePlannerNav (): void {
+  function togglePlannerNav(): void {
     $deviceInfo.navigator.visible = !$deviceInfo.navigator.visible
   }
 
-  function updateTags (mode: ToDosMode, tag: Ref<TagElement> | undefined): void {
+  function updateTags(mode: ToDosMode, tag: Ref<TagElement> | undefined): void {
     if (mode !== 'tag' || tag === undefined) {
       tagsQuery.unsubscribe()
       ids = []
@@ -85,7 +86,7 @@
     )
   }
 
-  function update (mode: ToDosMode, currentDate: Date, ids: Ref<ToDo>[]): void {
+  function update(mode: ToDosMode, currentDate: Date, ids: Ref<ToDo>[]): void {
     let activeQ: DocumentQuery<ToDo> | undefined = undefined
     let doneQ: DocumentQuery<ToDo> | undefined = undefined
     let inboxQ: DocumentQuery<ToDo> | undefined = undefined
@@ -201,9 +202,9 @@
 
   $: active = filterActive(mode, rawActive, currentDate)
 
-  $: groups = group(inbox, done, active, todoValue)
+  $: groups = group(inbox, done, active, todoValue, mode)
 
-  function filterActive (mode: ToDosMode, raw: WithLookup<ToDo>[], currentDate: Date): WithLookup<ToDo>[] {
+  function filterActive(mode: ToDosMode, raw: WithLookup<ToDo>[], currentDate: Date): WithLookup<ToDo>[] {
     if (mode === 'planned') {
       const today = areDatesEqual(new Date(), currentDate)
       const res: WithLookup<ToDo>[] = []
@@ -228,19 +229,22 @@
     }
   }
 
-  function getWorkslots (todo: WithLookup<ToDo>): WorkSlot[] {
+  function getWorkslots(todo: WithLookup<ToDo>): WorkSlot[] {
     return (todo.$lookup?.workslots ?? []) as WorkSlot[]
   }
 
-  function group (
+  function group(
     unplanned: WithLookup<ToDo>[],
     done: WithLookup<ToDo>[],
     active: WithLookup<ToDo>[],
-    filterValue: string
+    filterValue: string,
+    mode: ToDosMode
   ): [IntlString, WithLookup<ToDo>[]][] {
     const trimFilter = filterValue.trim().toLowerCase()
 
-    const filterOp = (it: WithLookup<ToDo>) => trimFilter === '' || it.title.toLowerCase().includes(trimFilter)
+    const filterOp = (it: WithLookup<ToDo>) =>
+      (mode !== 'all' || it.attachedToClass !== tracker.class.Issue) &&
+      (trimFilter === '' || it.title.toLowerCase().includes(trimFilter))
 
     const groups = new Map<IntlString, WithLookup<ToDo>[]>([
       [time.string.Scheduled, []],
@@ -296,9 +300,10 @@
   }
   $: filteredGroups = groups.filter(
     (gr) =>
+      (mode === 'all' && gr[1].length > 0) ||
       (mode === 'unplanned' && gr[0] === time.string.Unplanned) ||
       (mode === 'planned' && (gr[0] === time.string.ToDos || gr[0] === time.string.Scheduled)) ||
-      (mode !== 'unplanned' && mode !== 'planned')
+      (mode !== 'all' && mode !== 'unplanned' && mode !== 'planned')
   )
 </script>
 
@@ -329,6 +334,9 @@
   </Header>
   <CreateToDo fullSize bind:value={todoValue} />
   <Scroller fade={filteredGroups.length > 1 ? todosSP : defaultSP} noStretch>
+    {#if mode === 'all'}
+      <TrackerTasks {projects} filterValue={todoValue} />
+    {/if}
     {#each filteredGroups as group}
       <ToDoGroup
         todos={group[1]}

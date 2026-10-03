@@ -48,7 +48,7 @@
 {#if value}
   <DueDatePresenter
     kind={'link'}
-    value={value.dueDate}
+    value={value.dueDate ?? null}
     {width}
     {editable}
     onChange={(e) => handleDueDateChanged(e)}

@@ -28,6 +28,8 @@
   import PriorityEditor from './PriorityEditor.svelte'
   import TodoWorkslots from './TodoWorkslots.svelte'
   import { VisibilityEditor } from '@hcengineering/calendar-resources'
+  import tracker, { type Issue } from '@hcengineering/tracker'
+  import { canEditIssue } from '@hcengineering/tracker-resources/src/utils'
 
   // export let object: ToDo
   export let _id: Ref<ToDo>
@@ -42,6 +44,27 @@
   const dispatch = createEventDispatcher()
   const queryClient = createQuery()
   const client = getClient()
+  const issueQuery = createQuery()
+  let issue: Issue | undefined
+  let canEditDueDate = false
+
+  $: if (object?._class === time.class.ProjectToDo) {
+    issue = undefined
+    canEditDueDate = false
+    issueQuery.query(tracker.class.Issue, { _id: object.attachedTo as Ref<Issue> }, (result) => {
+      issue = result[0]
+      canEditDueDate = false
+      const currentIssue = issue
+      void canEditIssue(currentIssue).then((result) => {
+        if (issue === currentIssue) canEditDueDate = result
+      })
+    })
+  } else {
+    issueQuery.unsubscribe()
+    issue = undefined
+    canEditDueDate = true
+  }
+  $: dueDate = object?._class === time.class.ProjectToDo ? issue?.dueDate : object?.dueDate
 
   $: _id !== undefined &&
     _class !== undefined &&
@@ -53,44 +76,57 @@
       }
     })
 
-  export function canClose (): boolean {
+  export function canClose(): boolean {
     return true
   }
 
-  async function updateName () {
+  async function updateName() {
     if (object.title !== title) {
       await client.update(object, { title })
     }
   }
 
-  async function updateDescription () {
+  async function updateDescription() {
     if (object.description !== description) {
       await client.update(object, { description })
     }
   }
 
-  async function markDone () {
+  async function markDone() {
     object.doneOn = object.doneOn == null ? Date.now() : null
     await client.update(object, { doneOn: object.doneOn })
   }
 
-  async function dueDateChange (value: Date | null) {
+  async function dueDateChange(value: Date | null) {
+    if (!canEditDueDate) return
     const dueDate = value != null ? value.getTime() : null
-    await client.update(object, { dueDate })
-    object.dueDate = dueDate
+    if (object._class === time.class.ProjectToDo) {
+      if (issue === undefined) return
+      await client.updateCollection(
+        issue._class,
+        issue.space,
+        issue._id,
+        issue.attachedTo,
+        issue.attachedToClass,
+        issue.collection,
+        { dueDate }
+      )
+    } else {
+      await client.update(object, { dueDate })
+    }
   }
 
-  async function priorityChange (priority: ToDoPriority) {
+  async function priorityChange(priority: ToDoPriority) {
     await client.update(object, { priority })
     object.priority = priority
   }
 
-  async function visibilityChange (visibility: Visibility) {
+  async function visibilityChange(visibility: Visibility) {
     await client.update(object, { visibility })
     object.visibility = visibility
   }
 
-  async function spaceChange (space: Space | null) {
+  async function spaceChange(space: Space | null) {
     const oldSpace = object.attachedSpace ?? undefined
     const newSpace = space?._id ?? undefined
     if (newSpace !== oldSpace) {
@@ -184,7 +220,7 @@
           <Label label={time.string.WorkSchedule} />
         </span>
         <div class="flex-row-center gap-2">
-          <DueDateEditor value={object.dueDate} on:change={(e) => dueDateChange(e.detail)} />
+          <DueDateEditor value={dueDate} editable={canEditDueDate} on:change={(e) => dueDateChange(e.detail)} />
         </div>
       </div>
       <TodoWorkslots todo={object} />
