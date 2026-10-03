@@ -50,14 +50,23 @@ export function discordTodoSync(
   let active;
   let watcher;
   let pending = false;
-  let discordRetryAt = 0;
+  let rateTimer;
+  const rateLimits = new Map(
+    store
+      .entries("discord-todo-rate")
+      .map(([key, record]) => [key, record.until]),
+  );
   let closed = false;
   let botId;
   const publicText = (value, fallback) =>
     discordText(value, config.todoPublicTextExclusions, fallback);
 
   async function discord(path, { method = "GET", body, missingCode } = {}) {
-    if (Date.now() < discordRetryAt)
+    const route = `${method} ${path.split("?")[0].replace(/\/messages\/\d+$/, "/messages/:id")}`;
+    if (
+      Date.now() <
+      Math.max(rateLimits.get("*") ?? 0, rateLimits.get(route) ?? 0)
+    )
       throw new Error(
         "Discord to-do synchronization is waiting for its rate limit",
       );
@@ -75,12 +84,15 @@ export function discordTodoSync(
     if (response.status === 429) {
       const seconds = Number(data.retry_after);
       const delay = seconds * 1000;
-      discordRetryAt =
+      const until =
         Date.now() +
         (Number.isFinite(delay) && delay > 0 && delay <= 2147483647
           ? delay
           : 30000);
-      pending = true;
+      const key = data.global === true ? "*" : route;
+      rateLimits.set(key, until);
+      store.set("discord-todo-rate", key, { until }, until);
+      scheduleRateRetry();
     }
     if (response.status === 404 && missingCode && data.code === missingCode)
       return undefined;
@@ -594,17 +606,18 @@ export function discordTodoSync(
               next,
               people,
             );
+            const threadUpdate = {};
+            const title = publicText(next.title).slice(0, 100);
+            if (title !== thread.name) threadUpdate.name = title;
             if (
-              publicText(next.title).slice(0, 100) !== thread.name ||
               JSON.stringify(tags.toSorted()) !==
-                JSON.stringify((thread.applied_tags ?? []).toSorted())
-            ) {
+              JSON.stringify((thread.applied_tags ?? []).toSorted())
+            )
+              threadUpdate.applied_tags = tags;
+            if (Object.keys(threadUpdate).length) {
               const changed = await threadDiscord(`/channels/${thread.id}`, {
                 method: "PATCH",
-                body: {
-                  name: publicText(next.title).slice(0, 100),
-                  applied_tags: tags,
-                },
+                body: threadUpdate,
               });
               thread = { ...thread, ...changed };
             }
@@ -734,8 +747,8 @@ export function discordTodoSync(
 
   function sync() {
     if (closed) return Promise.resolve();
-    if (!active && Date.now() < discordRetryAt) {
-      changed();
+    if (!active && Date.now() < (rateLimits.get("*") ?? 0)) {
+      scheduleRateRetry();
       return Promise.resolve();
     }
     if (!active) {
@@ -751,17 +764,33 @@ export function discordTodoSync(
     void sync().catch((error) =>
       console.error("Discord to-do synchronization failed:", error.message),
     );
+  function scheduleRateRetry() {
+    clearTimeout(rateTimer);
+    for (const [key, until] of rateLimits)
+      if (until <= Date.now()) rateLimits.delete(key);
+    const waits = [...rateLimits.values()].filter(
+      (until) => until > Date.now(),
+    );
+    if (!closed && waits.length) {
+      rateTimer = setTimeout(
+        () => {
+          rateTimer = undefined;
+          scheduleRateRetry();
+          changed();
+        },
+        Math.min(...waits) - Date.now(),
+      );
+      rateTimer.unref();
+    }
+  }
   function changed() {
     if (closed) return;
     pending = true;
     if (active || wakeTimer) return;
-    wakeTimer = setTimeout(
-      () => {
-        wakeTimer = undefined;
-        run();
-      },
-      Math.max(750, discordRetryAt - Date.now()),
-    );
+    wakeTimer = setTimeout(() => {
+      wakeTimer = undefined;
+      run();
+    }, 750);
     wakeTimer.unref();
   }
   function start() {
@@ -770,11 +799,13 @@ export function discordTodoSync(
     run();
     timer = setInterval(run, 30000);
     timer.unref();
+    scheduleRateRetry();
   }
   async function close() {
     closed = true;
     clearInterval(timer);
     clearTimeout(wakeTimer);
+    clearTimeout(rateTimer);
     await watcher?.close();
     await active?.catch(() => {});
   }

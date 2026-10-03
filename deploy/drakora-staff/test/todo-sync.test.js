@@ -112,7 +112,11 @@ function fixture(t, options = {}) {
     const failure = failures.get(`${method} ${path}`);
     if (failure)
       return Response.json(
-        { code: failure.code, retry_after: failure.retry_after },
+        {
+          code: failure.code,
+          retry_after: failure.retry_after,
+          global: failure.global,
+        },
         { status: failure.status },
       );
     let result;
@@ -790,6 +794,7 @@ test("Discord rate limits delay event retries and periodic runs without another 
   s.failures.set("GET /api/v10/guilds/1/threads/active", {
     status: 429,
     retry_after: 45,
+    global: true,
   });
   await assert.rejects(s.sync.sync(), /HTTP 429/);
   const count = s.requests.length;
@@ -802,8 +807,47 @@ test("Discord rate limits delay event retries and periodic runs without another 
   t.mock.timers.tick(14999);
   assert.deepEqual(s.thread.applied_tags, []);
   t.mock.timers.tick(1);
+  t.mock.timers.tick(750);
   await new Promise(setImmediate);
   assert.deepEqual(s.thread.applied_tags, ["32"]);
+});
+
+test("tag updates do not resend titles and one throttled post does not block another", async (t) => {
+  const s = fixture(t);
+  s.threads.set("101", {
+    id: "101",
+    parent_id: "20",
+    name: "Second task",
+    applied_tags: [],
+  });
+  await s.sync.sync();
+  const second = s.issues.find((issue) => issue._id.endsWith(":101"));
+  s.issues[0].assignee = "envy";
+  second.assignee = "hampe";
+  s.failures.set("PATCH /api/v10/channels/100", {
+    status: 429,
+    retry_after: 60,
+  });
+  await assert.rejects(s.sync.sync(), /HTTP 429/);
+  assert.deepEqual(s.threads.get("101").applied_tags, ["33"]);
+  const updates = s.requests.filter(
+    (request) => request.method === "PATCH" && request.body.applied_tags,
+  );
+  assert.ok(updates.length >= 2);
+  assert.ok(updates.every((request) => !Object.hasOwn(request.body, "name")));
+  assert.ok(
+    s.store.get("discord-todo-rate", "PATCH /channels/100").until > Date.now(),
+  );
+  const count = s.requests.filter(
+    (request) => request.method === "PATCH" && request.path.endsWith("/100"),
+  ).length;
+  await assert.rejects(s.sync.sync(), /waiting for its rate limit/);
+  assert.equal(
+    s.requests.filter(
+      (request) => request.method === "PATCH" && request.path.endsWith("/100"),
+    ).length,
+    count,
+  );
 });
 
 test("ambiguous assignee tags hold the task and long Tracker titles do not trigger loops", async (t) => {
