@@ -11,6 +11,9 @@ importers:
       '@hcengineering/api-client':
         specifier: 0.7.423
         version: 0.7.423(prosemirror-inputrules@1.5.1)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)
+      '@hcengineering/client-resources':
+        specifier: 0.7.423
+        version: 0.7.423
       discord.js:
         specifier: 14.27.0
         version: 14.27.0

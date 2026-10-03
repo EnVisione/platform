@@ -21,7 +21,7 @@ const statuses = [
   ["Impossible / Void", "void"],
 ].map(([name, _id]) => ({ name, _id }));
 
-function fixture(t) {
+function fixture(t, options = {}) {
   const thread = {
     id: "100",
     parent_id: "20",
@@ -83,10 +83,12 @@ function fixture(t) {
   let incomplete = false;
   let lostMessageResponse = false;
   let lostThreadResponse = false;
+  let lostOpenResponse = false;
   const store = {
     get: (kind, id) => structuredClone(records.get(`${kind}:${id}`)),
     set: (kind, id, value) =>
       records.set(`${kind}:${id}`, structuredClone(value)),
+    delete: (kind, id) => records.delete(`${kind}:${id}`),
     entries: (kind) =>
       [...records]
         .filter(([key]) => key.startsWith(`${kind}:`))
@@ -109,7 +111,10 @@ function fixture(t) {
     requests.push({ path, method, body });
     const failure = failures.get(`${method} ${path}`);
     if (failure)
-      return Response.json({ code: failure.code }, { status: failure.status });
+      return Response.json(
+        { code: failure.code, retry_after: failure.retry_after },
+        { status: failure.status },
+      );
     let result;
     if (path.endsWith("/threads/active"))
       result = {
@@ -190,7 +195,24 @@ function fixture(t) {
               messages.delete(id);
           result = { id: channelId };
         } else {
-          if (method === "PATCH") Object.assign(threads.get(channelId), body);
+          if (method === "PATCH") {
+            const item = threads.get(channelId);
+            if (archived.has(channelId) && body.archived !== false)
+              return Response.json({ code: 50083 }, { status: 400 });
+            if (body.archived !== undefined) {
+              if (body.archived) archived.add(channelId);
+              else archived.delete(channelId);
+              item.thread_metadata = {
+                ...item.thread_metadata,
+                archived: body.archived,
+              };
+            }
+            Object.assign(item, body);
+            if (body.archived === false && lostOpenResponse) {
+              lostOpenResponse = false;
+              throw new Error("Lost opening response");
+            }
+          }
           result = threads.get(channelId);
         }
       }
@@ -309,6 +331,7 @@ function fixture(t) {
       fetcher,
       openClient: async (_endpoint, _workspace, account) =>
         Object.assign(Object.create(client), { account }),
+      ...options,
     },
   );
   t.after(() => sync.close());
@@ -333,6 +356,7 @@ function fixture(t) {
     });
   return {
     sync,
+    client,
     thread,
     threads,
     archived,
@@ -351,6 +375,7 @@ function fixture(t) {
     setIncomplete: () => (incomplete = true),
     loseMessage: () => (lostMessageResponse = true),
     loseThread: () => (lostThreadResponse = true),
+    loseOpen: () => (lostOpenResponse = true),
     closed: () => closeCount,
   };
 }
@@ -595,6 +620,148 @@ test("concurrent runs share one reconciliation and client closes on failure", as
   s.failures.set("GET /api/v10/channels/100/messages", { status: 500 });
   await assert.rejects(s.sync.sync(), /HTTP 500/);
   assert.equal(s.closed(), 2);
+});
+
+test("Tracker events coalesce into a fast sync and a change during an active run gets a trailing pass", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  let notify;
+  let stopped = 0;
+  const s = fixture(t, {
+    watchTracker: (_config, _huly, changed) => {
+      notify = changed;
+      return { close: async () => stopped++ };
+    },
+  });
+  s.sync.start();
+  s.sync.start();
+  await s.sync.sync();
+  assert.equal(s.closed(), 1);
+  s.issues[0].assignee = "envy";
+  notify();
+  notify();
+  t.mock.timers.tick(749);
+  assert.deepEqual(s.thread.applied_tags, []);
+  t.mock.timers.tick(1);
+  await new Promise(setImmediate);
+  assert.deepEqual(s.thread.applied_tags, ["32"]);
+  assert.equal(s.closed(), 2);
+
+  let release;
+  let seen;
+  const gate = new Promise((resolve) => (release = resolve));
+  const reading = new Promise((resolve) => (seen = resolve));
+  const original = s.client.findOne;
+  let hold = true;
+  s.client.findOne = async function (...args) {
+    const result = await original.apply(this, args);
+    if (hold && args[0] === issueClass) {
+      hold = false;
+      seen();
+      await gate;
+    }
+    return result;
+  };
+  const active = s.sync.sync();
+  await reading;
+  s.issues[0].assignee = "hampe";
+  notify();
+  t.mock.timers.tick(2000);
+  release();
+  await active;
+  assert.equal(s.closed(), 3);
+  t.mock.timers.tick(750);
+  await new Promise(setImmediate);
+  assert.deepEqual(s.thread.applied_tags, ["33"]);
+  assert.equal(s.closed(), 4);
+  await s.sync.close();
+  notify();
+  t.mock.timers.tick(30000);
+  assert.equal(s.closed(), 4);
+  assert.equal(stopped, 1);
+});
+
+test("archived posts update assignments and comments while retaining archival and lock state", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.archived.add("100");
+  s.thread.thread_metadata = { archived: true, locked: true };
+  s.issues[0].assignee = "envy";
+  s.nativeComment();
+  await s.sync.sync();
+  assert.deepEqual(s.thread.applied_tags, ["32"]);
+  assert.equal(s.thread.thread_metadata.archived, true);
+  assert.equal(s.thread.thread_metadata.locked, true);
+  assert.equal(s.archived.has("100"), true);
+  assert.equal(s.messages.size, 2);
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
+  const updates = s.requests.filter(
+    (request) => request.method === "PATCH" && request.path.endsWith("/100"),
+  );
+  assert.deepEqual(
+    updates.map((request) => request.body.archived),
+    [false, undefined, true],
+  );
+});
+
+test("failed rearchival remains durable and retries even without another content change", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.archived.add("100");
+  s.thread.thread_metadata = { archived: true };
+  s.issues[0].assignee = "envy";
+  const findAll = s.client.findAll;
+  s.client.findAll = async function (...args) {
+    if (args[0] === commentClass)
+      s.failures.set("PATCH /api/v10/channels/100", { status: 500 });
+    return findAll.apply(this, args);
+  };
+  await assert.rejects(s.sync.sync(), /HTTP 500/);
+  assert.equal(s.store.get("discord-todo-archive", "100"), true);
+  assert.equal(s.archived.has("100"), false);
+  s.client.findAll = findAll;
+  s.failures.clear();
+  await s.sync.sync();
+  assert.equal(s.archived.has("100"), true);
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
+  assert.equal(s.issues.length, 1);
+});
+
+test("an interrupted opening response still restores the archived post", async (t) => {
+  const s = fixture(t);
+  await s.sync.sync();
+  s.archived.add("100");
+  s.thread.thread_metadata = { archived: true };
+  s.issues[0].assignee = "envy";
+  s.loseOpen();
+  await assert.rejects(s.sync.sync(), /Lost opening response/);
+  assert.equal(s.archived.has("100"), true);
+  assert.equal(s.store.get("discord-todo-archive", "100"), undefined);
+  await s.sync.sync();
+  assert.deepEqual(s.thread.applied_tags, ["32"]);
+  assert.equal(s.archived.has("100"), true);
+});
+
+test("Discord rate limits delay event retries and periodic runs without another request", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const s = fixture(t, { watchTracker: () => ({ close: async () => {} }) });
+  await s.sync.sync();
+  s.failures.set("GET /api/v10/guilds/1/threads/active", {
+    status: 429,
+    retry_after: 45,
+  });
+  await assert.rejects(s.sync.sync(), /HTTP 429/);
+  const count = s.requests.length;
+  s.failures.clear();
+  s.issues[0].assignee = "envy";
+  s.sync.changed();
+  t.mock.timers.tick(30000);
+  await s.sync.sync();
+  assert.equal(s.requests.length, count);
+  t.mock.timers.tick(14999);
+  assert.deepEqual(s.thread.applied_tags, []);
+  t.mock.timers.tick(1);
+  await new Promise(setImmediate);
+  assert.deepEqual(s.thread.applied_tags, ["32"]);
 });
 
 test("ambiguous assignee tags hold the task and long Tracker titles do not trigger loops", async (t) => {
