@@ -47,6 +47,7 @@ import { websiteService, websiteAccess, communityStatus } from "./website.js";
 import { publicWebsiteRouter, websiteEditorRouter } from "./website-routes.js";
 import { ticketService } from "./tickets.js";
 import { ticketDiscord } from "./ticket-discord.js";
+import { ticketMail } from "./ticket-mail.js";
 import { ticketRouter } from "./ticket-routes.js";
 
 const config = validateConfig(
@@ -90,6 +91,7 @@ const ticketDatabase = config.tickets
 const tickets = ticketDatabase
   ? ticketService(config, ticketDatabase.store, rolePolicy)
   : undefined;
+const ticketEmails = tickets ? ticketMail(config, tickets) : undefined;
 const discord = discordClient(
   config,
   store,
@@ -1535,12 +1537,14 @@ server.listen(3000, "0.0.0.0", () =>
 todoSync?.start();
 applications?.start();
 tickets?.start();
+ticketEmails?.start();
 async function stop() {
   clearInterval(sweep);
   clearInterval(assignmentTimer);
   await assignments?.close();
   await todoSync?.close();
   await applications?.close();
+  await ticketEmails?.close();
   await tickets?.stop();
   await ticketTransport?.close();
   await office?.close();

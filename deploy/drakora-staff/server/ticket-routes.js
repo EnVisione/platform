@@ -1,6 +1,11 @@
 import express from "express";
 import { rateLimit } from "express-rate-limit";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  randomBytes,
+  randomUUID,
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
 import { AuthError } from "./discord.js";
 import { ticketTranscript } from "./ticket-transcript.js";
 import {
@@ -54,11 +59,23 @@ export function ticketRouter(
 ) {
   const router = express.Router();
   const prefix = staffView ? "/api/tickets" : "/help/api/tickets";
+  const identities = (session) => [
+    ...(session.ticketUntil > Date.now() && session.ticketIdentity
+      ? [session.ticketIdentity]
+      : []),
+    ...(session.ticketGuestUntil > Date.now() && session.ticketGuestIdentity
+      ? [session.ticketGuestIdentity]
+      : []),
+  ];
   const identity = async (req) => {
     if (staffView) return authorize(req);
-    if (!req.session.ticketIdentity || req.session.ticketUntil <= Date.now())
-      throw new AuthError("ticket_identity_required", 401);
-    return req.session.ticketIdentity;
+    const users = identities(req.session);
+    const user = req.params.id
+      ? users.find((user) => service.get(req.params.id).owner.id === user.id)
+      : users[0];
+    if (!users.length) throw new AuthError("ticket_identity_required", 401);
+    if (!user) throw new AuthError("ticket_not_found", 404);
+    return user;
   };
   const checkMutation = staffView
     ? mutation
@@ -84,10 +101,7 @@ export function ticketRouter(
       await save(req);
       res.json({
         csrf: req.session.csrf,
-        identity:
-          req.session.ticketUntil > Date.now()
-            ? req.session.ticketIdentity
-            : null,
+        identity: identities(req.session)[0] || null,
         types: ticketTypes,
         minecraftEnabled: false,
       });
@@ -113,28 +127,59 @@ export function ticketRouter(
     );
     router.get("/help/auth/consume", async (req, res) => {
       const handoff = service.consume(req.query.handoff, req.sessionID);
+      const guest = req.session.ticketGuestIdentity;
+      const guestUntil = req.session.ticketGuestUntil;
       await new Promise((resolve, reject) =>
         req.session.regenerate((error) => (error ? reject(error) : resolve())),
       );
       req.session.ticketIdentity = handoff.identity;
+      req.session.ticketGuestIdentity = guest;
+      req.session.ticketGuestUntil = guestUntil;
       req.session.ticketUntil = Date.now() + 7 * 86400000;
       req.session.csrf = randomBytes(32).toString("base64url");
       await save(req);
       res.redirect(handoff.returnPath);
     });
     router.post(
+      "/help/api/email-access",
+      rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+      express.json({ limit: "2kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        const access = service.consumeEmailAccess(req.body.key);
+        const discordIdentity = req.session.ticketIdentity;
+        const discordUntil = req.session.ticketUntil;
+        await new Promise((resolve, reject) =>
+          req.session.regenerate((error) =>
+            error ? reject(error) : resolve(),
+          ),
+        );
+        req.session.ticketIdentity = discordIdentity;
+        req.session.ticketUntil = discordUntil;
+        req.session.ticketGuestIdentity = access.identity;
+        req.session.ticketGuestUntil = Date.now() + 7 * 86400000;
+        req.session.csrf = randomBytes(32).toString("base64url");
+        await save(req);
+        res.json({ path: access.returnPath });
+      },
+    );
+    router.post(
       "/help/api/disconnect",
       express.json({ limit: "2kb" }),
       async (req, res) => {
         checkMutation(req);
-        await new Promise((resolve, reject) =>
-          req.session.destroy((error) => (error ? reject(error) : resolve())),
-        );
+        delete req.session.ticketIdentity;
+        delete req.session.ticketUntil;
+        await save(req);
         res.json({ ok: true });
       },
     );
     router.get(
-      ["/help/new", /^\/help\/[A-Za-z0-9_]{3,16}\/[a-f0-9-]{36}$/],
+      [
+        "/help/new",
+        /^\/help\/[A-Za-z0-9_]{3,16}\/[a-f0-9-]{36}$/,
+        /^\/help\/access\/[A-Za-z0-9_-]{43}$/,
+      ],
       (req, res) => res.sendFile(`${dist}/public.html`),
     );
     router.post(
@@ -143,18 +188,36 @@ export function ticketRouter(
       express.json({ limit: "8kb" }),
       async (req, res) => {
         checkMutation(req);
-        const user = await identity(req);
-        await transport.assertMember(user.id);
-        const ticket = service.create(user, req.body);
+        let user = identities(req.session)[0];
+        if (!user) {
+          if (!/^[A-Za-z0-9_]{3,16}$/.test(req.body.ign || ""))
+            throw new AuthError("invalid_ticket", 400);
+          user = {
+            id: `guest:${randomUUID()}`,
+            name: req.body.ign,
+            guest: true,
+          };
+          req.session.ticketGuestIdentity = user;
+          req.session.ticketGuestUntil = Date.now() + 7 * 86400000;
+          await save(req);
+        }
+        if (!user.guest) await transport.assertMember(user.id);
+        const network = user.guest
+          ? createHmac("sha256", config.sessionSecret)
+              .update(`ticket-network:${req.ip}`)
+              .digest("hex")
+          : undefined;
+        const ticket = service.create(user, req.body, "web", network);
         res.status(201).json({ path: ticketPath(ticket) });
       },
     );
     router.get(prefix, async (req, res) => {
-      const user = await identity(req);
+      await identity(req);
+      const owners = new Set(identities(req.session).map((user) => user.id));
       res.json({
         items: service
           .all()
-          .filter((ticket) => ticket.owner.id === user.id)
+          .filter((ticket) => owners.has(ticket.owner.id))
           .map((ticket) => ({
             id: ticket.id,
             ign: ticket.ign,
@@ -243,8 +306,7 @@ export function ticketRouter(
           Object.assign(user, fresh);
         } else if (
           !current ||
-          current.ticketUntil <= Date.now() ||
-          current.ticketIdentity?.id !== user.id
+          !identities(current).some((identity) => identity.id === user.id)
         )
           throw new Error("Session expired");
         res.write(": heartbeat\n\n");

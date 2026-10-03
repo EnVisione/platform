@@ -66,8 +66,10 @@
   color: var(--ticket-foreground);
   display: inline-block;
 }
-.ticket-page :focus-visible,
-.ticket-portal :focus-visible {
+.ticket-page a:focus-visible,
+.ticket-page button:focus-visible,
+.ticket-portal a:focus-visible,
+.ticket-portal button:focus-visible {
   outline: 0;
   text-decoration: underline;
   text-decoration-thickness: 2px;

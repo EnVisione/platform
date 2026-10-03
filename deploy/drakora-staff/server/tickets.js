@@ -1,6 +1,7 @@
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { AuthError } from "./discord.js";
+import { validMailAddress } from "./mail-address.js";
 import {
   ticketTypes,
   ticketPath,
@@ -16,6 +17,7 @@ const publicActor = (user) => ({
   id: user.id,
   name: user.name || user.username,
   avatar: user.avatar || null,
+  ...(user.guest ? { guest: true } : {}),
 });
 function text(value, min, max, code = "invalid_ticket") {
   if (
@@ -98,6 +100,20 @@ export function ticketService(
       entry,
     );
     put("ticket", ticket.id, ticket);
+    if (
+      ticket.owner.guest &&
+      !internal &&
+      (["opened", "claimed", "closed"].includes(action) ||
+        (action === "message" && user.id !== ticket.owner.id))
+    )
+      put("ticket-email-outbox", `${ticket.id}:${ticket.revision}`, {
+        ticketId: ticket.id,
+        event: action,
+        revision: ticket.revision,
+        status: ticket.status,
+        attempts: 0,
+        after: 0,
+      });
   }
   function mediaView(file, staffView, ticketId) {
     if (file.internal && !staffView) return null;
@@ -170,6 +186,7 @@ export function ticketService(
         : [],
     };
     if (staffView) {
+      safe.contactEmail = ticket.contactEmail || null;
       safe.resolution = ticket.resolution
         ? {
             ...ticket.resolution,
@@ -195,7 +212,7 @@ export function ticketService(
         (ticket.type !== "staff" || rolePolicy.isManager(user)),
     );
   }
-  function create(user, input, origin = "web") {
+  function create(user, input, origin = "web", guestNetwork) {
     if (!user?.id || !["web", "discord"].includes(origin))
       throw new AuthError("ticket_origin_disabled", 400);
     if (
@@ -205,9 +222,18 @@ export function ticketService(
       throw new AuthError("invalid_ticket", 400);
     const requestId = text(input.requestId, 36, 36);
     if (!idPattern.test(requestId)) throw new AuthError("invalid_request", 400);
+    let contactEmail;
+    if (user.guest) {
+      if (origin !== "web" || !/^[a-f0-9]{64}$/.test(guestNetwork || ""))
+        throw new AuthError("invalid_request", 400);
+      contactEmail = text(input.email, 3, 254, "invalid_ticket_email");
+      if (!validMailAddress(contactEmail))
+        throw new AuthError("invalid_ticket_email", 400);
+    }
     const prior = store.get("ticket-request", `${user.id}:${requestId}`);
     if (prior) return get(prior.id);
     if (
+      !user.guest &&
       store
         .entries("ticket")
         .filter(
@@ -223,6 +249,7 @@ export function ticketService(
       location: text(input.location, 2, 100),
       description: text(input.description, 30, 4000),
       owner: publicActor(user),
+      ...(user.guest ? { guestNetwork, contactEmail } : {}),
       origin,
       status: "pending",
       claimedBy: null,
@@ -235,6 +262,17 @@ export function ticketService(
       resolution: null,
     };
     store.transaction(() => {
+      if (
+        user.guest &&
+        store
+          .entries("ticket")
+          .some(
+            ([, current]) =>
+              current.guestNetwork === guestNetwork &&
+              ["pending", "claimed"].includes(current.status),
+          )
+      )
+        throw new AuthError("ticket_ip_limit", 409);
       audit(ticket, user, "opened", "Ticket opened");
       queue(ticket, "create");
       put("ticket-request", `${user.id}:${requestId}`, { id: ticket.id });
@@ -607,6 +645,7 @@ export function ticketService(
                 ticket,
                 message,
                 message.attachments.map((id) => store.get("ticket-media", id)),
+                { retry: job.attempts > 0 },
               );
               store.transaction(() => {
                 message.discordId = delivered.id;
@@ -616,6 +655,7 @@ export function ticketService(
                   ticketId: ticket.id,
                   key: job.ref,
                 });
+                store.delete("ticket-send", message.id);
                 const current = get(ticket.id);
                 current.revision++;
                 put("ticket", ticket.id, current);
@@ -794,6 +834,15 @@ export function ticketService(
         throw new AuthError("invalid_handoff", 400);
       store.delete("ticket-handoff", digest(handoff));
       return pending;
+    },
+    consumeEmailAccess(value) {
+      if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value))
+        throw new AuthError("invalid_ticket_link", 400);
+      const pending = store.take("ticket-email-access", digest(value));
+      if (!pending) throw new AuthError("invalid_ticket_link", 400);
+      const ticket = get(pending.ticketId);
+      if (!ticket.owner.guest) throw new AuthError("invalid_ticket_link", 400);
+      return { identity: ticket.owner, returnPath: ticketPath(ticket) };
     },
     pump,
     expire,

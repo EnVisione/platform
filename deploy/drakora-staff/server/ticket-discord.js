@@ -29,6 +29,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     recovering,
     refreshing;
   const settings = config.tickets;
+  const webhooks = new Map();
   const save = (key, value) =>
     service.store.set("ticket-discord", key, value, Number.MAX_SAFE_INTEGER);
   const state = () => service.store.get("ticket-discord", "channels") || {};
@@ -118,7 +119,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   function ticketOverwrites(ticket, members) {
     const permissions = overwrites(
       members,
-      ticket.owner.id,
+      ticket.owner.guest ? null : ticket.owner.id,
       ticket.type === "staff",
     );
     if (["closed", "awaiting_resolution"].includes(ticket.status))
@@ -263,7 +264,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       fields: [
         {
           name: "Player",
-          value: `${ticket.ign} · <@${ticket.owner.id}>`,
+          value: ticket.owner.guest
+            ? `${ticket.ign} · Website guest`
+            : `${ticket.ign} · <@${ticket.owner.id}>`,
           inline: true,
         },
         {
@@ -285,6 +288,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   }
   const transport = {
     async removeClosed(ticket) {
+      webhooks.delete(ticket.channelId);
       try {
         await (
           await channel(ticket.channelId)
@@ -300,7 +304,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       await ready();
       const main = await guild(),
         members = await staffMembers();
-      await main.members.fetch(ticket.owner.id);
+      if (!ticket.owner.guest) await main.members.fetch(ticket.owner.id);
       const channels = await main.channels.fetch();
       let target = ticket.channelId
         ? channels.get(ticket.channelId)
@@ -315,7 +319,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           topic: marker(ticket.id),
           permissionOverwrites: overwrites(
             members,
-            ticket.owner.id,
+            ticket.owner.guest ? null : ticket.owner.id,
             ticket.type === "staff",
           ),
         });
@@ -331,7 +335,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           );
       if (!intro)
         intro = await target.send({
-          content: `<@${ticket.owner.id}> Your private ticket is ready. Staff will claim it shortly.`,
+          content: `${ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`} Your private ticket is ready. Staff will claim it shortly.`,
           embeds: [overview(ticket)],
           components: controls(ticket),
           allowedMentions: { parse: [] },
@@ -347,6 +351,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (!webhook)
         webhook = await target.createWebhook({ name: "Drakora Support" });
       save(ticket.id, { ...saved, introId: intro.id, webhookId: webhook.id });
+      webhooks.set(target.id, webhook);
     },
     async status(ticket) {
       await ready();
@@ -369,25 +374,88 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           lockPermissions: false,
         });
     },
-    async message(ticket, message, attachments) {
+    async message(ticket, message, attachments, { retry = false } = {}) {
       await ready();
       const target = await channel(ticket.channelId),
         saved = service.store.get("ticket-discord", ticket.id);
-      const hook = (await target.fetchWebhooks()).get(saved.webhookId);
+      const key = String(message.sequence).padStart(12, "0");
+      const delivered = service.store.get(`ticket-messages:${ticket.id}`, key);
+      if (delivered?.id === message.id && delivered.discordId)
+        return { id: delivered.discordId };
+      function acknowledge(sent) {
+        service.store.transaction(() => {
+          service.store.set(
+            "ticket-send",
+            message.id,
+            {
+              ...intent,
+              acknowledgedId: sent.id,
+            },
+            Number.MAX_SAFE_INTEGER,
+          );
+          save(ticket.id, {
+            ...service.store.get("ticket-discord", ticket.id),
+            lastSentId: sent.id,
+          });
+          for (const file of attachments) {
+            file.mirrorChannelId = target.id;
+            file.mirrorMessageId = sent.id;
+            service.store.set(
+              "ticket-media",
+              file.id,
+              file,
+              Number.MAX_SAFE_INTEGER,
+            );
+          }
+        });
+        return sent;
+      }
+      let intent = service.store.get("ticket-send", message.id);
+      if (intent?.acknowledgedId) return { id: intent.acknowledgedId };
+      let hook = webhooks.get(target.id);
+      if (!hook) {
+        hook = (await target.fetchWebhooks()).get(saved.webhookId);
+        if (hook) webhooks.set(target.id, hook);
+      }
       if (!hook) {
         await transport.create(ticket);
         throw new Error("Ticket webhook was restored");
       }
-      // webhooks lack an idempotency key. recover an acknowledged send by its stable reference before retrying.
-      const recent = await target.messages.fetch({ limit: 100 });
-      const existing = recent.find(
-        (value) =>
-          value.webhookId === hook.id &&
-          value.embeds.some(
-            (embed) => embed.footer?.text === messageMarker(message.id),
-          ),
-      );
-      if (existing) return existing;
+      // recover uncertain sends after the last acknowledged message, without a visible marker.
+      if (intent || retry) {
+        let before;
+        for (let page = 0; page < 20; page++) {
+          const recent = await target.messages.fetch({
+            limit: 100,
+            ...(before
+              ? { before }
+              : intent?.after
+                ? { after: intent.after }
+                : {}),
+          });
+          const sorted = [...recent.values()].sort((a, b) =>
+            BigInt(a.id) < BigInt(b.id) ? -1 : 1,
+          );
+          const existing = sorted.find(
+            (value) =>
+              value.webhookId === (intent?.webhookId || hook.id) &&
+              (intent?.after
+                ? BigInt(value.id) > BigInt(intent.after)
+                : value.embeds?.some(
+                    (embed) => embed.footer?.text === messageMarker(message.id),
+                  )),
+          );
+          if (existing) return acknowledge(existing);
+          if (
+            recent.size < 100 ||
+            (intent?.after && BigInt(sorted[0].id) <= BigInt(intent.after))
+          )
+            break;
+          if (page === 19)
+            throw new Error("Ticket send recovery history remains pending");
+          before = sorted[0].id;
+        }
+      }
       const files = [];
       for (const file of attachments)
         if (!file.purged && file.expiresAt > Date.now())
@@ -395,25 +463,32 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             attachment: await transport.bytes(file),
             name: file.name,
           });
-      const sent = await hook.send({
-        content: message.content || undefined,
-        username: message.actor.name.slice(0, 80),
-        avatarURL: message.actor.avatar || undefined,
-        embeds: [{ footer: { text: messageMarker(message.id) } }],
-        files,
-        allowedMentions: { parse: [] },
-      });
-      for (const file of attachments) {
-        file.mirrorChannelId = target.id;
-        file.mirrorMessageId = sent.id;
+      if (!intent) {
+        const after = [saved.lastSentId, saved.introId, ticket.lastDiscordId]
+          .filter((id) => /^\d+$/.test(id || ""))
+          .sort((a, b) => (BigInt(a) < BigInt(b) ? 1 : -1))[0];
+        intent = { after, webhookId: hook.id, at: Date.now() };
         service.store.set(
-          "ticket-media",
-          file.id,
-          file,
+          "ticket-send",
+          message.id,
+          intent,
           Number.MAX_SAFE_INTEGER,
         );
       }
-      return sent;
+      let sent;
+      try {
+        sent = await hook.send({
+          content: message.content || undefined,
+          username: message.actor.name.slice(0, 80),
+          avatarURL: message.actor.avatar || undefined,
+          files,
+          allowedMentions: { parse: [] },
+        });
+      } catch (error) {
+        if (error.code === 10015) webhooks.delete(target.id);
+        throw error;
+      }
+      return acknowledge(sent);
     },
     async upload(bytes, name, type) {
       await ready();
@@ -912,6 +987,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       console.error("Ticket interaction failed."),
     );
   const handleReady = () => {
+    webhooks.clear();
     setup = null;
     void recover();
   };
@@ -940,6 +1016,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       client.off("clientReady", handleReady);
       client.off("shardResume", handleReady);
       await Promise.allSettled([recovering, refreshing]);
+      webhooks.clear();
     },
   };
 }

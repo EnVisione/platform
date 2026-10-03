@@ -62,6 +62,7 @@ function setupDiscord(t) {
         channels.delete(id);
       },
       async fetchWebhooks() {
+        target.webhookReads = (target.webhookReads || 0) + 1;
         return hooks;
       },
       async createWebhook(data) {
@@ -77,11 +78,17 @@ function setupDiscord(t) {
               channelId: id,
               guildId: "2",
               webhookId: hook.id,
-              author: { id: "bot", bot: true },
+              author: { id: "bot", bot: true, username: data.username },
+              content: data.content || "",
+              attachments: new Collection(),
               embeds: data.embeds || [],
               data,
             };
             messages.set(message.id, message);
+            if (target.failAfterSend) {
+              target.failAfterSend = false;
+              throw new Error("Response lost after Discord accepted the send");
+            }
             return message;
           },
         };
@@ -108,6 +115,7 @@ function setupDiscord(t) {
       },
       messages: {
         async fetch(query) {
+          target.historyReads = (target.historyReads || 0) + 1;
           if (typeof query === "string") return messages.get(query);
           const sorted = [...messages.values()].sort(
             (a, b) => Number(a.id) - Number(b.id),
@@ -401,6 +409,67 @@ test("Discord reconnect backfills multiple pages and reconciles edits and deleti
   assert.equal(
     service.messages(other.id)[0].content,
     "Edited after closure while disconnected",
+  );
+});
+
+test("web replies send without embeds or history reads and recover lost responses without collapsing identical replies", async (t) => {
+  const context = setupDiscord(t);
+  const { service, transport, channels } = context;
+  const owner = { id: "guest:test", name: "Jojo", guest: true };
+  const ticket = service.create(
+    owner,
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description: "Guest support without Discord account or guild membership.",
+      email: "jojo@example.invalid",
+    },
+    "web",
+    "a".repeat(64),
+  );
+  await transport.create(ticket);
+  await service.pump();
+  await transport.recover();
+  const target = channels.get(service.get(ticket.id).channelId);
+  assert.ok(!target.overwrites.some((entry) => entry.id === owner.id));
+  assert.ok(!target.savedMessages.first().data.content.includes("<@guest:"));
+  const histories = target.historyReads,
+    hooks = target.webhookReads;
+  const first = service.reply(owner, ticket.id, {
+    requestId: randomUUID(),
+    content: "Hello",
+  });
+  await service.pump();
+  assert.equal(target.historyReads, histories);
+  assert.equal(target.webhookReads, hooks);
+  const delivered = service.messages(ticket.id)[0];
+  assert.deepEqual(target.savedMessages.get(delivered.discordId).embeds, []);
+  assert.equal(service.store.get("ticket-send", first.id), undefined);
+  target.failAfterSend = true;
+  service.reply(owner, ticket.id, {
+    requestId: randomUUID(),
+    content: "Hello",
+  });
+  await service.pump();
+  assert.equal(context.sends, 2);
+  for (const [key, job] of service.store.entries("ticket-outbox")) {
+    job.after = 0;
+    service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
+  }
+  await service.pump();
+  assert.equal(context.sends, 2);
+  assert.equal(service.store.entries("ticket-outbox").length, 0);
+  assert.equal(service.messages(ticket.id).length, 2);
+  assert.ok(
+    service
+      .messages(ticket.id)
+      .every((message) => message.delivery === "delivered"),
+  );
+  assert.notEqual(
+    service.messages(ticket.id)[0].discordId,
+    service.messages(ticket.id)[1].discordId,
   );
 });
 

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import express from "express";
-import { openStore } from "../server/store.js";
+import session from "express-session";
+import { openStore, hash } from "../server/store.js";
 import { ticketService } from "../server/tickets.js";
 import { ticketRouter } from "../server/ticket-routes.js";
 import { rolePermissions } from "../server/role-permissions.js";
@@ -248,4 +249,136 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   assert.ok((await response.text()).includes("PRIVATE:"));
   response = await call(`/help/api/tickets/${id}/rating`, { rating: 5 });
   assert.equal(response.status, 200);
+});
+
+test("website guests use private sessions, required email and a shared IP open-ticket quota", async (t) => {
+  const config = {
+    ...fixture,
+    sessionSecret: randomBytes(32).toString("hex"),
+    applications: { publicOrigin: "https://example.invalid" },
+    tickets: { guildId: "2" },
+  };
+  const database = openStore(":memory:", randomBytes(32).toString("base64"));
+  const service = ticketService(
+    config,
+    database.store,
+    rolePermissions(config, database.store),
+  );
+  let memberChecks = 0;
+  const app = express();
+  app.set("trust proxy", 1);
+  app.use(
+    session({
+      secret: config.sessionSecret,
+      store: database.sessions,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { maxAge: 7 * 86400000 },
+    }),
+  );
+  app.use(
+    ticketRouter(
+      config,
+      service,
+      {
+        async assertMember() {
+          memberChecks++;
+        },
+      },
+      { database: database.store, dist: "/does-not-exist" },
+    ),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  t.after(async () => {
+    await service.stop();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    database.store.close();
+  });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function browser(ip) {
+    const response = await fetch(base + "/help/api/session");
+    const data = await response.json();
+    assert.equal(data.identity, null);
+    let cookie = response.headers.get("set-cookie").split(";")[0];
+    return async (path, body, forwarded = ip) => {
+      const response = await fetch(base + path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: config.applications.publicOrigin,
+          "X-CSRF-Token": data.csrf,
+          "Content-Type": "application/json",
+          "X-Forwarded-For": forwarded,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      if (response.headers.get("set-cookie"))
+        cookie = response.headers.get("set-cookie").split(";")[0];
+      return response;
+    };
+  }
+  const first = await browser("192.0.2.1"),
+    second = await browser("192.0.2.1"),
+    other = await browser("192.0.2.2");
+  const data = {
+    requestId: randomUUID(),
+    ign: "Jojo",
+    type: "general",
+    location: "Void",
+    description: "Detailed website ticket without any Discord account.",
+    email: "jojo@example.invalid",
+  };
+  assert.equal(
+    (await first("/help/api/tickets", { ...data, email: "" })).status,
+    400,
+  );
+  const response = await first("/help/api/tickets", data);
+  assert.equal(response.status, 201);
+  const id = (await response.json()).path.split("/").at(-1);
+  assert.equal((await first("/help/api/tickets", data)).status, 201);
+  assert.equal(
+    (
+      await second(
+        "/help/api/tickets",
+        { ...data, requestId: randomUUID() },
+        "198.51.100.99, 192.0.2.1",
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (await other("/help/api/tickets", { ...data, requestId: randomUUID() }))
+      .status,
+    201,
+  );
+  assert.equal(memberChecks, 0);
+  assert.equal((await second(`/help/api/tickets/${id}`)).status, 404);
+  const snapshot = await (await first(`/help/api/tickets/${id}`)).json();
+  assert.equal(snapshot.contactEmail, undefined);
+  assert.equal(snapshot.guestNetwork, undefined);
+  assert.equal(snapshot.owner.guest, true);
+  assert.equal(
+    (
+      await first(`/help/api/tickets/${id}/messages`, {
+        requestId: randomUUID(),
+        content: "Hello without Discord",
+      })
+    ).status,
+    201,
+  );
+  assert.equal((await first(`/help/api/tickets/${id}/close`, {})).status, 200);
+  assert.equal(
+    (await second("/help/api/tickets", { ...data, requestId: randomUUID() }))
+      .status,
+    201,
+  );
+  const key = randomBytes(32).toString("base64url");
+  database.store.set("ticket-email-access", hash(key), { ticketId: id });
+  const access = await second("/help/api/email-access", { key });
+  assert.equal(access.status, 200);
+  assert.equal((await access.json()).path, `/help/Jojo/${id}`);
+  assert.equal((await second(`/help/api/tickets/${id}`)).status, 200);
+  assert.equal((await first("/help/api/email-access", { key })).status, 400);
 });

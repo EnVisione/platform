@@ -10,14 +10,19 @@ import "./tickets.css";
 
 const errors = {
   ticket_identity_required:
-    "Connect Discord to open or view your private ticket.",
+    "Open your ticket in the browser you used to create it, or connect its Discord account.",
   ticket_not_found:
-    "This ticket is unavailable to your account. Connect the Discord account that opened it.",
+    "This ticket is unavailable in this browser. Use its private email link or connect the Discord account that opened it.",
   ticket_access_denied: "Your staff permissions do not allow this action.",
   ticket_already_claimed:
     "Another staff member has already claimed this ticket.",
   ticket_limit:
     "You have three open tickets. Continue in an existing ticket below.",
+  ticket_ip_limit:
+    "There is already an open website ticket on this internet connection. Continue in that ticket or wait for it to close.",
+  invalid_ticket_email: "Enter a valid email address for ticket updates.",
+  invalid_ticket_link:
+    "This private link expired or was already used. Open the newest ticket update email, or use the browser where your ticket is already open.",
   invalid_ticket:
     "Check your Minecraft username and provide at least 30 characters describing the issue.",
   invalid_message:
@@ -593,12 +598,22 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
         <strong>{ticket.ign}</strong>
         <span>{ticket.owner.name}</span>
         <dl>
-          <dt>Minecraft status</dt>
-          <dd>Not connected</dd>
-          <dt>Last online</dt>
-          <dd>Not connected</dd>
-          <dt>Network playtime</dt>
-          <dd>Not connected</dd>
+          {staffView && (
+            <>
+              <dt>Minecraft status</dt>
+              <dd>Not connected</dd>
+              <dt>Last online</dt>
+              <dd>Not connected</dd>
+              <dt>Network playtime</dt>
+              <dd>Not connected</dd>
+              {ticket.contactEmail && (
+                <>
+                  <dt>Contact email</dt>
+                  <dd>{ticket.contactEmail}</dd>
+                </>
+              )}
+            </>
+          )}
           <dt>Ticket opened from</dt>
           <dd>{ticket.origin === "discord" ? "Discord" : "Website"}</dd>
           <dt>Assigned staff</dt>
@@ -779,10 +794,14 @@ export function PublicTickets() {
     ign: "",
     location: "",
     description: "",
+    email: "",
   });
   const requestId = useRef(crypto.randomUUID());
   const id = location.pathname.match(
     /^\/help\/[A-Za-z0-9_]{3,16}\/([a-f0-9-]{36})$/,
+  )?.[1];
+  const emailKey = location.pathname.match(
+    /^\/help\/access\/([A-Za-z0-9_-]{43})$/,
   )?.[1];
   useEffect(() => {
     request("/help/api/session")
@@ -849,44 +868,80 @@ export function PublicTickets() {
       {session?.identity && (
         <p className="ticket-identity">
           <Avatar actor={session.identity} />
-          Connected as <strong>{session.identity.name}</strong>
+          {session.identity.guest ? "Website ticket for " : "Connected as "}
+          <strong>{session.identity.name}</strong>
+          {!session.identity.guest && (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                try {
+                  await request("/help/api/disconnect", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-CSRF-Token": session.csrf,
+                    },
+                    body: "{}",
+                  });
+                  location.reload();
+                } catch (error) {
+                  setError(error.message);
+                }
+              }}
+            >
+              Change account
+            </button>
+          )}
+        </p>
+      )}
+      {!session ? (
+        <p>Opening support…</p>
+      ) : emailKey ? (
+        <section className="ticket-connect">
+          <h1>Your private ticket</h1>
+          <p>
+            Continue to open the conversation linked in your ticket update
+            email.
+          </p>
           <button
+            className="ticket-primary"
             disabled={busy}
             onClick={async () => {
+              setBusy(true);
+              setError("");
               try {
-                await request("/help/api/disconnect", {
+                const result = await request("/help/api/email-access", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                     "X-CSRF-Token": session.csrf,
                   },
-                  body: "{}",
+                  body: JSON.stringify({ key: emailKey }),
                 });
-                location.reload();
+                location.assign(result.path);
               } catch (error) {
                 setError(error.message);
+                setBusy(false);
               }
             }}
           >
-            Change account
+            {busy ? "Opening…" : "Open my ticket"}
           </button>
-        </p>
-      )}
-      {!session ? (
-        <p>Opening support…</p>
-      ) : !session.identity ? (
+        </section>
+      ) : id && !session.identity ? (
         <section className="ticket-connect">
-          <h1>{id ? "Your private ticket" : "Let's get you some help"}</h1>
+          <h1>Your private ticket</h1>
           <p>
-            Connect Discord so we can keep your ticket private and reach you in
-            either place. You do not need a separate Drakora account.
+            Use the private link in your latest ticket update email, or connect
+            the Discord account that opened this ticket. You do not need a
+            separate Drakora account.
           </p>
           <button className="ticket-primary" disabled={busy} onClick={connect}>
             {busy ? "Connecting…" : "Connect Discord"}
           </button>
           <p>
-            Join our <a href="/discord">Discord community</a> before opening a
-            ticket.
+            Need a new ticket? <a href="/help/new">Open a website ticket</a>{" "}
+            with or without Discord.
           </p>
         </section>
       ) : id ? (
@@ -899,7 +954,41 @@ export function PublicTickets() {
               Tell us enough to understand the issue. A staff member will claim
               your ticket and help you here or in Discord.
             </p>
+            {(!session.identity || session.identity.guest) && (
+              <p className="ticket-privacy">
+                Discord is optional.{" "}
+                <button type="button" disabled={busy} onClick={connect}>
+                  Connect Discord
+                </button>{" "}
+                to chat in either place, or open a website ticket below. Without
+                Discord, one ticket can be open per internet connection. You can
+                also reopen your private conversation from an email update.
+              </p>
+            )}
             <form className="ticket-new-form" onSubmit={open}>
+              {(!session.identity || session.identity.guest) && (
+                <label>
+                  Email for ticket updates
+                  <input
+                    type="email"
+                    required
+                    maxLength={254}
+                    autoComplete="email"
+                    value={form.email}
+                    placeholder="you@example.com"
+                    onChange={(event) =>
+                      setForm((value) => ({
+                        ...value,
+                        email: event.target.value,
+                      }))
+                    }
+                  />
+                  <span>
+                    We will email you when staff reply or your ticket status
+                    changes. Your email stays private.
+                  </span>
+                </label>
+              )}
               <label>
                 What do you need help with?
                 <select
