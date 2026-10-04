@@ -211,6 +211,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const existing = commands.find((command) => command.name === "ticket");
     if (existing) await main.commands.edit(existing.id, command);
     else await main.commands.create(command);
+    service.queueClosedUpdates();
     service.attach(transport);
   }
   async function ready() {
@@ -372,6 +373,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   }
   function openingText(ticket) {
     const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
+    if (ticket.status === "awaiting_resolution")
+      return `${owner} This ticket was closed by the player. Staff resolution is pending.`;
+    if (ticket.status === "closed")
+      return `${owner} This ticket is resolved and closed. Its saved history remains in the staff dashboard.`;
     if (ticket.status === "claimed")
       return `${owner} ${ticketStatusLabel(ticket)}. Continue in this private ticket.`;
     return `${owner} Your private ticket is ready. Staff will claim it shortly.`;
@@ -384,13 +389,40 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         : ticket.claimedBy?.id !== notice.actor.id
     )
       return;
-    const key = `${ticket.id}:${notice.revision}`;
+    const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
+    const staff = `<@${notice.actor.id}>`;
+    const content =
+      notice.event === "replied"
+        ? `${owner} ${staff} replied to your ticket. You can continue here or on the website.`
+        : notice.event === "taken_over"
+          ? `${owner} ${staff} took over your ticket and is now helping you.`
+          : `${owner} ${staff} claimed your ticket and is now helping you.`;
+    return await sendUpdate(
+      ticket,
+      notice,
+      target,
+      content,
+      [],
+      [notice.actor.id, ...(!ticket.owner.guest ? [ticket.owner.id] : [])],
+    );
+  }
+  async function sendUpdate(
+    ticket,
+    notice,
+    target,
+    content,
+    components,
+    mentions,
+  ) {
+    const key = notice.id || `${ticket.id}:${notice.revision}`;
     const kind = "ticket-status-notice";
     let intent = service.store.get(kind, key);
     if (intent?.messageId) return;
     const persist = () =>
       service.store.set(kind, key, intent, Number.MAX_SAFE_INTEGER);
-    const footer = `Ticket ${ticket.id} · Staff update ${notice.revision}`;
+    const footer = notice.id
+      ? `Ticket ${ticket.id} · Activity ${notice.id}`
+      : `Ticket ${ticket.id} · Staff update ${notice.revision}`;
     const acknowledge = (message) => {
       intent.messageId = message.id;
       persist();
@@ -428,14 +460,6 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       };
       persist();
     }
-    const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
-    const staff = `<@${notice.actor.id}>`;
-    const content =
-      notice.event === "replied"
-        ? `${owner} ${staff} replied to your ticket. You can continue here or on the website.`
-        : notice.event === "taken_over"
-          ? `${owner} ${staff} took over your ticket and is now helping you.`
-          : `${owner} ${staff} claimed your ticket and is now helping you.`;
     acknowledge(
       await target.send({
         content,
@@ -446,14 +470,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             footer: { text: footer },
           },
         ],
+        components,
         allowedMentions: {
           parse: [],
-          users: [
-            ...new Set([
-              notice.actor.id,
-              ...(!ticket.owner.guest ? [ticket.owner.id] : []),
-            ]),
-          ],
+          users: [...new Set(mentions)],
         },
         nonce: createHash("sha256")
           .update(`staff-update:${key}`)
@@ -461,6 +481,76 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           .slice(0, 25),
         enforceNonce: true,
       }),
+    );
+  }
+  async function activityUpdate(ticket, notice) {
+    if (
+      !notice ||
+      notice.cycle !== (ticket.reopenedCount || 0) ||
+      notice.closureId !== (ticket.closureId || null)
+    )
+      return;
+    if (!ticket.channelId) {
+      const kind = "ticket-status-notice";
+      if (service.store.get(kind, notice.id)?.messageId) return;
+      const result = await transport.notice(
+        ticket,
+        {
+          event: notice.event,
+          activityId: notice.id,
+          channelId: settings.staffChannelId,
+          cycle: notice.cycle,
+        },
+        `${notice.id}:staff`,
+      );
+      if (result.id)
+        service.store.set(
+          kind,
+          notice.id,
+          {
+            ticketId: ticket.id,
+            channelId: result.channelId,
+            messageId: result.id,
+          },
+          Number.MAX_SAFE_INTEGER,
+        );
+      return result;
+    }
+    const closed = ["closed", "awaiting_resolution"].includes(ticket.status);
+    if (closed && !service.store.get("ticket-discord-close", ticket.id)?.ready)
+      return { pending: true };
+    const target = await channel(ticket.channelId);
+    const content = {
+      closed:
+        "The player closed this ticket. Their Discord channel access has been removed.",
+      resolved:
+        "Staff recorded the resolution and closed this ticket. The player's Discord channel access has been removed.",
+      rated:
+        "Private feedback received. The player submitted a support rating. Authorized staff can view it in the dashboard.",
+      reopened:
+        "This ticket was reopened and returned to the waiting queue. Staff can claim it again.",
+    }[notice.event];
+    if (!content) throw new Error("Unknown ticket activity notice");
+    const mentions = notice.silent
+      ? []
+      : closed
+        ? [
+            notice.staff?.id,
+            !notice.actor.guest && notice.actor.id !== ticket.owner.id
+              ? notice.actor.id
+              : null,
+          ].filter(Boolean)
+        : [
+            !ticket.owner.guest ? ticket.owner.id : null,
+            !notice.actor.guest ? notice.actor.id : null,
+          ].filter(Boolean);
+    return await sendUpdate(
+      ticket,
+      notice,
+      target,
+      `${content}${closed ? " Admins and higher can delete this Discord channel separately. Saved ticket history stays in the staff dashboard." : ""}${mentions.length ? `\n${[...new Set(mentions)].map((id) => `<@${id}>`).join(" ")}` : ""}`,
+      controls(ticket, closed),
+      mentions,
     );
   }
   const transport = {
@@ -513,7 +603,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         ])
       )
         throw new Error("Ticket staff notice channel permissions are missing");
-      const footer = `Ticket ${ticket.id} · ${job.event}${job.cycle ? ` · ${job.cycle}` : ""}`;
+      const footer = job.activityId
+        ? `Ticket ${ticket.id} · Activity ${job.activityId}`
+        : `Ticket ${ticket.id} · ${job.event}${job.cycle ? ` · ${job.cycle}` : ""}`;
       const put = (value) =>
         service.store.set(
           "ticket-notice-send",
@@ -560,31 +652,55 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
       const current = service.get(ticket.id);
       if (
-        ["closed", "awaiting_resolution"].includes(current.status) ||
+        (!job.activityId &&
+          ["closed", "awaiting_resolution"].includes(current.status)) ||
         (job.event === "unclaimed" &&
           (current.status !== "pending" || current.claimedBy))
       )
         return { cancelled: true };
       const restricted = category !== "support";
+      const activity = {
+        closed: [
+          "Ticket closed by the player",
+          "The player closed the conversation. Staff resolution is pending.",
+        ],
+        resolved: [
+          "Ticket resolved",
+          "Staff recorded the resolution and closed the conversation.",
+        ],
+        rated: [
+          "Private feedback received",
+          "The player submitted a support rating. Authorized staff can view it in the dashboard.",
+        ],
+        channel_deleted: [
+          "Ticket channel deleted",
+          "An Admin or higher deleted the Discord channel. Saved messages, history and transcripts remain in the staff dashboard.",
+        ],
+      }[job.event];
       const sent = await target.send({
         embeds: [
           {
-            title:
-              job.event === "reopened"
+            title: activity
+              ? activity[0]
+              : job.event === "reopened"
                 ? "Ticket reopened"
                 : job.event === "opened"
                   ? `New ${category === "partnership" ? "partnership request" : `${category} ticket`}`
                   : "Ticket still waiting for staff",
-            description: restricted
-              ? job.event !== "unclaimed"
-                ? "A restricted ticket has opened. Authorized staff can review it."
-                : "A restricted ticket has been unclaimed for at least one hour. Authorized staff can review it."
-              : job.event !== "unclaimed"
-                ? `**${ticket.ign}** ${job.event === "reopened" ? "reopened" : "opened"} a ${ticketTypes.find((type) => type.id === ticket.type).name.toLowerCase()} ticket.`
-                : `**${ticket.ign}** has been waiting for at least one hour. This ticket still needs a staff member.`,
+            description: activity
+              ? activity[1]
+              : restricted
+                ? job.event !== "unclaimed"
+                  ? "A restricted ticket has opened. Authorized staff can review it."
+                  : "A restricted ticket has been unclaimed for at least one hour. Authorized staff can review it."
+                : job.event !== "unclaimed"
+                  ? `**${ticket.ign}** ${job.event === "reopened" ? "reopened" : "opened"} a ${ticketTypes.find((type) => type.id === ticket.type).name.toLowerCase()} ticket.`
+                  : `**${ticket.ign}** has been waiting for at least one hour. This ticket still needs a staff member.`,
             color: 0xb92323,
             footer: { text: footer },
-            timestamp: new Date(ticket.createdAt).toISOString(),
+            timestamp: new Date(
+              activity ? ticket.updatedAt : ticket.createdAt,
+            ).toISOString(),
           },
         ],
         components: [
@@ -811,6 +927,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async status(ticket, job = {}) {
       await ready();
       ticket = service.get(ticket.id);
+      if (job.kind === "activity")
+        return await activityUpdate(ticket, job.notice);
       if (["closed", "awaiting_resolution"].includes(ticket.status))
         return await closeChannel(ticket);
       const target = await channel(ticket.channelId),
@@ -1204,6 +1322,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       await (
         await target.messages.fetch(saved.introId)
       ).edit({
+        content: openingText(ticket),
         embeds: [overview(ticket)],
         components: controls(ticket, true),
         allowedMentions: { parse: [] },

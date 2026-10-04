@@ -100,6 +100,30 @@ export function ticketService(
       ...(pendingNotice ? { notice: pendingNotice } : {}),
     });
   }
+  function queueActivity(ticket, event, actor, silent = false) {
+    if (ticket.type === "partnership") return;
+    const cycle =
+      event === "reopened"
+        ? ticket.reopenedCount
+        : ticket.closureId || ticket.closedAt;
+    const ref = `${event}:${cycle}`,
+      id = `${ticket.id}:${ref}`;
+    if (
+      store.get("ticket-outbox", `${ticket.id}:activity:${ref}`) ||
+      store.get("ticket-status-notice", id)?.messageId
+    )
+      return;
+    queue(ticket, "activity", ref, {
+      id,
+      event,
+      actor: publicActor(actor),
+      staff: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
+      revision: ticket.revision,
+      closureId: ticket.closureId || null,
+      cycle: ticket.reopenedCount || 0,
+      silent,
+    });
+  }
   function audit(ticket, user, action, detail, internal = false) {
     if (ticket.owner.id === user.id) {
       ticket.lastActiveAt = now();
@@ -738,6 +762,7 @@ export function ticketService(
       );
       if (!ticket.discordDeletedAt && !ticket.discordArchivedAt)
         queue(ticket, "status");
+      queueActivity(ticket, staffView ? "resolved" : "closed", user);
     });
     announce(ticket);
     return ticket;
@@ -835,6 +860,7 @@ export function ticketService(
         ticket,
         ticket.type === "partnership" || ticket.channelId ? "status" : "create",
       );
+      queueActivity(ticket, "reopened", user);
       if (config.tickets.staffChannelId) {
         const cycle = `${id}:reopened:${ticket.reopenedCount}`;
         for (const event of ["reopened", "unclaimed"])
@@ -877,7 +903,7 @@ export function ticketService(
         "Admin requested Discord channel deletion; dashboard history is kept",
         true,
       );
-      queue(ticket, "delete", ticket.channelId);
+      queue(ticket, "delete", ticket.channelId, { actor: publicActor(user) });
     });
     announce(ticket);
     return ticket;
@@ -899,6 +925,7 @@ export function ticketService(
     store.transaction(() => {
       ticket.rating = rating;
       audit(ticket, user, "rated", `Player rated the help ${rating}/5`);
+      queueActivity(ticket, "rated", user);
     });
     announce(ticket);
     return ticket;
@@ -1121,8 +1148,9 @@ export function ticketService(
           create: 0,
           message: 1,
           status: 2,
-          delete: 3,
-          feedback: 4,
+          activity: 3,
+          delete: 4,
+          feedback: 5,
         };
         let attempts = 0;
         for (const [key, job] of store
@@ -1131,6 +1159,9 @@ export function ticketService(
             ([, a], [, b]) =>
               a.ticketId.localeCompare(b.ticketId) ||
               priority[a.kind] - priority[b.kind] ||
+              (a.kind === "activity"
+                ? a.notice.revision - b.notice.revision
+                : 0) ||
               a.ref.localeCompare(b.ref),
           )) {
           if (job.kind !== "create" && blocked.has(job.ticketId)) continue;
@@ -1160,7 +1191,15 @@ export function ticketService(
                 !store.get("ticket-discord-close", ticket.id)?.ready)
             )
               continue;
-          } else if (job.kind !== "create" && !ticket.channelId) {
+          } else if (
+            job.kind !== "create" &&
+            !ticket.channelId &&
+            !(
+              job.kind === "activity" &&
+              ticket.discordDeletedAt &&
+              config.tickets.staffChannelId
+            )
+          ) {
             if (ticket.discordDeletedAt || ticket.discordArchivedAt)
               store.delete("ticket-outbox", key);
             continue;
@@ -1171,7 +1210,7 @@ export function ticketService(
             else if (job.kind === "feedback") {
               const result = await transport.feedback(ticket, job, key);
               if (result?.pending) continue;
-            } else if (job.kind === "status" || job.kind === "delete") {
+            } else if (["status", "activity", "delete"].includes(job.kind)) {
               if (
                 job.kind === "delete" &&
                 (ticket.channelId !== job.ref ||
@@ -1193,8 +1232,18 @@ export function ticketService(
                   store.delete("ticket-channel", current.channelId);
                   current.channelId = null;
                   current.discordDeletedAt = now();
-                  current.revision++;
-                  put("ticket", current.id, current);
+                  audit(
+                    current,
+                    job.notice?.actor || { id: "system", name: "Drakora" },
+                    "channel_deleted",
+                    "Discord channel deleted; saved ticket history is kept",
+                    true,
+                  );
+                  queueActivity(
+                    current,
+                    "channel_deleted",
+                    job.notice?.actor || { id: "system", name: "Drakora" },
+                  );
                 });
             } else {
               const message = store.get(
@@ -1333,6 +1382,24 @@ export function ticketService(
     },
     registerCleanupWaiter(wait) {
       cleanupWaiters.push(wait);
+    },
+    queueClosedUpdates() {
+      for (const [, ticket] of store.entries("ticket")) {
+        if (
+          ticket.erasingAt ||
+          !ticket.channelId ||
+          !["closed", "awaiting_resolution"].includes(ticket.status)
+        )
+          continue;
+        queueActivity(
+          ticket,
+          ticket.status === "closed" ? "resolved" : "closed",
+          ticket.resolution?.actor || ticket.owner,
+          true,
+        );
+        if (ticket.rating !== null)
+          queueActivity(ticket, "rated", ticket.owner, true);
+      }
     },
     get,
     list,

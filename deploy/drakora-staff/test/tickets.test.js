@@ -503,13 +503,18 @@ test("a status change during delivery retains a fresh outbox job", async (t) => 
   let calls = 0;
   service.attach({
     async create() {},
-    async status() {
+    async status(ticket, job) {
+      if (job.kind !== "status") return;
       calls++;
       if (calls === 1) service.closeTicket(owner, ticket.id, {});
     },
   });
   await service.pump();
-  assert.equal(store.entries("ticket-outbox").length, 2);
+  assert.equal(
+    store.entries("ticket-outbox").filter(([, job]) => job.kind === "status")
+      .length,
+    1,
+  );
   await service.pump();
   assert.equal(calls, 2);
   assert.equal(service.get(ticket.id).status, "awaiting_resolution");
@@ -1071,7 +1076,7 @@ test("reopening preserves private resolutions and ratings and reapplies quotas a
       return { id: randomUUID() };
     },
     async status() {
-      return { deleted: true };
+      return { closed: true };
     },
     async feedback() {
       return { id: randomUUID() };
@@ -1126,6 +1131,7 @@ test("reopening preserves private resolutions and ratings and reapplies quotas a
   );
   service.rate(owner, ticket.id, 5, service.get(ticket.id).closureId);
   assert.equal(service.get(ticket.id).ratingStaff.id, otherStaff.id);
+  await service.pump();
   await service.reopen(owner, ticket.id);
   service.closeTicket(
     helper,

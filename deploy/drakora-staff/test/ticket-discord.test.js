@@ -1303,6 +1303,201 @@ async function supportTicket(service, user, transport) {
   return ticket;
 }
 
+test("player closure, private rating and staff resolution each post a notice with guarded Admin deletion", async (t) => {
+  const app = setupDiscord(t, true),
+    { service, transport, user, channels } = app;
+  const owner = { id: user.id, name: "Player" };
+  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
+  const ticket = await supportTicket(service, owner, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  service.claim(helper, ticket.id);
+  await service.pump();
+  service.closeTicket(owner, ticket.id, {});
+  service.rate(owner, ticket.id, 4);
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "PRIVATE resolution with enough detail for the staff record.",
+      commands: "PRIVATE staff command",
+    },
+    true,
+  );
+  await service.pump();
+  const notices = [...target.savedMessages.values()].filter((message) =>
+    message.embeds?.some((embed) => embed.footer?.text.includes("Activity")),
+  );
+  assert.equal(notices.length, 3);
+  assert.match(notices[0].content, /player closed/);
+  assert.match(notices[1].content, /Private feedback received/);
+  assert.match(notices[2].content, /Staff recorded the resolution/);
+  assert.doesNotMatch(
+    JSON.stringify(notices.map((message) => message.data)),
+    /PRIVATE|4\/5/,
+  );
+  const deletion = notices[0].components[0].components.find((button) =>
+    button.custom_id?.includes(":delete:"),
+  );
+  assert.equal(deletion.label, "Delete channel · Admin+");
+  const denied = await click(
+    app.client,
+    app.staffMembers.get("201").user,
+    deletion.custom_id,
+  );
+  assert.match(denied.data, /permission/);
+  const confirm = await click(
+    app.client,
+    app.staffMembers.get("200").user,
+    deletion.custom_id,
+  );
+  assert.equal(confirm.flags, 64);
+  const approved = confirm.data.components[0].components.find((button) =>
+    button.custom_id?.includes(":delete-confirm:"),
+  );
+  assert.ok(approved);
+  const removed = await click(
+    app.client,
+    app.staffMembers.get("200").user,
+    approved.custom_id,
+  );
+  assert.match(removed.data, /Channel deletion requested/);
+  await service.pump();
+  await service.pump();
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.get(ticket.id).rating, 4);
+  assert.match(service.get(ticket.id).resolution.summary, /PRIVATE/);
+  assert.equal(
+    service
+      .view(helper, ticket.id, true)
+      .history.filter((entry) => entry.action === "channel_deleted").length,
+    1,
+  );
+  assert.equal(
+    service
+      .view(owner, ticket.id)
+      .history.some((entry) => entry.action === "channel_deleted"),
+    false,
+  );
+  const deletionNotice = [...app.staffChannel.savedMessages.values()].find(
+    (message) => message.embeds[0]?.title === "Ticket channel deleted",
+  );
+  assert.ok(deletionNotice);
+  assert.deepEqual(deletionNotice.data.allowedMentions, { parse: [] });
+});
+
+test("feedback after channel deletion is delivered privately to staff without exposing a score or duplicating an uncertain send", async (t) => {
+  const app = setupDiscord(t, true),
+    { service, transport, user } = app;
+  const owner = { id: user.id, name: "Player" };
+  const ticket = await supportTicket(service, owner, transport);
+  service.closeTicket(owner, ticket.id, {});
+  await service.pump();
+  await service.deleteChannel(
+    { id: "200", name: "Manager", roles: ["10", "28"] },
+    ticket.id,
+  );
+  await service.pump();
+  await service.pump();
+  app.staffChannel.failAfterBotSend = true;
+  service.rate(owner, ticket.id, 5);
+  await service.pump();
+  const [key, job] = service.store
+    .entries("ticket-outbox")
+    .find(([, job]) => job.kind === "activity" && job.notice.event === "rated");
+  assert.equal(job.attempts, 1);
+  job.after = 0;
+  service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
+  await service.pump();
+  const notices = [...app.staffChannel.savedMessages.values()].filter(
+    (message) => message.embeds[0]?.title === "Private feedback received",
+  );
+  assert.equal(notices.length, 1);
+  assert.doesNotMatch(JSON.stringify(notices[0].data), /5\/5|Helper/);
+  assert.deepEqual(notices[0].data.allowedMentions, { parse: [] });
+  assert.equal(service.get(ticket.id).rating, 5);
+  assert.equal(service.store.get("ticket-outbox", key), undefined);
+});
+
+test("existing retained closed tickets receive one silent notice and deletion controls", async (t) => {
+  const app = setupDiscord(t),
+    { service, transport, user, channels } = app;
+  const owner = { id: user.id, name: "Player" };
+  const ticket = await supportTicket(service, owner, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  service.closeTicket(owner, ticket.id, {});
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "activity") service.store.delete("ticket-outbox", key);
+  await service.pump();
+  service.queueClosedUpdates();
+  await service.pump();
+  service.queueClosedUpdates();
+  await service.pump();
+  const notices = [...target.savedMessages.values()].filter((message) =>
+    message.content.includes("player closed"),
+  );
+  assert.equal(notices.length, 1);
+  assert.deepEqual(notices[0].data.allowedMentions, { parse: [], users: [] });
+  assert.ok(
+    notices[0].components[0].components.some((button) =>
+      button.custom_id?.includes(":delete:"),
+    ),
+  );
+  const intro = await target.messages.fetch(
+    service.store.get("ticket-discord", ticket.id).introId,
+  );
+  assert.match(intro.content, /closed by the player/);
+  assert.doesNotMatch(intro.content, /will claim/);
+});
+
+test("an uncertain closure notice is recovered once and old closure controls cannot affect a reopened ticket", async (t) => {
+  const app = setupDiscord(t),
+    { service, transport, user, channels } = app;
+  const owner = { id: user.id, name: "Player" };
+  const ticket = await supportTicket(service, owner, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  target.failAfterBotSend = true;
+  service.closeTicket(owner, ticket.id, {});
+  await service.pump();
+  const [key, job] = service.store
+    .entries("ticket-outbox")
+    .find(([, job]) => job.kind === "activity");
+  assert.equal(job.attempts, 1);
+  job.after = 0;
+  service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
+  await service.pump();
+  const notices = [...target.savedMessages.values()].filter((message) =>
+    message.content.includes("player closed"),
+  );
+  assert.equal(notices.length, 1);
+  const oldDelete = notices[0].components[0].components.find((button) =>
+    button.custom_id?.includes(":delete:"),
+  );
+  await service.reopen(owner, ticket.id);
+  await service.pump();
+  assert.equal(service.get(ticket.id).status, "pending");
+  const reopened = [...target.savedMessages.values()].filter((message) =>
+    message.content.includes("was reopened"),
+  );
+  assert.equal(reopened.length, 1);
+  assert.ok(
+    reopened[0].components[0].components.some(
+      (button) => button.custom_id === `ticket:claim:${ticket.id}`,
+    ),
+  );
+  const expired = await click(
+    app.client,
+    app.staffMembers.get("200").user,
+    oldDelete.custom_id,
+  );
+  assert.match(expired.data, /earlier closure/);
+  assert.equal(channels.has(target.id), true);
+  assert.ok(
+    target.overwrites
+      .find((entry) => entry.id === user.id)
+      .allow.includes(P.ViewChannel),
+  );
+});
+
 test("native staff replies refresh the Discord overview and only Admin or higher can take over", async (t) => {
   const { service, transport, channels, user, client, staffMembers } =
     setupDiscord(t);
