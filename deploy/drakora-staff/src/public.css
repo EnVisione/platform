@@ -44,202 +44,90 @@ button {
 .public-fire {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   overflow: hidden;
   pointer-events: none;
   user-select: none;
 }
-.public-fire-drift {
+.public-fire-canvas {
+  display: block;
   width: 100%;
   height: 100%;
-  transform: translate(var(--fire-x, 0px), var(--fire-y, 0px));
-  transition: transform 700ms ease-out;
 }
-.public-fire-smoke {
-  position: absolute;
-  z-index: 0;
-  left: var(--smoke-x);
-  bottom: var(--smoke-bottom);
-  width: var(--smoke-size);
-  aspect-ratio: 4 / 5;
-}
-.public-fire-smoke-push {
-  width: 100%;
-  height: 100%;
-  opacity: calc(1 - var(--smoke-scatter, 0));
-  transform: translate(var(--smoke-push-x, 0px), var(--smoke-push-y, 0px))
-    scale(calc(1 + var(--smoke-scatter, 0) * 0.4));
-  transition:
-    transform 650ms ease-out,
-    opacity 650ms ease-out;
-}
-.public-fire-smoke-rise {
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  animation: drakora-smoke-rise var(--smoke-duration) linear var(--smoke-delay)
-    infinite;
-}
-.public-fire-smoke-cloud {
-  width: 100%;
-  height: 100%;
-  filter: blur(2px);
-}
-.public-fire-embers {
+.public-fire-fallback {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  background:
+    radial-gradient(ellipse 80px 180px at 40px 100%, #71311b66, transparent),
+    radial-gradient(
+      ellipse 80px 160px at calc(100% - 40px) 100%,
+      #71311b66,
+      transparent
+    );
 }
-.public-fire-ember {
+.public-fire.has-webgl .public-fire-fallback {
+  display: none;
+}
+.public-dragon-flight {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.public-word-fire {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.public-scorched {
+  position: relative;
+  z-index: 4;
+  text-shadow: 0 0 14px #a6382b66;
+  transform: translateY(var(--scorch-fall, 0px))
+    rotate(var(--scorch-tilt, 0deg));
+  transform-origin: center top;
+}
+.public-fire-foreground {
   position: absolute;
-  left: var(--ember-x);
-  top: 110%;
-  width: var(--ember-size);
-  height: var(--ember-size);
-  background: var(--ember-color);
+  inset: 0;
+}
+.public-fire-dragon {
+  position: absolute;
+  left: 0;
+  top: 0;
   opacity: 0;
-  animation: drakora-ember-rise var(--ember-duration) linear var(--ember-delay)
-    infinite;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  will-change: transform;
 }
-.public-fire-flame {
-  position: absolute;
-  z-index: 2;
-  bottom: 11vh;
-  width: 108px;
-  height: 144px;
-  opacity: 0.58;
-  transform-origin: center bottom;
-  animation: drakora-flame-flicker 2.1s steps(6, end) infinite;
+.public-motion-toggle {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #bdbdbd;
+  background: #202020;
+  font-size: 11px;
 }
-.public-fire-flame.flame-0 {
-  left: 16px;
+.public-motion-toggle:hover {
+  color: #fff;
 }
-.public-fire-flame.flame-1 {
-  left: 96px;
-  bottom: 5vh;
-  width: 66px;
-  height: 88px;
-  animation-delay: -1.5s;
-}
-.public-fire-flame.flame-2 {
-  right: 16px;
-  animation-delay: -2.5s;
-}
-.public-fire-flame.flame-3 {
-  right: 100px;
-  bottom: 6vh;
-  width: 60px;
-  height: 80px;
-  animation-delay: -0.5s;
-}
-.public-fire-flame.flame-4 {
-  left: 24px;
-  bottom: 58vh;
-  width: 42px;
-  height: 56px;
-  animation-delay: -0.8s;
-}
-.public-fire-flame.flame-5 {
-  right: 24px;
-  bottom: 48vh;
-  width: 48px;
-  height: 64px;
-  animation-delay: -1.2s;
-}
-.public-fire-tongue {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: drakora-flame-tongue 1.7s steps(4, end) infinite;
-}
-.public-fire-tongue.tongue-inner {
-  animation-duration: 1.1s;
-  animation-delay: -0.4s;
-}
-.public-fire-tongue.tongue-core {
-  animation-duration: 0.9s;
-  animation-delay: -0.6s;
-}
-.public-fire.is-paused .public-fire-ember,
-.public-fire.is-paused .public-fire-flame,
-.public-fire.is-paused .public-fire-tongue,
-.public-fire.is-paused .public-fire-smoke-rise {
-  animation-play-state: paused;
-}
-.public-fire.is-paused .public-fire-drift,
-.public-fire.is-paused .public-fire-smoke-push {
-  transition: none;
+.public-motion-toggle:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
 }
 .public-nav,
 .public-masthead,
 .public-content,
 .public-footer {
   position: relative;
-  z-index: 1;
-}
-@keyframes drakora-ember-rise {
-  0% {
-    opacity: 0;
-    transform: translate(0, 0);
-  }
-  15% {
-    opacity: 0.52;
-  }
-  40% {
-    opacity: 0.38;
-    transform: translate(22px, -45vh);
-  }
-  70% {
-    opacity: 0.2;
-    transform: translate(-16px, -85vh);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(10px, -120vh);
-  }
-}
-@keyframes drakora-smoke-rise {
-  0% {
-    opacity: 0;
-    transform: translate(-12px, 36px) scale(0.75);
-  }
-  20% {
-    opacity: 0.25;
-  }
-  55% {
-    opacity: 0.32;
-    transform: translate(18px, -60px) scale(1.04);
-  }
-  80% {
-    opacity: 0.18;
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-8px, -180px) scale(1.25);
-  }
-}
-@keyframes drakora-flame-flicker {
-  0%,
-  100% {
-    opacity: 0.48;
-    transform: scale(0.97, 0.94) rotate(-2deg);
-  }
-  35% {
-    opacity: 0.68;
-    transform: scale(1.02, 1.08) rotate(1deg);
-  }
-  70% {
-    opacity: 0.56;
-    transform: scale(0.96, 1.01) rotate(2deg);
-  }
-}
-@keyframes drakora-flame-tongue {
-  0%,
-  100% {
-    transform: scale(1, 0.92) translateX(-0.5px);
-  }
-  50% {
-    transform: scale(0.95, 1.08) translateX(0.5px);
-  }
 }
 .public-icon {
   display: inline-block;
@@ -334,7 +222,7 @@ button {
   z-index: -2;
   background: #252727 url("./assets/medieval-castle.svg") center 55% / cover
     no-repeat;
-  filter: blur(12px);
+  filter: blur(5px);
 }
 .public-header::after {
   inset: 0;
@@ -1034,24 +922,6 @@ button {
   }
 }
 @media (max-width: 700px) {
-  .public-fire-ember:nth-child(n + 19),
-  .public-fire-flame.flame-1,
-  .public-fire-flame.flame-3,
-  .public-fire-flame.flame-4,
-  .public-fire-flame.flame-5,
-  .public-fire-smoke.smoke-1,
-  .public-fire-smoke.smoke-2,
-  .public-fire-smoke.smoke-3,
-  .public-fire-smoke.smoke-4 {
-    display: none;
-  }
-  .public-fire-flame {
-    width: 60px;
-    height: 80px;
-  }
-  .public-fire-smoke {
-    width: min(var(--smoke-size), 160px);
-  }
   .public-brand img {
     width: 64px;
     height: 64px;
@@ -1206,7 +1076,10 @@ button {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .public-fire {
+  .public-fire,
+  .public-dragon-flight,
+  .public-word-fire,
+  .public-motion-toggle {
     display: none;
   }
   *,

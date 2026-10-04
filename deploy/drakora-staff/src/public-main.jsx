@@ -504,7 +504,7 @@ function PublicSite() {
   }, [title]);
   return (
     <div className="public-site">
-      <AmbientFire />
+      <AmbientFire ready={Boolean(content)} />
       <a href="#main" className="public-skip">
         Skip to content
       </a>
@@ -747,6 +747,21 @@ function PublicSite() {
             <PublicIcon name="help" /> Need help?
           </a>
         </nav>
+        <details className="public-art-credits">
+          <summary>Artwork credits</summary>
+          <p>
+            <a href="https://opengameart.org/content/flying-dragon-rework">
+              Flying Dragon Rework
+            </a>{" "}
+            by ZaPaper and Jordan Irwin (AntumDeluge), with credits to{" "}
+            <a href="http://www.buko-studios.com/">Buko Studios</a>.
+            Commissioned by{" "}
+            <a href="https://www.playcraftapp.com/">PlayCraft</a>. Used under{" "}
+            <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>
+            . The original red sprite is displayed with a flight path and fire
+            effects.
+          </p>
+        </details>
         <LegalNotice />
         <small>© {new Date().getFullYear()} Drakora</small>
       </footer>
