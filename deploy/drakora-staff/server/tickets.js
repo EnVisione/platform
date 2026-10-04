@@ -87,7 +87,7 @@ export function ticketService(
   function queue(ticket, kind, ref = ticket.id, notice) {
     const id = `${ticket.id}:${kind}:${ref}`;
     const outbox =
-      ticket.type === "partnership" && kind !== "note"
+      ticket.type === "partnership" && !["note", "notes-thread"].includes(kind)
         ? "partnership-outbox"
         : "ticket-outbox";
     const pendingNotice = notice || store.get(outbox, id)?.notice;
@@ -551,6 +551,7 @@ export function ticketService(
         throw new AuthError("ticket_ip_limit", 409);
       audit(ticket, user, "opened", "Ticket opened");
       queue(ticket, "create");
+      if (transport?.notesThread) queue(ticket, "notes-thread");
       if (config.tickets.staffChannelId)
         for (const event of ["opened", "unclaimed"])
           put("ticket-notice-outbox", `${ticket.id}:${event}`, {
@@ -648,6 +649,7 @@ export function ticketService(
         throw new AuthError("partnership_limit", 409);
       audit(ticket, user, "opened", "Modpack partnership request submitted");
       queue(ticket, "opened");
+      if (transport?.notesThread) queue(ticket, "notes-thread");
       if (config.tickets.staffChannelId)
         for (const event of ["opened", "unclaimed"])
           put("ticket-notice-outbox", `${ticket.id}:${event}`, {
@@ -1352,6 +1354,7 @@ export function ticketService(
           notesBlocked = new Set();
         const priority = {
           create: 0,
+          "notes-thread": 1,
           message: 1,
           note: 1,
           status: 2,
@@ -1406,6 +1409,7 @@ export function ticketService(
           } else if (
             job.kind !== "create" &&
             job.kind !== "note" &&
+            job.kind !== "notes-thread" &&
             !ticket.channelId &&
             !(
               job.kind === "activity" &&
@@ -1423,7 +1427,10 @@ export function ticketService(
           if (attempts++ === 20) break;
           try {
             if (job.kind === "create") await transport.create(ticket);
-            else if (job.kind === "feedback") {
+            else if (job.kind === "notes-thread") {
+              const result = await transport.notesThread(ticket);
+              if (result?.pending) continue;
+            } else if (job.kind === "feedback") {
               const result = await transport.feedback(ticket, job, key);
               if (result?.pending) continue;
             } else if (["status", "activity", "delete"].includes(job.kind)) {
@@ -1673,6 +1680,18 @@ export function ticketService(
     authorize,
     attach(value) {
       transport = value;
+      if (value.notesThread)
+        for (const [, ticket] of store.entries("ticket"))
+          if (
+            !ticket.erasingAt &&
+            ["pending", "claimed"].includes(ticket.status) &&
+            !store.get("ticket-notes-discord", ticket.id)?.threadId &&
+            !store.get(
+              "ticket-outbox",
+              `${ticket.id}:notes-thread:${ticket.id}`,
+            )
+          )
+            queue(ticket, "notes-thread");
       for (const [, ticket] of store.entries("ticket"))
         if (
           ticket.channelId &&

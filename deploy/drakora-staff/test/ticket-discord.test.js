@@ -365,6 +365,145 @@ function setupDiscord(t, notices = false) {
   };
 }
 
+test("ticket opening creates empty private staff threads for website, Discord and partnership intake", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  await transport.recover();
+  const input = {
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description: "An issue for staff to discuss without writing a panel note.",
+  };
+  const website = service.create(user, { ...input, requestId: randomUUID() });
+  const discord = service.create(
+    user,
+    { ...input, requestId: randomUUID() },
+    "discord",
+  );
+  const partner = service.createPartnership(
+    user,
+    {
+      requestId: randomUUID(),
+      name: "Pack owner",
+      relationship: "owner",
+      email: "pack@example.invalid",
+      discord: "packowner",
+      packUrl: "https://example.invalid/pack",
+      preference: "email",
+      description:
+        "A modpack partnership request for the network to consider hosting.",
+    },
+    "a".repeat(64),
+  );
+  await service.pump();
+  for (const ticket of [website, discord, partner]) {
+    const state = service.store.get("ticket-notes-discord", ticket.id);
+    const thread = channels.get(state.threadId);
+    assert.equal(thread.type, ChannelType.PrivateThread);
+    assert.equal(thread.invitable, false);
+    assert.equal(thread.savedMessages.size, 0);
+    assert.equal(service.messages(ticket.id).length, 0);
+    assert.equal((await thread.members.fetch()).has(user.id), false);
+    assert.deepEqual(
+      [...(await thread.members.fetch()).keys()].sort(),
+      ticket.type === "partnership" ? ["200", "bot"] : ["200", "201", "bot"],
+    );
+  }
+  assert.equal(service.get(partner.id).channelId, null);
+  const before = channels.filter(
+    (value) => value.type === ChannelType.PrivateThread,
+  ).size;
+  await transport.recover();
+  service.attach(transport);
+  await service.pump();
+  assert.equal(
+    channels.filter((value) => value.type === ChannelType.PrivateThread).size,
+    before,
+  );
+  service.attach({});
+  const existing = service.create(
+    { ...user, id: "101" },
+    { ...input, requestId: randomUUID() },
+  );
+  assert.equal(
+    service.store.get("ticket-notes-discord", existing.id),
+    undefined,
+  );
+  service.attach(transport);
+  await service.pump();
+  const restored = service.store.get("ticket-notes-discord", existing.id);
+  assert.ok(restored.threadId);
+  await Promise.all([
+    transport.notesThread(existing),
+    transport.notesThread(existing),
+  ]);
+  assert.equal(
+    channels.filter(
+      (value) => value.name === `ticket-${existing.id}-internal-notes`,
+    ).size,
+    1,
+  );
+});
+
+test("failed opening thread creation retries without blocking player replies or duplicating threads", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  await transport.recover();
+  const input = {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description: "Staff can discuss this ticket before the first panel note.",
+  };
+  const first = service.create(user, input);
+  await service.pump();
+  const parent = channels.get(
+    service.store.get("ticket-notes-discord", first.id).parentId,
+  );
+  parent.failThreadCreation = true;
+  const ticket = service.create(user, { ...input, requestId: randomUUID() });
+  service.reply(user, ticket.id, {
+    requestId: randomUUID(),
+    content: "The player can still reply.",
+  });
+  await service.pump();
+  assert.equal(service.messages(ticket.id)[0].delivery, "delivered");
+  assert.ok(
+    service.store
+      .entries("ticket-outbox")
+      .some(
+        ([, job]) =>
+          job.ticketId === ticket.id &&
+          job.kind === "notes-thread" &&
+          job.attempts === 1,
+      ),
+  );
+  await transport.recover();
+  const state = service.store.get("ticket-notes-discord", ticket.id);
+  assert.ok(state.threadId);
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "notes-thread")
+      service.store.set(
+        "ticket-outbox",
+        key,
+        { ...job, after: 0 },
+        Number.MAX_SAFE_INTEGER,
+      );
+  await service.pump();
+  assert.equal(
+    channels.filter(
+      (value) => value.name === `ticket-${ticket.id}-internal-notes`,
+    ).size,
+    1,
+  );
+  assert.equal(
+    service.store
+      .entries("ticket-outbox")
+      .some(([, job]) => job.kind === "notes-thread"),
+    false,
+  );
+});
+
 test("internal notes sync privately in both directions and survive customer channel deletion", async (t) => {
   const app = setupDiscord(t),
     { service, transport, channels, client, user, config } = app;
@@ -378,6 +517,8 @@ test("internal notes sync privately in both directions and survive customer chan
     description: "A detailed issue for staff to handle in this private ticket.",
   });
   await service.pump();
+  assert.ok(service.store.get("ticket-notes-discord", ticket.id)?.threadId);
+  assert.equal(service.notes(manager, ticket.id).messages.length, 0);
   service.addNote(manager, ticket.id, {
     requestId: randomUUID(),
     content: "Private strategy, not a player reply.",

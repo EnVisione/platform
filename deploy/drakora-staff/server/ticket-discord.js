@@ -1339,6 +1339,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     bytes: (file) => transport.bytes(file),
   });
   transport.note = notes.send;
+  transport.notesThread = notes.ensure;
   async function observe(message, edited = false, closing = false) {
     const ticket = service.linked(message.channelId);
     if (
@@ -1921,7 +1922,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         return await interaction.editReply({
           content: url
             ? `Private staff discussion: ${url}\nStaff panel: ${config.staffOrigin}/tickets/${id}#notes`
-            : `Open Internal staff notes in the staff panel. The first note creates a private Discord thread: ${config.staffOrigin}/tickets/${id}#notes`,
+            : `The private staff discussion is syncing to Discord. You can use the staff panel now: ${config.staffOrigin}/tickets/${id}#notes`,
           allowedMentions: { parse: [] },
         });
       }

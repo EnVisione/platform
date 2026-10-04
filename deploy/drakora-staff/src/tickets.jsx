@@ -624,8 +624,8 @@ function InternalNotes({ base, csrf, active, canReply }) {
         )}
         {data && !messages.length && (
           <p className="ticket-empty">
-            No internal notes yet. The first note creates a private Discord
-            thread for this ticket.
+            No internal notes yet. Discuss this ticket here or in its private
+            Discord thread.
           </p>
         )}
         {messages.map((message) => (

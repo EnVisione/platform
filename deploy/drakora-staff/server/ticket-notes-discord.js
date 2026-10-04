@@ -15,6 +15,8 @@ export function ticketNotesDiscord(
   let running,
     stopped = false;
   const store = service.store;
+  const pendingThreads = new Map();
+  const pendingParents = new Map();
   const save = (kind, id, value) => store.set(kind, id, value, forever);
   const guild = () => client.guilds.fetch(config.guildId);
   const linked = (id) => {
@@ -61,7 +63,7 @@ export function ticketNotesDiscord(
       };
     });
   }
-  async function parent(ticket, members) {
+  async function createParent(ticket, members) {
     const category = ticketCategory(ticket),
       main = await guild();
     const settings = store.get("ticket-notes-settings", "parents") || {};
@@ -85,9 +87,22 @@ export function ticketNotesDiscord(
         permissionOverwrites: permissions(members, category),
       });
     await target.permissionOverwrites.set(permissions(members, category));
-    settings[category] = target.id;
-    save("ticket-notes-settings", "parents", settings);
+    save("ticket-notes-settings", "parents", {
+      ...store.get("ticket-notes-settings", "parents"),
+      [category]: target.id,
+    });
     return target;
+  }
+  function parent(ticket, members) {
+    const category = ticketCategory(ticket);
+    if (!pendingParents.has(category))
+      pendingParents.set(
+        category,
+        createParent(ticket, members).finally(() =>
+          pendingParents.delete(category),
+        ),
+      );
+    return pendingParents.get(category);
   }
   function owned(target, ticket, state) {
     if (
@@ -210,10 +225,20 @@ export function ticketNotesDiscord(
     await synchronize(result, ticket, members);
     return result;
   }
+  function ensure(ticket, create = true, batch) {
+    if (!pendingThreads.has(ticket.id))
+      pendingThreads.set(
+        ticket.id,
+        thread(ticket, create, batch).finally(() =>
+          pendingThreads.delete(ticket.id),
+        ),
+      );
+    return pendingThreads.get(ticket.id);
+  }
   async function send(ticket, message, attachments) {
     if (!message.internal)
       throw new Error("Only internal notes can use the staff thread");
-    const target = await thread(ticket);
+    const target = await ensure(ticket);
     if (target.pending) return target;
     if (target.archived) await target.setArchived(false);
     const key = `note:${message.id}`;
@@ -355,7 +380,7 @@ export function ticketNotesDiscord(
         let ticket;
         try {
           ticket = service.get(state.ticketId);
-          const target = await thread(ticket, false, context);
+          const target = await ensure(ticket, !state.threadId, context);
           if (!target || target.pending) continue;
           let after = state.after || target.id;
           for (let page = 0; page < 5; page++) {
@@ -481,8 +506,11 @@ export function ticketNotesDiscord(
   };
   client.on("messageCreate", onMessage);
   client.on("raw", onRaw);
-  service.registerCleanupWaiter(() => running);
+  service.registerCleanupWaiter(() =>
+    Promise.allSettled([running, ...pendingThreads.values()]),
+  );
   return {
+    ensure,
     send,
     recover,
     refreshPermissions,
@@ -491,7 +519,7 @@ export function ticketNotesDiscord(
       stopped = true;
       client.off("messageCreate", onMessage);
       client.off("raw", onRaw);
-      await running;
+      await Promise.allSettled([running, ...pendingThreads.values()]);
     },
   };
 }
