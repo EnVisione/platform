@@ -55,6 +55,7 @@ export function applicationService(
   getMinecraftLink = () => undefined,
   getStaffAvatar = () => undefined,
   onActivity = () => {},
+  eraseOnboarding = async () => {},
 ) {
   const notifications = applicationNotifications(config, store, fetcher);
   const forms = applicationForms(config, store);
@@ -844,6 +845,7 @@ export function applicationService(
           { ...summary, erasingAt: record.erasingAt },
           permanent,
         );
+      await eraseOnboarding(record);
       await notifications.erase(record);
       store.transaction(() => {
         for (const kind of store.kinds()) {

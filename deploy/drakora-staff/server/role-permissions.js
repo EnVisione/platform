@@ -398,7 +398,11 @@ export function rolePermissions(config, store) {
         throw new AuthError("invalid_request", 400);
       const { term, withinDate } = listFilters({ ...input, offset });
       const { action = "" } = input;
-      if (!["", "permissions", "assignment"].includes(action))
+      if (
+        !["", "permissions", "assignment", "application-invite"].includes(
+          action,
+        )
+      )
         throw new AuthError("invalid_list_filters", 400);
       const page = store.page(
         "role-audit",
@@ -407,7 +411,12 @@ export function rolePermissions(config, store) {
         (entry) =>
           (!action || entry.action === action) &&
           withinDate(entry.at) &&
-          matchesText(term, [entry.actor.id, entry.actor.name, entry.memberId]),
+          matchesText(term, [
+            entry.actor.id,
+            entry.actor.name,
+            entry.memberId,
+            entry.applicationId,
+          ]),
       );
       return { ...page, pageSize: 25 };
     },

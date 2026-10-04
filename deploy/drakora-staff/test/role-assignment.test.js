@@ -243,6 +243,27 @@ test("queued ranks and access survive restart and wait until the member joins st
   assert.equal(app.assignments.status("42").request.status, "applied");
 });
 
+test("individual onboarding grants preserve queued access and specialist roles before joining", async (t) => {
+  const app = setup(t, [member("2", "42", ["99"])]);
+  for (const roleId of ["10", "52", "23"]) {
+    const { members } = await app.assignments.list(actor("28"), "42");
+    await app.assignments.grant(actor("28"), "42", members[0].version, roleId);
+  }
+  assert.equal(app.assignments.status("42").request.status, "waiting_member");
+  assert.deepEqual(
+    new Set(app.roster.get("2:42").roles),
+    new Set(["99", "123"]),
+  );
+  app.roster.set("1:42", member("1", "42", ["98"]));
+  await app.sync.join(app.roster.get("1:42"));
+  await app.assignments.reconcile("42");
+  assert.deepEqual(
+    new Set(app.roster.get("1:42").roles),
+    new Set(["98", "23", "52", "10"]),
+  );
+  assert.equal(app.assignments.status("42").request.status, "applied");
+});
+
 test("blocked Founder promotion keeps the existing rank until bot permissions allow the complete change", async (t) => {
   const app = setup(t, [
     member("1", "42", ["28", "10", "11"]),
@@ -262,6 +283,24 @@ test("blocked Founder promotion keeps the existing rank until bot permissions al
   await app.sync.retry(true);
   assert.ok(app.roster.get("1:42").roles.includes("20"));
   assert.ok(app.roster.get("2:42").roles.includes("120"));
+});
+
+test("role grants cannot bypass queued protected promotions or stale membership", async (t) => {
+  const app = setup(t, [member("2", "42", ["99"])]);
+  app.blocked.add("120");
+  let { members } = await app.assignments.list(actor("20"), "42");
+  await app.assignments.grant(actor("20"), "42", members[0].version, "20");
+  ({ members } = await app.assignments.list(actor("28"), "42"));
+  await assert.rejects(
+    app.assignments.grant(actor("28"), "42", members[0].version, "23"),
+    { code: "founder_role_required" },
+  );
+  app.roster.get("2:42").roles.push("98");
+  await assert.rejects(
+    app.assignments.grant(actor("20"), "42", members[0].version, "52"),
+    { code: "discord_roles_changed" },
+  );
+  assert.equal(app.store.get("role-assignment", "42").rank, "20");
 });
 
 test("stale assignment versions, invalid roles and self-removal cannot change Discord", async (t) => {

@@ -37,6 +37,7 @@ import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
 
 import { applicationService } from "./applications.js";
+import { applicationOnboarding } from "./application-onboarding.js";
 import { applicationRouter } from "./application-routes.js";
 import { applicationFormRouter } from "./application-form-routes.js";
 import { mailboxService } from "./mailbox.js";
@@ -81,6 +82,7 @@ const applicationDatabase = config.applications
 const minecraft = minecraftRegistry(store);
 const timeSettings = timePreferences(store);
 const website = config.website ? websiteService(config, store) : undefined;
+let onboarding;
 const applications = applicationDatabase
   ? applicationService(
       config,
@@ -89,6 +91,7 @@ const applications = applicationDatabase
       minecraft.get,
       (id) => store.get("user", id)?.avatar,
       (id, at) => privacyActivity(store, id, at),
+      (record) => onboarding?.erase(record),
     )
   : undefined;
 const rolePolicy = rolePermissions(config, store);
@@ -183,6 +186,16 @@ const assignments =
         rolePolicy,
         office.roleAdministration,
         office.roleSync,
+      )
+    : undefined;
+onboarding =
+  applications && office
+    ? applicationOnboarding(
+        config,
+        applicationDatabase.store,
+        office,
+        rolePolicy,
+        assignments,
       )
     : undefined;
 office?.onRolesChanged((id) => {
@@ -1612,6 +1625,7 @@ async function stop() {
   await retention.close();
   clearInterval(sweep);
   clearInterval(assignmentTimer);
+  await onboarding?.close();
   await assignments?.close();
   await todoSync?.close();
   await applications?.close();

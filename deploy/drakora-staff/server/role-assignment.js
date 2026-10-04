@@ -240,6 +240,130 @@ export function roleAssignments(config, store, policy, transport, sync) {
       }
     });
   }
+  async function assign(user, id, input, addRole) {
+    const current = policy.authorize(user, "roles.assign");
+    if (
+      !/^\d{1,20}$/.test(id) ||
+      !input ||
+      typeof input.version !== "string" ||
+      !/^[a-f0-9]{64}$/.test(input.version) ||
+      (!addRole &&
+        ((input.rank !== null &&
+          !managed.some(
+            (role) => !role.specialist && role.id === input.rank,
+          )) ||
+          !Array.isArray(input.specialists) ||
+          input.specialists.length > 3 ||
+          new Set(input.specialists).size !== input.specialists.length ||
+          input.specialists.some(
+            (id) => !managed.some((role) => role.specialist && role.id === id),
+          ) ||
+          typeof input.access?.dashboard !== "boolean" ||
+          typeof input.access?.todo !== "boolean")) ||
+      (addRole &&
+        ![
+          ...managed.map((role) => role.id),
+          config.accessRoles.dashboard,
+        ].includes(addRole))
+    )
+      throw new AuthError("invalid_role_assignment", 400);
+    return exclusive(id, async () => {
+      const members = await transport.lookup(id);
+      if (!members.length || members.some((member) => member.bot))
+        throw new AuthError("discord_member_required", 404);
+      if (version(members) !== input.version)
+        throw new AuthError("discord_roles_changed", 409);
+      const roles = staffRoles(members);
+      if (addRole) {
+        const queued = store.get("role-assignment", id);
+        const pending = queued && queued.status !== "applied";
+        const extras = new Set(pending ? queued.extraRoles : roles);
+        const selected = managed.find((role) => role.id === addRole);
+        if (selected?.specialist || addRole === config.accessRoles.dashboard)
+          extras.add(addRole);
+        input = {
+          version: input.version,
+          rank:
+            selected && !selected.specialist
+              ? selected.id
+              : pending
+                ? queued.rank
+                : (managed.find(
+                    (role) => !role.specialist && roles.includes(role.id),
+                  )?.id ?? null),
+          specialists: managed
+            .filter((role) => role.specialist && extras.has(role.id))
+            .map((role) => role.id),
+          access: {
+            dashboard: extras.has(config.accessRoles.dashboard),
+            todo: extras.has(config.accessRoles.todo),
+          },
+        };
+        if (
+          pending &&
+          !policy.isFounder(current) &&
+          queued.rank !== input.rank &&
+          managed.some(
+            (role) =>
+              ["Founder", "Manager"].includes(role.name) &&
+              role.id === queued.rank,
+          )
+        )
+          throw new AuthError("founder_role_required");
+      }
+      const desiredRank = managed.find((role) => role.id === input.rank);
+      const protectedRoles = managed.filter((role) =>
+        ["Founder", "Manager"].includes(role.name),
+      );
+      if (
+        !policy.isFounder(current) &&
+        (protectedRoles.some(
+          (role) => roles.includes(role.id) !== (input.rank === role.id),
+        ) ||
+          (roles.some((id) => protectedRoles.some((role) => role.id === id)) &&
+            (input.access.dashboard !==
+              roles.includes(config.accessRoles.dashboard) ||
+              input.access.todo !== roles.includes(config.accessRoles.todo))))
+      )
+        throw new AuthError("founder_role_required");
+      if (
+        policy.isFounder(current) &&
+        current.id === id &&
+        (desiredRank?.name !== "Founder" || !input.access.dashboard)
+      )
+        throw new AuthError("founder_access_protected", 400);
+      if (!sync) throw new AuthError("role_sync_unavailable", 503);
+      const extraRoles = [
+        ...input.specialists,
+        ...(input.access.dashboard ? [config.accessRoles.dashboard] : []),
+        ...(input.access.todo ? [config.accessRoles.todo] : []),
+      ];
+      const request = {
+        id,
+        operationId: randomUUID(),
+        requestedAt: Date.now(),
+        actor: { id: user.id, name: user.name },
+        extraRoles,
+        rank: input.rank,
+        status: "pending",
+        error: null,
+      };
+      set(request);
+      policy.audit(user, "assignment", {
+        memberId: id,
+        rank: input.rank,
+        specialists: input.specialists,
+        access: input.access,
+      });
+      const syncedRoles = syncRoles(request);
+      await sync.assign(id, syncedRoles);
+      set({ ...request, rankQueued: true, syncedRoles });
+      return { queued: true, id, ...status(id) };
+    }).then(async (result) => {
+      await reconcile(id);
+      return { ...result, ...status(id) };
+    });
+  }
   return {
     status,
     async list(user, query = "", offset = 0) {
@@ -275,88 +399,9 @@ export function roleAssignments(config, store, policy, transport, sync) {
         syncsToMain: mappedIds.has(role.id),
       }));
     },
-    async assign(user, id, input) {
-      const current = policy.authorize(user, "roles.assign");
-      if (
-        !/^\d{1,20}$/.test(id) ||
-        !input ||
-        typeof input.version !== "string" ||
-        !/^[a-f0-9]{64}$/.test(input.version) ||
-        (input.rank !== null &&
-          !managed.some(
-            (role) => !role.specialist && role.id === input.rank,
-          )) ||
-        !Array.isArray(input.specialists) ||
-        input.specialists.length > 3 ||
-        new Set(input.specialists).size !== input.specialists.length ||
-        input.specialists.some(
-          (id) => !managed.some((role) => role.specialist && role.id === id),
-        ) ||
-        typeof input.access?.dashboard !== "boolean" ||
-        typeof input.access?.todo !== "boolean"
-      )
-        throw new AuthError("invalid_role_assignment", 400);
-      return exclusive(id, async () => {
-        const members = await transport.lookup(id);
-        if (!members.length || members.some((member) => member.bot))
-          throw new AuthError("discord_member_required", 404);
-        if (version(members) !== input.version)
-          throw new AuthError("discord_roles_changed", 409);
-        const roles = staffRoles(members);
-        const desiredRank = managed.find((role) => role.id === input.rank);
-        const protectedRoles = managed.filter((role) =>
-          ["Founder", "Manager"].includes(role.name),
-        );
-        if (
-          !policy.isFounder(current) &&
-          (protectedRoles.some(
-            (role) => roles.includes(role.id) !== (input.rank === role.id),
-          ) ||
-            (roles.some((id) =>
-              protectedRoles.some((role) => role.id === id),
-            ) &&
-              (input.access.dashboard !==
-                roles.includes(config.accessRoles.dashboard) ||
-                input.access.todo !== roles.includes(config.accessRoles.todo))))
-        )
-          throw new AuthError("founder_role_required");
-        if (
-          policy.isFounder(current) &&
-          current.id === id &&
-          (desiredRank?.name !== "Founder" || !input.access.dashboard)
-        )
-          throw new AuthError("founder_access_protected", 400);
-        if (!sync) throw new AuthError("role_sync_unavailable", 503);
-        const extraRoles = [
-          ...input.specialists,
-          ...(input.access.dashboard ? [config.accessRoles.dashboard] : []),
-          ...(input.access.todo ? [config.accessRoles.todo] : []),
-        ];
-        const request = {
-          id,
-          operationId: randomUUID(),
-          requestedAt: Date.now(),
-          actor: { id: user.id, name: user.name },
-          extraRoles,
-          rank: input.rank,
-          status: "pending",
-          error: null,
-        };
-        set(request);
-        policy.audit(user, "assignment", {
-          memberId: id,
-          rank: input.rank,
-          specialists: input.specialists,
-          access: input.access,
-        });
-        const syncedRoles = syncRoles(request);
-        await sync.assign(id, syncedRoles);
-        set({ ...request, rankQueued: true, syncedRoles });
-        return { queued: true, id, ...status(id) };
-      }).then(async (result) => {
-        await reconcile(id);
-        return { ...result, ...status(id) };
-      });
+    assign,
+    grant(user, id, version, roleId) {
+      return assign(user, id, { version }, roleId);
     },
     reconcile,
     async retry() {

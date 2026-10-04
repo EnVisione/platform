@@ -461,6 +461,7 @@ function RoleHistory({ revision }) {
             <option value="">All actions</option>
             <option value="permissions">Permission changes</option>
             <option value="assignment">Discord role changes</option>
+            <option value="application-invite">Staff server invites</option>
           </select>
         </label>
         <DateFilters {...filters} change={change} />
@@ -501,7 +502,9 @@ function RoleHistory({ revision }) {
                 <strong>{entry.actor.name}</strong>{" "}
                 {entry.action === "permissions"
                   ? `saved permission revision ${entry.revision}`
-                  : `requested Discord role changes for ${entry.memberId}`}
+                  : entry.action === "application-invite"
+                    ? `sent a staff server invite to ${entry.memberId}`
+                    : `requested Discord role changes for ${entry.memberId}`}
                 <small>{time(entry.at)}</small>
               </li>
             ))}

@@ -192,6 +192,8 @@ By default, Managers and Founders can open **Edit application questions** from S
 
 ## Roles and dashboard permissions
 
+Accepted applications with a linked Discord account have **Give role** and **Invite to staff server** buttons in the staff Discord notice. Authorized Managers and Founders can choose configured ranks, specialist roles or Dashboard access, then DM a single-use, 24-hour staff invite. Roles selected before joining remain queued for membership and screening. Applicants who chose email updates must enable Discord updates before the bot can DM an invite. See [application delivery](documentation.md#application-storage-and-delivery) for permissions and delivery behavior.
+
 Managers and Founders can open **Roles**. The page lists Founder, Manager, Admin, Sr Mod, Mod, Jr Mod, Helper, Builder, Dev and Artist, with grouped switches for every dashboard action. Changes across roles are saved together. Existing access rules are the defaults; the Roles page can delegate individual features, such as letting Sr Mod read Email without sending mail or changing its read status.
 
 Members receive the combined grants of their roles. A disabled switch does not override another role that grants that permission. Dependent permissions require their parent access. The Dashboard role is required for admission; rank assignments alone do not grant admission. Workspace accounts are created automatically, and the saved Open Tracker and Calendar permission controls workspace access. Role management remains limited to Managers and Founders, even when other feature permissions are delegated. Managers cannot edit Founder permissions. Founder dashboard and role-management access is protected against accidental removal.

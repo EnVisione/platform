@@ -2,6 +2,7 @@ import { applicationChannels } from "./application-channels.js";
 import { hash } from "./store.js";
 import { applicationRoles } from "../shared/application-form.js";
 import { applicationMail } from "./application-mail.js";
+import { applicationControls } from "./application-onboarding.js";
 
 const permanent = Number.MAX_SAFE_INTEGER;
 const events = ["received", "reviewing", "approved", "denied"];
@@ -38,6 +39,8 @@ export function applicationNotifications(
   let closed = false;
   let offset = 0;
   let emailOffset = 0;
+  let controlsKeys;
+  const controlsVersion = config.roleSync ? 2 : 1;
   const fallback = applicationChannels(config, store, request);
 
   function queueStaff(record, event = "received") {
@@ -248,21 +251,6 @@ export function applicationNotifications(
       throw new Error("Invalid Discord delivery response");
     return result;
   }
-  function applicationLink(id) {
-    return [
-      {
-        type: 1,
-        components: [
-          {
-            type: 2,
-            style: 5,
-            label: "Click to view",
-            url: `${config.staffOrigin}/applications/${id}`,
-          },
-        ],
-      },
-    ];
-  }
   function staffPayload(record, event) {
     const name = escape(record.answers.displayName).replace(/[\r\n]/g, " ");
     const applicant = `${name}${record.discord ? ` (<@${record.discord.id}>)` : ""}`;
@@ -270,7 +258,7 @@ export function applicationNotifications(
     if (!event)
       return {
         content: `${applicant} just filled out a ${label} application.`,
-        components: applicationLink(record.id),
+        components: applicationControls(config, record),
       };
     const author =
       event === "reviewing" ? record.review.author : record.decision.author;
@@ -305,7 +293,7 @@ export function applicationNotifications(
           footer: { text: `Drakora · Reference ${record.id}` },
         },
       ],
-      components: applicationLink(record.id),
+      components: applicationControls(config, record, event),
     };
   }
   function applicantUpdate(record, event) {
@@ -420,6 +408,8 @@ export function applicationNotifications(
   async function deliver() {
     await deliverEmail();
     if (store.get("application-discord-limit", "pause")) return;
+    await refreshApprovedControls();
+    if (store.get("application-discord-limit", "pause")) return;
     const page = store.page("application-notification", 20, offset);
     offset = offset + 20 < page.total ? offset + 20 : 0;
     for (const pending of page.items.sort(
@@ -480,6 +470,11 @@ export function applicationNotifications(
           channelId = pending.channelId;
         }
         let payload = pending.payload ?? staffPayload(record);
+        if (!applicant)
+          payload = {
+            ...payload,
+            components: applicationControls(config, record, pending.event),
+          };
         if (!applicant && pending.event) {
           payload = {
             ...payload,
@@ -537,7 +532,9 @@ export function applicationNotifications(
                     route: pending.route ?? "discord",
                     channelUrl: pending.channelUrl,
                   }
-                : {}),
+                : pending.event === "approved" && config.office
+                  ? { onboardingControlsVersion: controlsVersion }
+                  : {}),
             },
             permanent,
           );
@@ -596,6 +593,82 @@ export function applicationNotifications(
             Date.now() + Math.max(60000, error.retryAfter ?? 0),
           );
           store.set("application-discord-limit", "pause", { until }, until);
+          break;
+        }
+      }
+    }
+  }
+  async function refreshApprovedControls() {
+    if (!config.office) return;
+    controlsKeys ??= store
+      .entries("application-delivery")
+      .filter(
+        ([key, delivery]) =>
+          key.endsWith(":staff:approved") &&
+          delivery.messageId &&
+          delivery.onboardingControlsVersion !== controlsVersion,
+      )
+      .map(([key]) => key);
+    const batch = controlsKeys.splice(0, 10);
+    for (const [index, key] of batch.entries()) {
+      if (closed) return;
+      const delivery = store.get("application-delivery", key);
+      if (!delivery || delivery.onboardingControlsVersion === controlsVersion)
+        continue;
+      if (delivery.controlsNextAt > Date.now()) {
+        controlsKeys.push(key);
+        continue;
+      }
+      const id = key.slice(0, -":staff:approved".length);
+      const record = store.get("application", id);
+      if (!record || record.erasingAt || record.status !== "Approved") continue;
+      try {
+        await request(
+          `/channels/${delivery.channelId ?? config.applications.notificationChannelId}/messages/${delivery.messageId}`,
+          "PATCH",
+          { components: applicationControls(config, record, "approved") },
+        );
+        store.set(
+          "application-delivery",
+          key,
+          {
+            ...delivery,
+            onboardingControlsVersion: controlsVersion,
+          },
+          permanent,
+        );
+      } catch (error) {
+        const attempts = (delivery.controlsAttempts ?? 0) + 1;
+        const terminal =
+          attempts >= 8 ||
+          (error.status >= 400 && error.status < 500 && error.status !== 429);
+        store.set(
+          "application-delivery",
+          key,
+          {
+            ...delivery,
+            controlsAttempts: attempts,
+            ...(terminal
+              ? {
+                  onboardingControlsVersion: controlsVersion,
+                  controlsFailedAt: Date.now(),
+                }
+              : {
+                  controlsNextAt:
+                    Date.now() +
+                    Math.max(
+                      Math.min(3600000, 30000 * 2 ** attempts),
+                      error.retryAfter ?? 0,
+                    ),
+                }),
+          },
+          permanent,
+        );
+        if (!terminal) controlsKeys.push(key);
+        if (error.status === 429) {
+          const until = Date.now() + Math.max(60000, error.retryAfter ?? 0);
+          store.set("application-discord-limit", "pause", { until }, until);
+          controlsKeys.push(...batch.slice(index + 1));
           break;
         }
       }
