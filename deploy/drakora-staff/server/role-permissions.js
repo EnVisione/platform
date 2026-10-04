@@ -2,7 +2,7 @@ import { monthsAfter, inactivityMonths } from "../shared/privacy.js";
 import { randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
 import { listFilters, matchesText } from "./list-filters.js";
-import { permissions } from "./roles.js";
+import { permissions, communityRankNames } from "./roles.js";
 import {
   staffPermissionCatalog,
   permissionDependencies,
@@ -43,6 +43,7 @@ export function rolePermissions(config, store) {
     revision: 0,
     overrides: {},
     ticketVisibilityVersion: 1,
+    ticketTakeoverVersion: 1,
   };
   const defaults = (role) =>
     Object.fromEntries(
@@ -97,7 +98,7 @@ export function rolePermissions(config, store) {
         if (key.startsWith("mail.inbox.partners@drakora.org."))
           enabled = managers.includes(role.name);
         if (key === "tickets.takeover" || key.endsWith(".takeover"))
-          enabled = enabled && admins.includes(role.name);
+          enabled = enabled && communityRankNames.includes(role.name);
         if (key === "tickets.macros.manage")
           enabled = admins.includes(role.name);
         return [key, enabled];
@@ -136,13 +137,53 @@ export function rolePermissions(config, store) {
   const takeover = (key) =>
     key === "tickets.takeover" ||
     (key.startsWith("tickets.category.") && key.endsWith(".takeover"));
-  const adminOnly = (key) => deletion(key) || takeover(key);
+  const adminOnly = deletion;
   const restricted = (key, role) =>
     (key.startsWith("tickets.category.billing.") && role.name !== "Founder") ||
     ((key.startsWith("tickets.category.partnership.") ||
       key.startsWith("tickets.category.staff.") ||
       key.startsWith("mail.inbox.partners@drakora.org.")) &&
       !managers.includes(role.name));
+  if (!state.ticketTakeoverVersion) {
+    const overrides = structuredClone(state.overrides);
+    for (const role of roles.filter(
+      (role) =>
+        role.id &&
+        !admins.includes(role.name) &&
+        communityRankNames.includes(role.name),
+    )) {
+      if (!overrides[role.id]) continue;
+      const previous = { ...defaults(role), ...overrides[role.id] };
+      for (const key of keys.filter(takeover))
+        overrides[role.id][key] = Boolean(
+          previous[key.replace(/takeover$/, "claim")],
+        );
+    }
+    state = {
+      ...state,
+      overrides,
+      ticketTakeoverVersion: 1,
+      revision: state.revision + 1,
+      updatedAt: Date.now(),
+      updatedBy: { id: "system", name: "System" },
+    };
+    store.transaction(() => {
+      store.set("role-permissions", "current", state, Number.MAX_SAFE_INTEGER);
+      audit(state.updatedBy, "permissions", {
+        revision: state.revision,
+        reason: "Rank based ticket takeovers and Manager approval enabled",
+      });
+    });
+  }
+  const rank = (user) => {
+    const index = communityRankNames.findIndex((name) =>
+      roles.some(
+        (role) =>
+          role.name === name && role.id && user.roles?.includes(role.id),
+      ),
+    );
+    return index < 0 ? null : index;
+  };
   const values = (role) =>
     Object.fromEntries(
       Object.entries({ ...defaults(role), ...state.overrides[role.id] }).map(
@@ -150,6 +191,7 @@ export function rolePermissions(config, store) {
           key,
           value &&
             !restricted(key, role) &&
+            (!takeover(key) || communityRankNames.includes(role.name)) &&
             (!adminOnly(key) || admins.includes(role.name)),
         ],
       ),
@@ -282,7 +324,7 @@ export function rolePermissions(config, store) {
       )
         throw new AuthError("ticket_deletion_protected", 400);
       if (
-        !admins.includes(role.name) &&
+        !communityRankNames.includes(role.name) &&
         keys.some((key) => takeover(key) && entry.permissions[key])
       )
         throw new AuthError("ticket_takeover_protected", 400);
@@ -312,6 +354,7 @@ export function rolePermissions(config, store) {
     const next = {
       revision: state.revision + 1,
       ticketVisibilityVersion: 1,
+      ticketTakeoverVersion: 1,
       overrides,
       updatedAt: Date.now(),
       updatedBy: { id: user.id, name: user.name },
@@ -347,6 +390,7 @@ export function rolePermissions(config, store) {
     isFounder,
     isManager,
     isAdmin,
+    rank,
     roles,
     history(user, offset = 0, input = {}) {
       authorize(user, "roles.view");

@@ -349,7 +349,7 @@ test("player reports require a target and have an independent authorized reports
   const roles = edit.roles
     .filter((role) => role.id)
     .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
-  for (const action of ["view", "reply", "claim", "close"])
+  for (const action of ["view", "reply", "claim", "takeover", "close"])
     roles.find((role) => role.id === "29").permissions[
       `tickets.category.reports.${action}`
     ] = false;
@@ -487,19 +487,18 @@ test("Discord staff replies update helped status once and never reopen closed ti
   assert.equal(service.get(ticket.id).ratingStaff.id, helper.id);
 });
 
-test("Admin takeover is audited, category restricted, and rejects stale assignments", (t) => {
+test("Admin takeover is audited, category restricted, and rejects stale assignments", async (t) => {
   const { service, policy } = setup(t);
   const admin = { id: "203", name: "Admin", roles: ["10", "21"] };
   const ticket = service.create(owner, input());
   service.claim(helper, ticket.id);
-  fails(
-    () => service.takeover(otherStaff, ticket.id, helper.id),
-    "ticket_access_denied",
-  );
+  await assert.rejects(service.takeover(otherStaff, ticket.id, helper.id), {
+    code: "ticket_takeover_approval_required",
+  });
   assert.equal(service.view(admin, ticket.id, true).actions.takeover, true);
-  service.takeover(admin, ticket.id, helper.id);
+  await service.takeover(admin, ticket.id, helper.id);
   const revision = service.get(ticket.id).revision;
-  service.takeover(admin, ticket.id, helper.id);
+  await service.takeover(admin, ticket.id, helper.id);
   assert.equal(service.get(ticket.id).revision, revision);
   assert.equal(service.get(ticket.id).claimedBy.id, admin.id);
   assert.equal(service.view(admin, ticket.id, true).actions.takeover, false);
@@ -507,19 +506,17 @@ test("Admin takeover is audited, category restricted, and rejects stale assignme
   assert.equal(entry.action, "taken_over");
   assert.equal(entry.actor.id, admin.id);
   assert.match(entry.detail, /Admin took over the ticket from Helper/);
-  fails(
-    () => service.takeover(manager, ticket.id, helper.id),
-    "ticket_assignment_changed",
-  );
-  service.takeover(manager, ticket.id, admin.id);
+  await assert.rejects(service.takeover(manager, ticket.id, helper.id), {
+    code: "ticket_assignment_changed",
+  });
+  await service.takeover(manager, ticket.id, admin.id);
   const billing = service.create(
     { ...owner, id: "101" },
     input({ type: "billing" }),
   );
-  fails(
-    () => service.takeover(admin, billing.id, manager.id),
-    "ticket_access_denied",
-  );
+  await assert.rejects(service.takeover(admin, billing.id, manager.id), {
+    code: "ticket_access_denied",
+  });
   const edit = policy.read(manager);
   const roles = edit.roles
     .filter((role) => role.id)
@@ -531,10 +528,9 @@ test("Admin takeover is audited, category restricted, and rejects stale assignme
     "tickets.category.support.takeover"
   ] = false;
   policy.save(manager, { revision: edit.revision, roles });
-  fails(
-    () => service.takeover(admin, ticket.id, manager.id),
-    "ticket_access_denied",
-  );
+  await assert.rejects(service.takeover(admin, ticket.id, manager.id), {
+    code: "ticket_access_denied",
+  });
   service.closeTicket(
     manager,
     ticket.id,
@@ -544,7 +540,147 @@ test("Admin takeover is audited, category restricted, and rejects stale assignme
     },
     true,
   );
-  fails(() => service.takeover(manager, ticket.id, admin.id), "ticket_closed");
+  await assert.rejects(service.takeover(manager, ticket.id, admin.id), {
+    code: "ticket_closed",
+  });
+});
+
+test("two-rank hierarchy permits Mod over Helper and Manager over Founder, with fresh assignee checks", async (t) => {
+  const { service } = setup(t);
+  const mod = { id: "mod", name: "Mod", roles: ["10", "22"] };
+  const jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] };
+  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  await assert.rejects(service.takeover(jr, ticket.id, helper.id), {
+    code: "ticket_takeover_approval_required",
+  });
+  await service.takeover(mod, ticket.id, helper.id);
+  assert.equal(service.get(ticket.id).claimedBy.id, mod.id);
+  await service.takeover(
+    { id: "admin", name: "Admin", roles: ["10", "21"] },
+    ticket.id,
+    mod.id,
+  );
+  assert.equal(service.get(ticket.id).claimedBy.id, "admin");
+  await service.takeover(
+    founder,
+    ticket.id,
+    service.get(ticket.id).claimedBy.id,
+  );
+  await service.takeover(manager, ticket.id, founder.id);
+  assert.equal(service.get(ticket.id).claimedBy.id, manager.id);
+  const fresh = service.create({ ...owner, id: "101" }, input());
+  service.claim(helper, fresh.id);
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async status() {},
+    async note() {
+      return { id: randomUUID() };
+    },
+    async staffUser() {
+      return { ...helper, roles: ["10", "29"] };
+    },
+  });
+  await assert.rejects(service.takeover(mod, fresh.id, helper.id), {
+    code: "ticket_takeover_approval_required",
+  });
+  assert.equal(service.get(fresh.id).claimedBy.id, helper.id);
+});
+
+test("private takeover requests approve once, reject stale and revoked requesters, and never enter player data", async (t) => {
+  let at = Date.now();
+  const { service } = setup(t, { now: () => at });
+  const jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] };
+  let requester = jr;
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async status() {},
+    async note() {
+      return { id: randomUUID() };
+    },
+    async staffUser(id) {
+      return id === jr.id ? requester : helper;
+    },
+  });
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  const lastActive = service.get(ticket.id).lastActiveAt;
+  at += 10000;
+  const request = service.requestTakeover(jr, ticket.id, {
+    claimedBy: helper.id,
+    reason: "Need to correct the handling.",
+  });
+  assert.equal(
+    service.requestTakeover(jr, ticket.id, {
+      claimedBy: helper.id,
+      reason: "Retry",
+    }).id,
+    request.id,
+  );
+  assert.equal(service.get(ticket.id).claimedBy.id, helper.id);
+  assert.equal(service.get(ticket.id).lastActiveAt, lastActive);
+  assert.equal(service.view(owner, ticket.id).takeoverRequest, undefined);
+  assert.equal(service.view(owner, ticket.id).messages.length, 0);
+  assert.equal(
+    service.view(jr, ticket.id, true).actions.approveTakeover,
+    false,
+  );
+  await assert.rejects(
+    service.reviewTakeover(jr, ticket.id, request.id, true),
+    { code: "ticket_takeover_manager_required" },
+  );
+  requester = { ...jr, roles: [] };
+  await assert.rejects(
+    service.reviewTakeover(manager, ticket.id, request.id, true),
+    { code: "ticket_access_denied" },
+  );
+  requester = jr;
+  await service.reviewTakeover(manager, ticket.id, request.id, true);
+  assert.equal(service.get(ticket.id).claimedBy.id, jr.id);
+  assert.equal(
+    service.notes(manager, ticket.id).takeoverRequest.status,
+    "approved",
+  );
+  await assert.rejects(
+    service.reviewTakeover(manager, ticket.id, request.id, true),
+    { code: "ticket_takeover_request_expired" },
+  );
+  assert.equal(
+    service.view(owner, ticket.id).history.some((entry) => entry.internal),
+    false,
+  );
+  assert.doesNotMatch(
+    await ticketTranscript(service, owner, ticket.id, false),
+    /Need to correct the handling/,
+  );
+  const denied = service.requestTakeover(otherStaff, ticket.id, {
+    claimedBy: jr.id,
+    reason: "A separate request.",
+  });
+  await service.reviewTakeover(manager, ticket.id, denied.id, false);
+  assert.equal(service.get(ticket.id).claimedBy.id, jr.id);
+  assert.equal(
+    service.notes(manager, ticket.id).takeoverRequest.status,
+    "denied",
+  );
+  const stale = service.requestTakeover(helper, ticket.id, {
+    claimedBy: jr.id,
+    reason: "Please review.",
+  });
+  service.closeTicket(owner, ticket.id, {});
+  await assert.rejects(
+    service.reviewTakeover(manager, ticket.id, stale.id, true),
+    { code: "ticket_takeover_request_expired" },
+  );
+  assert.equal(
+    service.notes(manager, ticket.id).takeoverRequest.status,
+    "expired",
+  );
 });
 
 test("message retry is idempotent and attachment references cannot cross owners or tickets", (t) => {

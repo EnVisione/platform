@@ -2234,7 +2234,7 @@ test("an uncertain closure notice is recovered once and old closure controls can
   );
 });
 
-test("native staff replies refresh the Discord overview and only Admin or higher can take over", async (t) => {
+test("native staff replies refresh the Discord overview and authorized staff can take over", async (t) => {
   const { service, transport, channels, user, client, staffMembers } =
     setupDiscord(t);
   const ticket = await supportTicket(service, user, transport);
@@ -2310,7 +2310,7 @@ test("native staff replies refresh the Discord overview and only Admin or higher
   assert.match(claimNotice.embeds[0].description, /<@100> <@201>/);
   const control = intro.data.components
     .flatMap((row) => row.components)
-    .find((button) => button.label === "Take over (Admin+)");
+    .find((button) => button.label === "Take over / request");
   assert.equal(control.custom_id, `ticket:takeover:${ticket.id}:201`);
   const denied = await click(client, { ...user, id: "100" }, control.custom_id);
   assert.match(denied.data, /permission/);
@@ -2752,4 +2752,103 @@ test("existing managed ticket notices move into embeds without sending another m
   assert.equal(message.embeds[0].description, "Helper claimed your ticket.");
   assert.equal(message.embeds[0].fields[0].value, "Claimed by Helper");
   assert.equal(service.store.get("ticket-status-notice", key).layoutVersion, 2);
+});
+
+test("Discord hierarchy and private request approval assign the requester and keep controls current", async (t) => {
+  const { service, transport, channels, client, user, staffMembers } =
+    setupDiscord(t);
+  await transport.recover();
+  for (const [id, name, rank] of [
+    ["202", "Jr Mod", "30"],
+    ["203", "Mod", "22"],
+  ])
+    staffMembers.set(id, {
+      id,
+      displayName: name,
+      user: { ...user, id },
+      roles: {
+        cache: new Collection([
+          ["10", {}],
+          [rank, {}],
+        ]),
+      },
+    });
+  const ticket = await supportTicket(service, user, transport);
+  const helper = staffMembers.get("201"),
+    jr = staffMembers.get("202"),
+    mod = staffMembers.get("203"),
+    manager = staffMembers.get("200");
+  await click(client, helper.user, `ticket:claim:${ticket.id}`);
+  const blocked = await click(
+    client,
+    jr.user,
+    `ticket:takeover:${ticket.id}:201`,
+  );
+  assert.match(blocked.data.content, /Manager approval/);
+  const requestButton = blocked.data.components[0].components[0];
+  const modal = await click(client, jr.user, requestButton.custom_id);
+  assert.equal(modal.modal.title, "Request a ticket takeover");
+  const submitted = await click(
+    client,
+    jr.user,
+    modal.modal.custom_id,
+    [],
+    "2",
+    { reason: "Please review this handling privately." },
+  );
+  assert.match(submitted.data, /request is saved/);
+  await service.pump();
+  await service.pump();
+  const thread = channels.get(
+    service.store.get("ticket-notes-discord", ticket.id).threadId,
+  );
+  const posted = [...thread.savedMessages.values()].find(
+    (message) => message.embeds?.[0]?.title === "Ticket takeover request",
+  );
+  assert.ok(posted);
+  assert.equal(posted.content, "");
+  assert.deepEqual(posted.sentData.allowedMentions, {
+    parse: [],
+    users: ["200"],
+  });
+  assert.match(posted.embeds[0].description, /handling privately/);
+  assert.equal(service.get(ticket.id).claimedBy.id, "201");
+  assert.equal(service.view(user, ticket.id).messages.length, 0);
+  const approve = posted.components[0].components[0].custom_id;
+  const denied = await click(client, mod.user, approve, [], "1");
+  assert.match(denied.data, /Only Managers/);
+  const approved = await click(client, manager.user, approve, [], "1");
+  assert.match(approved.data, /requester is now assigned/);
+  await service.pump();
+  assert.equal(service.get(ticket.id).claimedBy.id, "202");
+  assert.match(posted.embeds[0].fields[0].value, /approved by Manager/);
+  assert.deepEqual(posted.components, []);
+  assert.equal(thread.savedMessages.size, 1);
+  const duplicate = await click(client, manager.user, approve, [], "1");
+  assert.match(duplicate.data, /no longer current/);
+  await click(client, manager.user, `ticket:takeover:${ticket.id}:202`);
+  const disallowed = await click(
+    client,
+    mod.user,
+    `ticket:takeover:${ticket.id}:200`,
+  );
+  assert.match(disallowed.data.content, /Manager approval/);
+  const second = service.create(
+    { ...user, id: "101" },
+    {
+      requestId: randomUUID(),
+      type: "general",
+      ign: "Jojo",
+      location: "Void",
+      description: "A second support ticket for direct hierarchy transfer.",
+    },
+  );
+  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, second.id);
+  const direct = await click(
+    client,
+    mod.user,
+    `ticket:takeover:${second.id}:201`,
+  );
+  assert.match(direct.data, /Claimed by Mod/);
+  assert.equal(service.get(second.id).claimedBy.id, "203");
 });

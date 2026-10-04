@@ -63,8 +63,7 @@ export function ticketService(
   function staff(user, ticket, capability = "tickets.view") {
     const current = rolePolicy.apply(user);
     if (
-      (["tickets.delete", "tickets.takeover"].includes(capability) &&
-        !rolePolicy.isAdmin(current)) ||
+      (capability === "tickets.delete" && !rolePolicy.isAdmin(current)) ||
       !current.capabilities[capability] ||
       (ticket &&
         !current.capabilities[
@@ -288,8 +287,7 @@ export function ticketService(
             Boolean(
               current.capabilities[`tickets.${action}`] &&
               current.capabilities[ticketCapability(ticket, action)] &&
-              (!["delete", "takeover"].includes(action) ||
-                rolePolicy.isAdmin(current)) &&
+              (action !== "delete" || rolePolicy.isAdmin(current)) &&
               (action !== "takeover" ||
                 (["pending", "claimed"].includes(ticket.status) &&
                   ticket.claimedBy &&
@@ -297,6 +295,12 @@ export function ticketService(
             ),
           ],
         ),
+      );
+      safe.takeoverRequest = takeoverRequestView(ticket);
+      safe.actions.approveTakeover = Boolean(
+        rolePolicy.isManager(current) &&
+        current.capabilities["tickets.takeover"] &&
+        current.capabilities[ticketCapability(ticket, "takeover")],
       );
       safe.resolution = ticket.resolution
         ? {
@@ -709,7 +713,14 @@ export function ticketService(
         revision: ticket.revision + 1,
       });
   }
-  function reply(user, id, input, staffView = false, note = false) {
+  function reply(
+    user,
+    id,
+    input,
+    staffView = false,
+    note = false,
+    takeoverRequest,
+  ) {
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.reply");
     if (note && !staffView) throw new AuthError("ticket_access_denied");
@@ -742,7 +753,14 @@ export function ticketService(
         origin: staffView ? "dashboard" : "web",
         delivery: "pending",
         deleted: false,
+        ...(takeoverRequest ? { takeoverRequestId: takeoverRequest.id } : {}),
       };
+      if (takeoverRequest)
+        ticket.takeoverRequest = {
+          ...takeoverRequest,
+          noteId: message.id,
+          noteKey: String(message.sequence).padStart(12, "0"),
+        };
       put(
         `ticket-messages:${id}`,
         String(message.sequence).padStart(12, "0"),
@@ -773,7 +791,7 @@ export function ticketService(
   }
   function notes(user, id, before) {
     const ticket = get(id);
-    staff(user, ticket);
+    const current = staff(user, ticket);
     const page = store.page(
       `ticket-messages:${id}`,
       50,
@@ -783,6 +801,12 @@ export function ticketService(
     );
     const link = store.get("ticket-notes-discord", id);
     return {
+      takeoverRequest: takeoverRequestView(ticket),
+      canApproveTakeover: Boolean(
+        rolePolicy.isManager(current) &&
+        current.capabilities["tickets.takeover"] &&
+        current.capabilities[ticketCapability(ticket, "takeover")],
+      ),
       messages: page.items.reverse().map((message) => ({
         ...message,
         attachments: message.attachments
@@ -806,6 +830,8 @@ export function ticketService(
     if (ticket.claimedBy) throw new AuthError("ticket_already_claimed", 409);
     store.transaction(() => {
       ticket.claimedBy = publicActor(user);
+      ticket.claimedRank = rolePolicy.rank(user);
+      ticket.assignmentVersion = (ticket.assignmentVersion || 0) + 1;
       ticket.status = "claimed";
       audit(ticket, user, "claimed", `${user.name} claimed the ticket`);
       queue(ticket, "status", ticket.id, {
@@ -817,29 +843,176 @@ export function ticketService(
     announce(ticket);
     return ticket;
   }
-  function takeover(user, id, previousStaffId) {
+  function canTakeover(user, assignedRank) {
+    const rank = rolePolicy.rank(user);
+    return (
+      rolePolicy.isManager(user) ||
+      (rank !== null &&
+        Number.isInteger(assignedRank) &&
+        assignedRank - rank >= 2)
+    );
+  }
+  function takeoverRequestView(ticket) {
+    const request = ticket.takeoverRequest;
+    if (!request) return null;
+    const valid =
+      ["pending", "claimed"].includes(ticket.status) &&
+      ticket.claimedBy?.id === request.previousStaffId &&
+      (ticket.assignmentVersion || 0) === request.assignmentVersion &&
+      (ticket.reopenedCount || 0) === request.cycle;
+    return {
+      ...request,
+      status:
+        request.status === "pending" && !valid ? "expired" : request.status,
+    };
+  }
+  function syncTakeoverRequest(ticket) {
+    const request = takeoverRequestView(ticket);
+    if (!request) return;
+    ticket.takeoverRequest = request;
+    const message = store.get(`ticket-messages:${ticket.id}`, request.noteKey);
+    if (!message) return;
+    message.content = `${request.requester.name} requested to take over from ${request.previousStaff.name}.\nReason: ${request.reason}\nStatus: ${request.status}${request.reviewer ? ` by ${request.reviewer.name}` : ""}`;
+    put(`ticket-messages:${ticket.id}`, request.noteKey, message);
+    queue(ticket, "note", request.noteKey);
+  }
+  function assignTakeover(ticket, user) {
+    const previous = ticket.claimedBy;
+    ticket.claimedBy = publicActor(user);
+    ticket.claimedRank = rolePolicy.rank(user);
+    ticket.assignmentVersion = (ticket.assignmentVersion || 0) + 1;
+    ticket.status = "claimed";
+    syncTakeoverRequest(ticket);
+    audit(
+      ticket,
+      user,
+      "taken_over",
+      `${user.name} took over the ticket from ${previous.name}`,
+    );
+    queue(ticket, "status", ticket.id, {
+      event: "taken_over",
+      actor: ticket.claimedBy,
+      revision: ticket.revision,
+    });
+  }
+  function takeoverTarget(user, id, previousStaffId) {
     const ticket = get(id);
     staff(user, ticket, "tickets.takeover");
+    if (rolePolicy.rank(user) === null)
+      throw new AuthError("ticket_access_denied");
     if (!["pending", "claimed"].includes(ticket.status))
       throw new AuthError("ticket_closed", 409);
-    if (ticket.claimedBy?.id === user.id) return ticket;
-    if (!ticket.claimedBy || ticket.claimedBy.id !== previousStaffId)
+    if (
+      !ticket.claimedBy ||
+      (ticket.claimedBy.id !== user.id &&
+        ticket.claimedBy.id !== previousStaffId)
+    )
       throw new AuthError("ticket_assignment_changed", 409);
+    return ticket;
+  }
+  async function takeover(user, id, previousStaffId) {
+    let ticket = takeoverTarget(user, id, previousStaffId);
+    if (ticket.claimedBy.id === user.id) return ticket;
+    const version = ticket.assignmentVersion || 0;
+    const assignee =
+      !rolePolicy.isManager(user) && transport?.staffUser
+        ? await transport.staffUser(ticket.claimedBy.id)
+        : null;
+    ticket = takeoverTarget(user, id, previousStaffId);
+    if ((ticket.assignmentVersion || 0) !== version)
+      throw new AuthError("ticket_assignment_changed", 409);
+    const assignedRank =
+      transport?.staffUser && !rolePolicy.isManager(user)
+        ? assignee
+          ? rolePolicy.rank(assignee)
+          : null
+        : ticket.claimedRank;
+    if (!canTakeover(user, assignedRank))
+      throw new AuthError("ticket_takeover_approval_required", 403);
+    store.transaction(() => assignTakeover(ticket, user));
+    announce(ticket);
+    return ticket;
+  }
+  function requestTakeover(user, id, input) {
+    const ticket = takeoverTarget(user, id, input?.claimedBy);
+    if (ticket.claimedBy.id === user.id)
+      throw new AuthError("ticket_assignment_changed", 409);
+    const current = takeoverRequestView(ticket);
+    if (current?.status === "pending") {
+      if (current.requester.id === user.id) return current;
+      throw new AuthError("ticket_takeover_request_pending", 409);
+    }
+    const request = {
+      id: randomUUID(),
+      requester: publicActor(user),
+      previousStaff: ticket.claimedBy,
+      previousStaffId: ticket.claimedBy.id,
+      assignmentVersion: ticket.assignmentVersion || 0,
+      cycle: ticket.reopenedCount || 0,
+      reason: text(input.reason, 1, 1000, "invalid_takeover_reason"),
+      status: "pending",
+      at: now(),
+    };
+    reply(
+      user,
+      id,
+      {
+        requestId: request.id,
+        content: `${user.name} requested to take over from ${ticket.claimedBy.name}.\nReason: ${request.reason}\nStatus: pending Manager approval`,
+      },
+      true,
+      true,
+      request,
+    );
+    return get(id).takeoverRequest;
+  }
+  async function reviewTakeover(user, id, requestId, approve) {
+    if (typeof approve !== "boolean")
+      throw new AuthError("invalid_request", 400);
+    let ticket = get(id);
+    staff(user, ticket, "tickets.takeover");
+    if (!rolePolicy.isManager(user))
+      throw new AuthError("ticket_takeover_manager_required", 403);
+    let request = takeoverRequestView(ticket);
+    if (!request || request.id !== requestId || request.status !== "pending")
+      throw new AuthError("ticket_takeover_request_expired", 409);
+    if (request.requester.id === user.id)
+      throw new AuthError("ticket_takeover_self_approval", 403);
+    let requester;
+    if (approve) {
+      if (!transport?.staffUser)
+        throw new AuthError("ticket_sync_unavailable", 503);
+      requester = await transport.staffUser(request.requester.id);
+      if (!requester)
+        throw new AuthError("ticket_takeover_requester_unavailable", 409);
+    }
+    ticket = get(id);
+    staff(user, ticket, "tickets.takeover");
+    request = takeoverRequestView(ticket);
+    if (!request || request.id !== requestId || request.status !== "pending")
+      throw new AuthError("ticket_takeover_request_expired", 409);
+    if (approve) {
+      staff(requester, ticket, "tickets.takeover");
+      if (rolePolicy.rank(requester) === null)
+        throw new AuthError("ticket_takeover_requester_unavailable", 409);
+    }
     store.transaction(() => {
-      const previous = ticket.claimedBy;
-      ticket.claimedBy = publicActor(user);
-      ticket.status = "claimed";
+      ticket.takeoverRequest = {
+        ...request,
+        status: approve ? "approved" : "denied",
+        reviewer: publicActor(user),
+        reviewedAt: now(),
+      };
+      if (approve) assignTakeover(ticket, requester);
+      else syncTakeoverRequest(ticket);
       audit(
         ticket,
         user,
-        "taken_over",
-        `${user.name} took over the ticket from ${previous.name}`,
+        approve ? "takeover_approved" : "takeover_denied",
+        `${user.name} ${approve ? "approved" : "denied"} ${request.requester.name}'s takeover request`,
+        true,
+        false,
       );
-      queue(ticket, "status", ticket.id, {
-        event: "taken_over",
-        actor: ticket.claimedBy,
-        revision: ticket.revision,
-      });
     });
     announce(ticket);
     return ticket;
@@ -871,6 +1044,7 @@ export function ticketService(
       }
       ticket.status = staffView ? "closed" : "awaiting_resolution";
       ticket.closedAt = now();
+      syncTakeoverRequest(ticket);
       if (resolution) {
         resolution.attachments = files(
           ticket,
@@ -960,6 +1134,9 @@ export function ticketService(
       );
       ticket.status = "pending";
       ticket.claimedBy = null;
+      ticket.claimedRank = null;
+      ticket.assignmentVersion = (ticket.assignmentVersion || 0) + 1;
+      syncTakeoverRequest(ticket);
       ticket.helpedBy = null;
       ticket.resolution = null;
       ticket.rating = null;
@@ -1487,6 +1664,11 @@ export function ticketService(
               );
               if (delivered?.pending) continue;
               store.transaction(() => {
+                if (message.takeoverRequestId)
+                  Object.assign(
+                    message,
+                    store.get(`ticket-messages:${ticket.id}`, job.ref),
+                  );
                 message.discordId = delivered.id;
                 message.delivery = "delivered";
                 put(`ticket-messages:${ticket.id}`, job.ref, message);
@@ -1649,6 +1831,9 @@ export function ticketService(
     },
     claim,
     takeover,
+    requestTakeover,
+    reviewTakeover,
+    takeoverRequestView,
     closeTicket,
     reopen,
     deleteChannel,

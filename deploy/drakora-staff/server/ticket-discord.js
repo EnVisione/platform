@@ -323,7 +323,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 {
                   type: 2,
                   style: 2,
-                  label: "Take over (Admin+)",
+                  label: "Take over / request",
                   custom_id: `ticket:takeover:${ticket.id}:${ticket.claimedBy.id}`,
                 },
               ]
@@ -615,6 +615,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     );
   }
   const transport = {
+    staffUser,
     async notice(ticket, job, key) {
       if (!client.isReady()) throw new Error("Discord is not ready");
       const staffGuild = await client.guilds.fetch(config.guildId);
@@ -1890,6 +1891,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (
         [
           "mine-choice",
+          "takeover-approve",
+          "takeover-deny",
+          "takeover-submit",
           "claim",
           "notes",
           "takeover",
@@ -1905,6 +1909,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         !owner ||
         [
           "claim",
+          "takeover-request",
+          "takeover-submit",
+          "takeover-approve",
+          "takeover-deny",
           "notes",
           "close",
           "resolve",
@@ -1916,6 +1924,23 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           : null;
       const user = staffIdentity || actor(interaction.user, interaction.member);
       if (!owner) service.staff(user || { roles: [] }, ticket);
+      if (action === "takeover-request") {
+        service.staff(user, ticket, "tickets.takeover");
+        return await interaction.showModal(
+          new ModalBuilder()
+            .setCustomId(`ticket:takeover-submit:${id}:${closureId}`)
+            .setTitle("Request a ticket takeover")
+            .addComponents(
+              input(
+                "reason",
+                "Why do you need to take over?",
+                TextInputStyle.Paragraph,
+                1,
+                1000,
+              ),
+            ),
+        );
+      }
       if (action === "notes") {
         service.staff(user, ticket);
         const url = service.notes(user, id).discordUrl;
@@ -2053,7 +2078,42 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
       if (!interaction.deferred) await interaction.deferReply({ flags: 64 });
       if (action === "claim") service.claim(user, id);
-      else if (action === "takeover") service.takeover(user, id, closureId);
+      else if (action === "takeover") {
+        try {
+          await service.takeover(user, id, closureId);
+        } catch (error) {
+          if (error.code !== "ticket_takeover_approval_required") throw error;
+          return await interaction.editReply({
+            content:
+              "Manager approval is required. Add a reason to request this ticket.",
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 2,
+                    style: 1,
+                    label: "Request takeover",
+                    custom_id: `ticket:takeover-request:${id}:${closureId}`,
+                  },
+                ],
+              },
+            ],
+            allowedMentions: { parse: [] },
+          });
+        }
+      } else if (action === "takeover-submit")
+        service.requestTakeover(user, id, {
+          claimedBy: closureId,
+          reason: interaction.fields.getTextInputValue("reason"),
+        });
+      else if (["takeover-approve", "takeover-deny"].includes(action))
+        await service.reviewTakeover(
+          user,
+          id,
+          closureId,
+          action === "takeover-approve",
+        );
       else if (action === "close") service.closeTicket(user, id, {}, false);
       else if (action === "resolve")
         service.closeTicket(
@@ -2107,19 +2167,37 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return await interaction.editReply(
         action === "claim" || action === "takeover"
           ? `${ticketStatusLabel(service.get(id))}. Updates are syncing to Discord and the website.`
-          : action === "close"
-            ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
-            : action === "rating"
-              ? "Thank you. Your private rating has been saved."
-              : action === "delete-confirm"
-                ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
-                : action === "reopen"
-                  ? "Ticket reopened. Staff can claim it again."
-                  : "Ticket updated.",
+          : action === "takeover-submit"
+            ? "Your request is saved in the private staff notes thread for Manager approval."
+            : action === "takeover-approve"
+              ? "Takeover approved. The requester is now assigned to the ticket."
+              : action === "takeover-deny"
+                ? "Takeover request denied. The assignment has not changed."
+                : action === "close"
+                  ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
+                  : action === "rating"
+                    ? "Thank you. Your private rating has been saved."
+                    : action === "delete-confirm"
+                      ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
+                      : action === "reopen"
+                        ? "Ticket reopened. Staff can claim it again."
+                        : "Ticket updated.",
       );
     } catch (error) {
       const message =
         {
+          ticket_takeover_manager_required:
+            "Only Managers and Founders with access to this ticket can approve or deny a takeover.",
+          ticket_takeover_request_expired:
+            "This takeover request is no longer current. Check the ticket's assignment.",
+          ticket_takeover_request_pending:
+            "A takeover request is already waiting for Manager review in the private notes thread.",
+          ticket_takeover_requester_unavailable:
+            "The requester is no longer an eligible staff member.",
+          ticket_takeover_self_approval:
+            "Another Manager or Founder must review your request.",
+          invalid_takeover_reason:
+            "Provide a nonblank reason, up to 1,000 characters.",
           ticket_already_claimed:
             "Another staff member already claimed this ticket.",
           ticket_assignment_changed:

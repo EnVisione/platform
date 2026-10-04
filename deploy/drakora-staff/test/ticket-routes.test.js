@@ -235,7 +235,7 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
         staffHeaders,
       )
     ).status,
-    403,
+    200,
   );
   staffIdentity = policy.apply({
     id: "201",
@@ -563,4 +563,135 @@ test("website guests use private sessions, required email and a shared IP open-t
   assert.equal((await access.json()).path, `/help/Jojo/${id}`);
   assert.equal((await second(`/help/api/tickets/${id}`)).status, 200);
   assert.equal((await first("/help/api/email-access", { key })).status, 400);
+});
+
+test("panel takeover requests require Manager review and preserve category and mutation boundaries", async (t) => {
+  const config = {
+    ...fixture,
+    staffOrigin: "https://staff.example.invalid",
+    applications: { publicOrigin: "https://example.invalid" },
+    tickets: { guildId: "2" },
+  };
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  const policy = rolePermissions(config, store),
+    service = ticketService(config, store, policy);
+  const helper = { id: "helper", name: "Helper", roles: ["10", "23"] },
+    jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] },
+    manager = { id: "manager", name: "Manager", roles: ["10", "28"] };
+  let identity = jr;
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async status() {},
+    async note() {
+      return { id: randomUUID() };
+    },
+    async staffUser() {
+      return jr;
+    },
+  });
+  const ticket = service.create(
+    { id: "owner", name: "Player" },
+    {
+      requestId: randomUUID(),
+      type: "general",
+      ign: "Jojo",
+      location: "Void",
+      description: "An HTTP fixture for private takeover approvals.",
+    },
+  );
+  service.claim(helper, ticket.id);
+  const app = express();
+  app.use(
+    ticketRouter(
+      config,
+      service,
+      {},
+      {
+        staffView: true,
+        database: store,
+        dist: "/does-not-exist",
+        authorize: async () => identity,
+        mutation: (req) => {
+          if (
+            req.headers.origin !== config.staffOrigin ||
+            req.headers["x-csrf-token"] !== "fixture"
+          )
+            throw new AuthError("invalid_request");
+        },
+      },
+    ),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  t.after(async () => {
+    await service.stop();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+  });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const base = `http://127.0.0.1:${server.address().port}/api/tickets/${ticket.id}`;
+  const call = (action, body, csrf = "fixture") =>
+    fetch(`${base}/${action}`, {
+      method: "POST",
+      headers: {
+        Origin: config.staffOrigin,
+        "X-CSRF-Token": csrf,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  let response = await call("takeover", { claimedBy: helper.id });
+  assert.equal(response.status, 403);
+  assert.equal(
+    (await response.json()).error,
+    "ticket_takeover_approval_required",
+  );
+  assert.equal(
+    (
+      await call(
+        "takeover-request",
+        { claimedBy: helper.id, reason: "Review handling." },
+        "wrong",
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call("takeover-request", {
+        claimedBy: helper.id,
+        reason: "Review handling.",
+      })
+    ).status,
+    201,
+  );
+  const request = service.get(ticket.id).takeoverRequest;
+  const read = await fetch(`${base}/notes`);
+  const notes = await read.json();
+  assert.equal(notes.takeoverRequest.id, request.id);
+  assert.equal(notes.canApproveTakeover, false);
+  assert.equal(
+    (await call("takeover-review", { requestId: request.id, approve: true }))
+      .status,
+    403,
+  );
+  identity = manager;
+  assert.equal(
+    (await call("takeover-review", { requestId: request.id, approve: "yes" }))
+      .status,
+    400,
+  );
+  assert.equal(
+    (await call("takeover-review", { requestId: request.id, approve: true }))
+      .status,
+    200,
+  );
+  assert.equal(service.get(ticket.id).claimedBy.id, jr.id);
+  assert.equal(
+    (await call("takeover-review", { requestId: request.id, approve: true }))
+      .status,
+    409,
+  );
 });

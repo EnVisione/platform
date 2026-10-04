@@ -27,6 +27,19 @@ const errors = {
     "Another staff member has already claimed this ticket.",
   ticket_assignment_changed:
     "This ticket's assignment changed. Reload it before taking over.",
+  ticket_takeover_approval_required:
+    "Manager approval is required. Add a reason to request this ticket.",
+  ticket_takeover_manager_required:
+    "Only Managers and Founders with category access can review this request.",
+  ticket_takeover_request_expired:
+    "This request is no longer current. Check the ticket's assignment.",
+  ticket_takeover_request_pending:
+    "A takeover request is already waiting for Manager review.",
+  ticket_takeover_requester_unavailable:
+    "The requester is no longer an eligible staff member.",
+  ticket_takeover_self_approval:
+    "Another Manager or Founder must review your request.",
+  invalid_takeover_reason: "Provide a nonblank reason, up to 1,000 characters.",
   ticket_limit:
     "You have three open tickets. Continue in an existing ticket below.",
   ticket_ip_limit:
@@ -64,9 +77,12 @@ async function request(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json();
   if (!response.ok)
-    throw new Error(
-      errors[data.error] ||
-        "Support is temporarily unavailable. Your ticket and unsent message have been kept. Please try again.",
+    throw Object.assign(
+      new Error(
+        errors[data.error] ||
+          "Support is temporarily unavailable. Your ticket and unsent message have been kept. Please try again.",
+      ),
+      { code: data.error },
     );
   return data;
 }
@@ -533,6 +549,60 @@ function TicketHistory({ entries }) {
   );
 }
 
+function TakeoverReview({ takeover, canApprove, base, csrf, onReviewed }) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  if (!takeover) return null;
+  async function review(approve) {
+    setBusy(true);
+    setError("");
+    try {
+      await request(`${base}/takeover-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ requestId: takeover.id, approve }),
+      });
+      await onReviewed();
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section
+      className="ticket-close-confirm"
+      aria-label="Internal takeover request"
+    >
+      <strong>Takeover request · {takeover.status}</strong>
+      <p>
+        {takeover.requester.name} requested this ticket from{" "}
+        {takeover.previousStaff.name}.
+      </p>
+      <p>{takeover.reason}</p>
+      {takeover.reviewer && <p>Reviewed by {takeover.reviewer.name}.</p>}
+      {error && (
+        <p className="ticket-error" role="alert">
+          {error}
+        </p>
+      )}
+      {takeover.status === "pending" &&
+        (canApprove ? (
+          <div className="ticket-actions">
+            <button disabled={busy} onClick={() => review(true)}>
+              Approve takeover
+            </button>
+            <button disabled={busy} onClick={() => review(false)}>
+              Deny takeover
+            </button>
+          </div>
+        ) : (
+          <p>Waiting for a Manager or Founder with access to this category.</p>
+        ))}
+    </section>
+  );
+}
+
 function InternalNotes({ base, csrf, active, canReply }) {
   const [data, setData] = useState(null),
     [older, setOlder] = useState([]),
@@ -592,6 +662,13 @@ function InternalNotes({ base, csrf, active, canReply }) {
           {error} <button onClick={refresh}>Retry notes</button>
         </p>
       )}
+      <TakeoverReview
+        takeover={data?.takeoverRequest}
+        canApprove={data?.canApproveTakeover}
+        base={base}
+        csrf={csrf}
+        onReviewed={refresh}
+      />
       <div
         className="ticket-messages"
         ref={scroll}
@@ -679,6 +756,8 @@ function TicketChat({
     [error, setError] = useState(""),
     [closing, setClosing] = useState(false),
     [deleting, setDeleting] = useState(false),
+    [requestingTakeover, setRequestingTakeover] = useState(false),
+    [takeoverReason, setTakeoverReason] = useState(""),
     [busy, setBusy] = useState(false),
     [older, setOlder] = useState([]),
     [hasEarlier, setHasEarlier] = useState(null),
@@ -738,8 +817,15 @@ function TicketChat({
         body: JSON.stringify(data),
       });
       await refresh();
+      if (name === "takeover-request") {
+        setRequestingTakeover(false);
+        setTakeoverReason("");
+        setConversation("notes");
+      }
     } catch (error) {
       setError(error.message);
+      if (error.code === "ticket_takeover_approval_required")
+        setRequestingTakeover(true);
     } finally {
       setBusy(false);
     }
@@ -836,7 +922,7 @@ function TicketChat({
                 action("takeover", { claimedBy: ticket.claimedBy.id })
               }
             >
-              Take over ticket
+              Take over / request
             </button>
           )}
           {staffView && ticket.actions?.close && ticket.status !== "closed" && (
@@ -868,6 +954,55 @@ function TicketChat({
         </div>
       </header>
       <section className="ticket-chat" aria-label="Ticket conversation">
+        {staffView && requestingTakeover && active && (
+          <form
+            className="ticket-close-confirm"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void action("takeover-request", {
+                claimedBy: ticket.claimedBy?.id,
+                reason: takeoverReason,
+              });
+            }}
+          >
+            <label>
+              Why do you need to take over this ticket?
+              <textarea
+                required
+                maxLength={1000}
+                value={takeoverReason}
+                onChange={(event) => setTakeoverReason(event.target.value)}
+              />
+            </label>
+            <p>
+              The request and reason go only to the private staff notes thread.
+              Manager approval assigns the ticket to you.
+            </p>
+            <button
+              disabled={busy || !takeoverReason.trim()}
+              className="ticket-primary"
+            >
+              Request Manager approval
+            </button>
+            <button type="button" onClick={() => setRequestingTakeover(false)}>
+              Cancel request
+            </button>
+          </form>
+        )}
+        {staffView &&
+          ticket.takeoverRequest?.status === "pending" &&
+          conversation !== "notes" && (
+            <div className="ticket-close-confirm">
+              <p>
+                A takeover request from {ticket.takeoverRequest.requester.name}{" "}
+                is waiting for Manager approval.
+              </p>
+              <button onClick={() => setConversation("notes")}>
+                Review in internal staff notes
+              </button>
+            </div>
+          )}
+
         {staffView && (
           <div
             className="ticket-conversation-tabs"

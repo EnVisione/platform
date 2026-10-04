@@ -241,11 +241,85 @@ export function ticketNotesDiscord(
     const target = await ensure(ticket);
     if (target.pending) return target;
     if (target.archived) await target.setArchived(false);
+    const takeover = () =>
+      message.takeoverRequestId &&
+      service.takeoverRequestView(service.get(ticket.id));
+    function payload() {
+      const request = takeover();
+      const matching = Boolean(
+        request &&
+        message.takeoverRequestId &&
+        request.id === message.takeoverRequestId,
+      );
+      const pending = matching && request.status === "pending";
+      return {
+        content: "",
+        embeds: [
+          {
+            title: matching
+              ? "Ticket takeover request"
+              : `${message.actor.name.slice(0, 80)} · Internal staff note`,
+            description: matching
+              ? `${request.requester.name} requests this ticket from ${request.previousStaff.name}.\n\n${request.reason}`
+              : message.content || undefined,
+            ...(matching
+              ? {
+                  fields: [
+                    {
+                      name: "Decision",
+                      value: `${request.status}${request.reviewer ? ` by ${request.reviewer.name}` : ""}`,
+                    },
+                  ],
+                }
+              : {}),
+            footer: { text: footer(message.id) },
+            url: `${config.staffOrigin}/tickets/${ticket.id}#notes`,
+            timestamp: new Date(message.at).toISOString(),
+          },
+        ],
+        components: pending
+          ? [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 2,
+                    style: 3,
+                    label: "Approve · Manager+",
+                    custom_id: `ticket:takeover-approve:${ticket.id}:${request.id}`,
+                  },
+                  {
+                    type: 2,
+                    style: 4,
+                    label: "Deny · Manager+",
+                    custom_id: `ticket:takeover-deny:${ticket.id}:${request.id}`,
+                  },
+                ],
+              },
+            ]
+          : [],
+        allowedMentions: { parse: [] },
+      };
+    }
+    if (message.takeoverRequestId && message.discordId) {
+      try {
+        const existing = await target.messages.fetch(message.discordId);
+        await existing.edit(payload());
+        return { id: existing.id };
+      } catch (error) {
+        if (error.code !== 10008) throw error;
+      }
+    }
     const key = `note:${message.id}`;
     let intent = store.get("ticket-send", key);
     if (intent?.threadId !== target.id) intent = null;
-    if (intent?.acknowledgedId) return { id: intent.acknowledgedId };
-    function acknowledge(sent) {
+    if (intent?.acknowledgedId) {
+      if (message.takeoverRequestId)
+        return acknowledge(await target.messages.fetch(intent.acknowledgedId));
+      return { id: intent.acknowledgedId };
+    }
+    async function acknowledge(sent) {
+      if (message.takeoverRequestId) await sent.edit(payload());
       save("ticket-send", key, { ...intent, acknowledgedId: sent.id });
       for (const file of attachments)
         save("ticket-media", file.id, {
@@ -294,18 +368,37 @@ export function ticketNotesDiscord(
       if (!file.purged && file.expiresAt > Date.now())
         files.push({ attachment: await bytes(file), name: file.name });
     service.get(ticket.id);
+    const request = takeover();
+    const managers =
+      request?.status === "pending"
+        ? (await staffMembers())
+            .filter((user) => {
+              try {
+                service.staff(user, ticket, "tickets.takeover");
+              } catch {
+                return false;
+              }
+              return user.roles?.some((id) =>
+                config.ranks.some(
+                  (rank) =>
+                    rank.id === id &&
+                    ["Founder", "Manager"].includes(rank.name),
+                ),
+              );
+            })
+            .map((user) => user.id)
+            .slice(0, 100)
+        : [];
+    service.get(ticket.id);
     const sent = await target.send({
-      embeds: [
-        {
-          title: `${message.actor.name.slice(0, 80)} · Internal staff note`,
-          description: message.content || undefined,
-          footer: { text: footer(message.id) },
-          url: `${config.staffOrigin}/tickets/${ticket.id}`,
-          timestamp: new Date(message.at).toISOString(),
-        },
-      ],
+      ...payload(),
+      ...(managers.length
+        ? {
+            content: managers.map((id) => `<@${id}>`).join(" "),
+            allowedMentions: { parse: [], users: managers },
+          }
+        : {}),
       files,
-      allowedMentions: { parse: [] },
       nonce: createHash("sha256").update(key).digest("hex").slice(0, 25),
       enforceNonce: true,
     });

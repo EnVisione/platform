@@ -124,18 +124,18 @@ test("legacy ticket visibility migrates once without broadening actions or reset
   assert.equal(caps["tickets.reply"], false);
   assert.equal(caps["tickets.claim"], false);
   assert.equal(caps["mail.view"], true);
-  assert.equal(migrated.read(actor("20")).revision, 8);
+  assert.equal(migrated.read(actor("20")).revision, 9);
   assert.equal(migrated.history(actor("20")).items[0].actor.id, "system");
   const edit = input(migrated);
   change(edit, "51", "tickets.category.reports.view", false);
   migrated.save(actor("20"), edit);
   const restarted = rolePermissions(settings, store);
-  assert.equal(restarted.read(actor("20")).revision, 9);
+  assert.equal(restarted.read(actor("20")).revision, 10);
   assert.equal(
     restarted.apply(actor("51")).capabilities["tickets.category.reports.view"],
     false,
   );
-  assert.equal(restarted.history(actor("20")).items.length, 2);
+  assert.equal(restarted.history(actor("20")).items.length, 3);
 });
 
 test("restricted categories reject lower-rank grants and mask stale saved grants across combined roles", (t) => {
@@ -501,32 +501,30 @@ test("category and inbox defaults preserve billing and partnership privacy acros
   );
 });
 
-test("takeover defaults to Admin or higher, obeys category grants and cannot be delegated below Admin", (t) => {
+test("takeover grants admit community ranks, migrate old locked grants once, and preserve later revocations", (t) => {
   const { policy, store } = setup(t);
   for (const rank of ["20", "28", "21", "29", "22", "30", "23"]) {
     const caps = policy.apply(actor(rank)).capabilities;
-    assert.equal(caps["tickets.takeover"], ["20", "28", "21"].includes(rank));
-    assert.equal(
-      caps["tickets.category.support.takeover"],
-      ["20", "28", "21"].includes(rank),
-    );
+    assert.equal(caps["tickets.takeover"], true);
+    assert.equal(caps["tickets.category.support.takeover"], true);
     assert.equal(caps["tickets.category.billing.takeover"], rank === "20");
   }
-  const edit = input(policy);
-  change(edit, "23", "tickets.takeover", true);
-  assert.throws(() => policy.save(actor("20"), edit), {
-    code: "ticket_takeover_protected",
-  });
+  assert.equal(policy.rank(actor("23")), 6);
+  assert.equal(policy.rank(actor("22", ["10", "20"])), 0);
+  assert.equal(policy.rank(actor("25")), null);
   store.set(
     "role-permissions",
     "current",
     {
       revision: 1,
+      ticketVisibilityVersion: 1,
       overrides: {
         23: {
-          "tickets.takeover": true,
-          "tickets.category.support.takeover": true,
+          "tickets.takeover": false,
+          "tickets.category.support.takeover": false,
         },
+        30: { "tickets.claim": false, "tickets.takeover": false },
+        21: { "tickets.category.support.takeover": false },
       },
     },
     Number.MAX_SAFE_INTEGER,
@@ -534,25 +532,31 @@ test("takeover defaults to Admin or higher, obeys category grants and cannot be 
   const restarted = rolePermissions(settings, store);
   assert.equal(
     restarted.apply(actor("23")).capabilities["tickets.takeover"],
-    false,
-  );
-  assert.ok(
-    restarted
-      .read(actor("20"))
-      .roles.find((role) => role.id === "23")
-      .locked.includes("tickets.category.support.takeover"),
-  );
-  const valid = input(restarted);
-  change(valid, "21", "tickets.category.support.takeover", false);
-  restarted.save(actor("28"), valid);
-  assert.equal(
-    restarted.apply(actor("21")).capabilities["tickets.takeover"],
     true,
+  );
+  assert.equal(
+    restarted.apply(actor("30")).capabilities["tickets.takeover"],
+    false,
   );
   assert.equal(
     restarted.apply(actor("21")).capabilities[
       "tickets.category.support.takeover"
     ],
+    false,
+  );
+  assert.equal(
+    restarted
+      .read(actor("20"))
+      .roles.find((role) => role.id === "23")
+      .locked.includes("tickets.category.support.takeover"),
+    false,
+  );
+  const valid = input(restarted);
+  change(valid, "23", "tickets.category.support.takeover", false);
+  restarted.save(actor("28"), valid);
+  const again = rolePermissions(settings, store);
+  assert.equal(
+    again.apply(actor("23")).capabilities["tickets.category.support.takeover"],
     false,
   );
 });

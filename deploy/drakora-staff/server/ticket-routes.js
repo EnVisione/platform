@@ -476,7 +476,7 @@ export function ticketRouter(
       express.json({ limit: "2kb" }),
       async (req, res) => {
         checkMutation(req);
-        service.takeover(
+        await service.takeover(
           await identity(req),
           req.params.id,
           req.body?.claimedBy,
@@ -484,6 +484,33 @@ export function ticketRouter(
         res.json({ ok: true });
       },
     );
+  if (staffView) {
+    router.post(
+      `${prefix}/:id/takeover-request`,
+      express.json({ limit: "4kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        service.requestTakeover(await identity(req), req.params.id, req.body);
+        res.status(201).json({ ok: true });
+      },
+    );
+    router.post(
+      `${prefix}/:id/takeover-review`,
+      express.json({ limit: "2kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        if (typeof req.body?.approve !== "boolean")
+          throw new AuthError("invalid_request", 400);
+        await service.reviewTakeover(
+          await identity(req),
+          req.params.id,
+          req.body.requestId,
+          req.body.approve,
+        );
+        res.json({ ok: true });
+      },
+    );
+  }
   if (staffView)
     router.post(
       `${prefix}/:id/delete-channel`,

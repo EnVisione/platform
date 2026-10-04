@@ -31,7 +31,7 @@ export const staffPermissions = [
     "tickets.takeover",
     "Tickets",
     "Take over tickets",
-    "Admin or higher can take responsibility for a ticket assigned to another staff member.",
+    "Managers and Founders can take any accessible ticket. Other staff need two ranks above its assignee, or Manager approval in the private staff thread.",
     ["tickets.claim"],
   ],
   [
