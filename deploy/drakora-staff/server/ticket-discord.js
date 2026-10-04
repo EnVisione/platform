@@ -39,6 +39,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     refreshing;
   const settings = config.tickets;
   const webhooks = new Map();
+  const intakeReplies = new Map();
+  const intakeReplyTasks = new Set();
   const save = (key, value) =>
     service.store.set("ticket-discord", key, value, Number.MAX_SAFE_INTEGER);
   const state = () => service.store.get("ticket-discord", "channels") || {};
@@ -974,6 +976,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           permissionOverwrites: ticketOverwrites(ticket, members),
         });
       service.bind(ticket.id, target.id);
+      finishIntakeReply(service.get(ticket.id));
       const saved = service.store.get("ticket-discord", ticket.id) || {};
       const recent = await target.messages.fetch({ limit: 100 });
       let intro = saved.introId
@@ -1776,6 +1779,58 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       ],
     };
   }
+  function intakeReply(ticket) {
+    const web = `${config.applications.publicOrigin}${ticketPath(ticket)}`;
+    return {
+      content: ticket.channelId
+        ? `Please go to your ticket here: <#${ticket.channelId}>\nYou can also continue on the website: ${web}`
+        : `Your ticket has been saved. Your private Discord channel is being created; this message will update with its link when it is ready.\nYou can also continue on the website: ${web}`,
+      components: ticket.channelId
+        ? [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 5,
+                  label: "Go to your ticket",
+                  url: `https://discord.com/channels/${settings.guildId}/${ticket.channelId}`,
+                },
+              ],
+            },
+          ]
+        : [myTicketsButton()],
+      allowedMentions: { parse: [] },
+    };
+  }
+  function finishIntakeReply(ticket) {
+    const pending = intakeReplies.get(ticket.id);
+    if (!pending || !ticket.channelId || stopped) return;
+    intakeReplies.delete(ticket.id);
+    clearTimeout(pending.timer);
+    const task = pending.interaction
+      .editReply(intakeReply(ticket))
+      .catch(() =>
+        console.error("Ticket channel link reply could not be updated."),
+      )
+      .finally(() => intakeReplyTasks.delete(task));
+    intakeReplyTasks.add(task);
+  }
+  async function acknowledgeIntake(interaction, ticket) {
+    const current = service.get(ticket.id);
+    await interaction.editReply(intakeReply(current));
+    if (current.channelId || stopped) return;
+    const remaining = Math.max(
+      0,
+      14 * 60000 -
+        Math.max(0, Date.now() - (interaction.createdTimestamp || Date.now())),
+    );
+    if (!remaining) return;
+    const timer = setTimeout(() => intakeReplies.delete(ticket.id), remaining);
+    timer.unref();
+    intakeReplies.set(ticket.id, { interaction, timer });
+    finishIntakeReply(service.get(ticket.id));
+  }
   function input(id, label, style, min, max, value, required = true) {
     const field = new TextInputBuilder()
       .setCustomId(id)
@@ -1881,10 +1936,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           },
           "discord",
         );
-        await service.pump();
-        return await interaction.editReply(
-          `Your ticket is ready: ${config.applications.publicOrigin}${ticketPath(ticket)}${service.get(ticket.id).channelId ? `\n<#${service.get(ticket.id).channelId}>` : "\nDiscord channel delivery is pending. Your ticket has been saved."}`,
-        );
+        return await acknowledgeIntake(interaction, ticket);
       }
       const ticket = service.get(id),
         owner = interaction.user.id === ticket.owner.id;
@@ -2290,15 +2342,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return refreshPermissions();
     },
     async close() {
-      await notes.close();
       stopped = true;
+      for (const pending of intakeReplies.values()) clearTimeout(pending.timer);
+      intakeReplies.clear();
+      await notes.close();
       clearInterval(timer);
       client.off("messageCreate", handleMessage);
       client.off("raw", handleRaw);
       client.off("interactionCreate", handleInteraction);
       client.off("clientReady", handleReady);
       client.off("shardResume", handleReady);
-      await Promise.allSettled([recovering, refreshing]);
+      await Promise.allSettled([recovering, refreshing, ...intakeReplyTasks]);
       webhooks.clear();
     },
   };

@@ -1102,6 +1102,7 @@ test("Discord reports have dedicated forms, persist the reported person and isol
       },
     }),
   );
+  await service.pump();
   const report = service.all()[0];
   assert.equal(report.type, "player");
   assert.equal(report.ign, "Reporter");
@@ -1136,6 +1137,126 @@ test("Discord reports have dedicated forms, persist the reported person and isol
       JSON.stringify(message.data).includes("ReportedPlayer"),
     ),
   );
+});
+
+test("ticket intake acknowledges immediately and replaces the private receipt with the created channel", async (t) => {
+  const { service, transport, client, user } = setupDiscord(t);
+  await transport.recover();
+  const main = await client.guilds.fetch("2");
+  const create = main.channels.create;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  main.channels.create = async (options) => {
+    if (options.topic?.startsWith("Drakora ticket ")) await gate;
+    return create(options);
+  };
+  const replies = [],
+    flags = [];
+  const values = {
+    ign: "ReceiptPlayer",
+    location: "Fixture",
+    description:
+      "A detailed issue saved while Discord channel creation is delayed.",
+  };
+  try {
+    client.emit("interactionCreate", {
+      guildId: "2",
+      customId: "ticket:intake:general",
+      user,
+      isChatInputCommand: () => false,
+      fields: { getTextInputValue: (id) => values[id] },
+      async deferReply(options) {
+        this.deferred = true;
+        flags.push(options.flags);
+      },
+      async editReply(value) {
+        replies.push(value);
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(flags, [64]);
+    assert.equal(replies.length, 1);
+    assert.match(replies[0].content, /Your ticket has been saved/);
+    assert.ok(!replies[0].content.includes("<#"));
+    assert.equal(
+      replies[0].components[0].components[0].custom_id,
+      "ticket:mine",
+    );
+    const ticket = service.all()[0];
+    assert.match(replies[0].content, new RegExp(ticket.id));
+    release();
+    await service.pump();
+    const current = service.get(ticket.id);
+    assert.ok(current.channelId);
+    assert.equal(replies.length, 2);
+    assert.match(
+      replies[1].content,
+      new RegExp(`Please go to your ticket here: <#${current.channelId}>`),
+    );
+    assert.equal(
+      replies[1].components[0].components[0].url,
+      `https://discord.com/channels/2/${current.channelId}`,
+    );
+    assert.deepEqual(replies[1].allowedMentions, { parse: [] });
+    await service.pump();
+    assert.equal(replies.length, 2);
+  } finally {
+    release();
+    await service.pump();
+  }
+});
+
+test("ticket intake recovers a channel created while the first reply is sending and clears pending replies on shutdown", async (t) => {
+  const { service, transport, client, user } = setupDiscord(t);
+  await transport.recover();
+  service.attach({});
+  const replies = [];
+  const values = {
+    ign: "RacePlayer",
+    location: "Fixture",
+    description:
+      "A detailed issue used to verify a fast channel creation race.",
+  };
+  client.emit("interactionCreate", {
+    guildId: "2",
+    customId: "ticket:intake:general",
+    user,
+    isChatInputCommand: () => false,
+    fields: { getTextInputValue: (id) => values[id] },
+    async deferReply() {
+      this.deferred = true;
+    },
+    async editReply(value) {
+      replies.push(value);
+      if (replies.length === 1)
+        service.bind(service.all()[0].id, "race-channel");
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(replies.length, 2);
+  assert.match(replies[1].content, /<#race-channel>/);
+  const pendingReplies = [];
+  client.emit("interactionCreate", {
+    guildId: "2",
+    customId: "ticket:intake:general",
+    user,
+    isChatInputCommand: () => false,
+    fields: { getTextInputValue: (id) => values[id] },
+    async deferReply() {
+      this.deferred = true;
+    },
+    async editReply(value) {
+      pendingReplies.push(value);
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pendingReplies.length, 1);
+  await transport.close();
+  service.attach(transport);
+  await transport.create(service.all().find((ticket) => !ticket.channelId));
+  assert.equal(pendingReplies.length, 1);
 });
 
 test("managed Discord tickets and attachment archives enforce staff rank boundaries", async (t) => {
