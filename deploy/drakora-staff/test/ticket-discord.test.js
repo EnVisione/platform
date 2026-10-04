@@ -947,6 +947,59 @@ test("ticket visibility follows screened staff membership and Dashboard access i
   assert.ok(!target.overwrites.some((value) => value.id === "201"));
 });
 
+test("permission refresh skips externally deleted channels while retaining transcripts and retrying real access failures", async (t) => {
+  const { service, transport, channels, user, staffMembers, client } =
+    setupDiscord(t, true);
+  await transport.recover();
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    ign: "Player",
+    type: "general",
+    location: "Discord",
+    description:
+      "A retained ticket whose Discord channel is removed outside the dashboard.",
+  });
+  await transport.create(ticket);
+  const id = service.get(ticket.id).channelId;
+  channels.delete(id);
+  staffMembers.delete("201");
+  await transport.refreshPermissions();
+  assert.equal(
+    service.store.get("ticket-discord", "permissions-pending"),
+    undefined,
+  );
+  assert.equal(service.get(ticket.id).channelId, id);
+  const main = await client.guilds.fetch("2");
+  const fetch = main.channels.fetch;
+  main.channels.fetch = async (requested) => {
+    if (requested === id)
+      throw Object.assign(new Error("Unknown Channel"), { code: 10003 });
+    return fetch(requested);
+  };
+  await transport.refreshPermissions();
+  assert.equal(
+    service.store.get("ticket-discord", "permissions-pending"),
+    undefined,
+  );
+  main.channels.fetch = async (requested) => {
+    if (requested === id)
+      throw Object.assign(new Error("Missing Access"), { code: 50001 });
+    return fetch(requested);
+  };
+  await assert.rejects(transport.refreshPermissions(), /refresh is incomplete/);
+  assert.ok(service.store.get("ticket-discord", "permissions-pending"));
+  const category = [...channels.values()].find(
+    (channel) => channel.name === "Drakora Support",
+  );
+  assert.ok(!category.overwrites.some((entry) => entry.id === "201"));
+  main.channels.fetch = fetch;
+  await transport.refreshPermissions();
+  assert.equal(
+    service.store.get("ticket-discord", "permissions-pending"),
+    undefined,
+  );
+});
+
 test("closure removes owner access and preserves paginated history before Admin channel deletion", async (t) => {
   const { service, transport, channels, user, dms } = setupDiscord(t);
   const ticket = service.create(

@@ -1325,11 +1325,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         let failed = false;
         for (const target of targets) {
           try {
-            await (
-              await main.channels.fetch(target.id)
-            ).permissionOverwrites.set(target.permissions);
-          } catch {
-            failed = true;
+            const channel = await main.channels.fetch(target.id);
+            if (channel)
+              await channel.permissionOverwrites.set(target.permissions);
+          } catch (error) {
+            if (error.code !== 10003) failed = true;
           }
         }
         const staffGuild = await client.guilds.fetch(config.guildId);
@@ -1341,17 +1341,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         };
         for (const [type, id] of Object.entries(noticeChannels)) {
           try {
-            await (
-              await staffGuild.channels.fetch(id)
-            ).permissionOverwrites.set(
+            const channel = await staffGuild.channels.fetch(id);
+            if (!channel) continue;
+            await channel.permissionOverwrites.set(
               overwrites(members, null, type).map((entry) =>
                 entry.id === settings.guildId
                   ? { ...entry, id: config.guildId }
                   : entry,
               ),
             );
-          } catch {
-            failed = true;
+          } catch (error) {
+            if (error.code !== 10003) failed = true;
           }
         }
         if (failed) throw new Error("Ticket permission refresh is incomplete");
