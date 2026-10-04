@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./workspace-tools.css";
 import { accentForeground } from "../shared/accent.js";
+import { workspaceSessionRequests } from "../shared/workspace-session-request.js";
 
 export const dashboardTools = [
   {
@@ -29,52 +30,38 @@ export function WorkspaceTools({
   const activeView = useRef(view);
   activeView.current = view;
   const initialView = useRef(view ?? "tracker");
-  const recovering = useRef(false);
-  const pending = useRef(false);
+  const recovering = useRef({});
+  const requests = useRef(null);
+  requests.current ??= workspaceSessionRequests();
   const [urls, setUrls] = useState({});
   const [ready, setReady] = useState({});
   const [failures, setFailures] = useState({});
   const failure = failures[view];
-  const [slow, setSlow] = useState(false);
+  const [slow, setSlow] = useState({});
   const title =
     dashboardTools.find((tool) => tool.view === view)?.title ?? "Workspace";
 
   const start = useCallback(
-    async (target, signal) => {
-      if (pending.current) return;
-      pending.current = true;
+    async (target) => {
       setFailures((current) => ({ ...current, [target]: undefined }));
-      setSlow(false);
+      setSlow((current) => ({ ...current, [target]: false }));
       setReady((current) => ({ ...current, [target]: false }));
       try {
-        const response = await fetch("/api/workspace-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-          body: JSON.stringify({ view: target }),
-          signal,
+        const url = await requests.current.start(target, {
+          origin,
+          csrf,
         });
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error(result.error ?? "service_unavailable");
-        const url = new URL(result.url);
-        if (url.origin !== origin || url.pathname !== "/__staff/attach")
-          throw new Error("service_unavailable");
-        if (!signal?.aborted)
-          setUrls((current) => ({ ...current, [target]: url.href }));
+        if (url) setUrls((current) => ({ ...current, [target]: url }));
       } catch (error) {
-        if (!signal?.aborted)
-          setFailures((current) => ({ ...current, [target]: error.message }));
-      } finally {
-        pending.current = false;
+        setFailures((current) => ({ ...current, [target]: error.message }));
       }
     },
     [csrf, origin],
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-    void start(initialView.current, controller.signal);
-    return () => controller.abort();
+    void start(initialView.current);
+    return () => requests.current.cancelAll();
   }, [start]);
 
   useEffect(() => {
@@ -88,9 +75,9 @@ export function WorkspaceTools({
         const code = event.data.code;
         if (
           ["login_required", "huly_account_mismatch"].includes(code) &&
-          !recovering.current
+          !recovering.current[tool.view]
         ) {
-          recovering.current = true;
+          recovering.current[tool.view] = true;
           void start(tool.view);
         } else
           setFailures((current) => ({
@@ -116,7 +103,8 @@ export function WorkspaceTools({
         return next;
       });
       setFailures((current) => ({ ...current, [tool.view]: undefined }));
-      setSlow(false);
+      recovering.current[tool.view] = false;
+      setSlow((current) => ({ ...current, [tool.view]: false }));
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
@@ -142,10 +130,13 @@ export function WorkspaceTools({
   }, [accent, timeFormat, origin, ready]);
 
   useEffect(() => {
-    if (view && ready[view]) return;
-    const timer = setTimeout(() => setSlow(true), 20000);
+    if (!view || ready[view]) return;
+    const timer = setTimeout(
+      () => setSlow((current) => ({ ...current, [view]: true })),
+      20000,
+    );
     return () => clearTimeout(timer);
-  }, [view, ready, urls]);
+  }, [view, ready[view], urls[view]]);
 
   return (
     <section
@@ -158,13 +149,17 @@ export function WorkspaceTools({
           <span className="workspace-tool-symbol" aria-hidden="true">
             {dashboardTools.find((tool) => tool.view === view)?.icon}
           </span>
-          <h2>{failure ? `${title} is unavailable` : `Opening ${title}…`}</h2>
+          <h2>
+            {failure || slow[view]
+              ? `${title} is unavailable`
+              : `Opening ${title}…`}
+          </h2>
           <p>
             {failure === "login_required"
               ? "Your dashboard session has expired. Sign in to continue."
               : failure === "staff_permission_required"
                 ? "Your current staff permissions do not allow workspace access."
-                : failure || slow
+                : failure || slow[view]
                   ? "The workspace could not connect. You can retry here."
                   : "Your workspace is loading."}
           </p>
@@ -173,10 +168,10 @@ export function WorkspaceTools({
               Sign in to dashboard
             </a>
           ) : (
-            (failure || slow) && (
+            (failure || slow[view]) && (
               <button
                 onClick={() => {
-                  recovering.current = false;
+                  recovering.current[view] = false;
                   void start(view);
                 }}
               >

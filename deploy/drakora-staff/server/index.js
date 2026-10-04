@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import { openStore, hash } from "./store.js";
 import { AuthError, discordClient } from "./discord.js";
 import { hulyClient } from "./huly.js";
-import { isPageRequest } from "./navigation.js";
+import { isPageRequest, requestPath } from "./navigation.js";
 import {
   workspaceAllowed,
   workspacePath,
@@ -426,7 +426,7 @@ async function signedIn(
   if (!user.permissions.dashboard)
     throw new AuthError("dashboard_role_required");
   const link = minecraft.get(user.id);
-  const path = req.originalUrl.split("?")[0];
+  const path = requestPath(req);
   if (
     !["GET", "HEAD"].includes(req.method) ||
     (req.method === "GET" &&
