@@ -227,7 +227,7 @@ function Composer({
   }
   return (
     <form
-      className="ticket-composer"
+      className={`ticket-composer${resolution ? " ticket-composer-resolution" : ""}`}
       onSubmit={send}
       onPaste={(event) => {
         if (event.clipboardData.files.length) {
@@ -265,7 +265,7 @@ function Composer({
         minLength={resolution ? 20 : undefined}
         maxLength={resolution ? 4000 : 2000}
         required={resolution || !files.length}
-        rows={resolution ? 4 : 3}
+        rows={resolution ? 4 : 2}
         disabled={busy}
       />
       {resolution && (
@@ -446,7 +446,13 @@ function TicketHistory({ entries }) {
   );
 }
 
-function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
+function TicketChat({
+  id,
+  csrf,
+  staffView = false,
+  capabilities = {},
+  backHref,
+}) {
   const base = `${staffView ? "/api/tickets" : "/help/api/tickets"}/${id}`;
   const [ticket, setTicket] = useState(null),
     [error, setError] = useState(""),
@@ -454,7 +460,17 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
     [deleting, setDeleting] = useState(false),
     [busy, setBusy] = useState(false),
     [older, setOlder] = useState([]),
-    [hasEarlier, setHasEarlier] = useState(null);
+    [hasEarlier, setHasEarlier] = useState(null),
+    [panel, setPanel] = useState("details"),
+    [detailsOpen, setDetailsOpen] = useState(
+      () => window.matchMedia("(min-width: 1100px)").matches,
+    );
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1100px)");
+    const resize = () => setDetailsOpen(media.matches);
+    media.addEventListener("change", resize);
+    return () => media.removeEventListener("change", resize);
+  }, []);
   const loading = useRef(false),
     queued = useRef(false),
     scroll = useRef(null),
@@ -507,6 +523,11 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
   if (!ticket)
     return (
       <div className="ticket-loading">
+        {backHref && (
+          <a className="ticket-back" href={backHref}>
+            ← Back to filtered tickets
+          </a>
+        )}
         <p role="status">{error || "Opening your ticket…"}</p>
         <button onClick={refresh}>Retry</button>
       </div>
@@ -518,13 +539,22 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
       values.findIndex((value) => value.id === message.id) === index,
   );
   return (
-    <div className="ticket-chat-layout">
-      <section className="ticket-chat">
-        <header className="ticket-chat-header">
-          <div>
-            <h2>
-              #{ticket.type}-{ticket.ign}
-            </h2>
+    <div
+      className={`ticket-chat-layout${detailsOpen ? " ticket-details-open" : ""}`}
+    >
+      <header className="ticket-chat-header">
+        <div className="ticket-heading">
+          {backHref && (
+            <a className="ticket-back" href={backHref}>
+              ← Back to filtered tickets
+            </a>
+          )}
+          <h2>
+            {ticketTypes.find((type) => type.id === ticket.type)?.name ||
+              "Ticket"}
+            <span className="ticket-heading-owner">{ticket.ign}</span>
+          </h2>
+          <div className="ticket-heading-meta">
             <span className={`ticket-state ${ticket.status}`}>
               {ticketStatusLabel(ticket)}
             </span>
@@ -537,77 +567,83 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
                   : ""}
             </small>
           </div>
-          <div className="ticket-actions">
-            {!active && (!staffView || ticket.actions?.close) && (
+        </div>
+        <div className="ticket-actions">
+          {!active && (!staffView || ticket.actions?.close) && (
+            <button
+              disabled={busy || ticket.deletionPending}
+              onClick={() => action("reopen", { closureId: ticket.closureId })}
+            >
+              Reopen ticket
+            </button>
+          )}
+          {staffView &&
+            !active &&
+            ticket.channelRetained &&
+            ticket.actions?.delete && (
               <button
                 disabled={busy || ticket.deletionPending}
-                onClick={() =>
-                  action("reopen", { closureId: ticket.closureId })
-                }
+                onClick={() => setDeleting((value) => !value)}
               >
-                Reopen ticket
+                {ticket.deletionPending
+                  ? "Deleting channel…"
+                  : deleting
+                    ? "Cancel deletion"
+                    : "Delete Discord channel"}
               </button>
             )}
-            {staffView &&
-              !active &&
-              ticket.channelRetained &&
-              ticket.actions?.delete && (
-                <button
-                  disabled={busy || ticket.deletionPending}
-                  onClick={() => setDeleting((value) => !value)}
-                >
-                  {ticket.deletionPending
-                    ? "Deleting channel…"
-                    : deleting
-                      ? "Cancel deletion"
-                      : "Delete Discord channel"}
-                </button>
-              )}
-            {staffView &&
-              ticket.actions?.claim &&
-              active &&
-              !ticket.claimedBy && (
-                <button
-                  className="ticket-primary"
-                  disabled={busy}
-                  onClick={() => action("claim")}
-                >
-                  Claim ticket
-                </button>
-              )}
-            {staffView && ticket.actions?.takeover && (
+          {staffView &&
+            ticket.actions?.claim &&
+            active &&
+            !ticket.claimedBy && (
               <button
                 className="ticket-primary"
                 disabled={busy}
-                onClick={() =>
-                  action("takeover", { claimedBy: ticket.claimedBy.id })
-                }
+                onClick={() => action("claim")}
               >
-                Take over ticket
+                Claim ticket
               </button>
             )}
-            {staffView &&
-              ticket.actions?.close &&
-              ticket.status !== "closed" && (
-                <button onClick={() => setClosing((value) => !value)}>
-                  {closing ? "Cancel resolution" : "Resolve ticket"}
-                </button>
-              )}
-            {!staffView && active && (
-              <button
-                disabled={busy}
-                onClick={() => setClosing((value) => !value)}
-              >
-                Close ticket
-              </button>
-            )}
-            {ticket.discordUrl && (
-              <a href={ticket.discordUrl} target="_blank" rel="noreferrer">
-                Open Discord ↗
-              </a>
-            )}
-          </div>
-        </header>
+          {staffView && ticket.actions?.takeover && (
+            <button
+              className="ticket-primary"
+              disabled={busy}
+              onClick={() =>
+                action("takeover", { claimedBy: ticket.claimedBy.id })
+              }
+            >
+              Take over ticket
+            </button>
+          )}
+          {staffView && ticket.actions?.close && ticket.status !== "closed" && (
+            <button onClick={() => setClosing((value) => !value)}>
+              {closing ? "Cancel resolution" : "Resolve ticket"}
+            </button>
+          )}
+          {!staffView && active && (
+            <button
+              disabled={busy}
+              onClick={() => setClosing((value) => !value)}
+            >
+              Close ticket
+            </button>
+          )}
+          {ticket.discordUrl && (
+            <a href={ticket.discordUrl} target="_blank" rel="noreferrer">
+              Open Discord ↗
+            </a>
+          )}
+          <button
+            className="ticket-details-toggle"
+            aria-expanded={detailsOpen}
+            aria-controls={`ticket-details-${id}`}
+            onClick={() => setDetailsOpen((value) => !value)}
+          >
+            {detailsOpen ? "Hide details" : "Ticket details"}
+          </button>
+        </div>
+      </header>
+      <section className="ticket-chat" aria-label="Ticket conversation">
         {error && (
           <p className="ticket-error" role="alert">
             {error}
@@ -641,39 +677,44 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
               Load earlier messages
             </button>
           )}
-          <article className="ticket-intake">
-            <h3>Ticket opened</h3>
-            <p>
-              <strong>
-                {ticketTypes.find((type) => type.id === ticket.type)?.name}
-              </strong>{" "}
-              · {ticket.location}
-            </p>
-            {ticket.intakeDetails?.map((detail) => (
-              <p key={detail.label}>
-                <strong>{detail.label}:</strong> {detail.value}
-              </p>
-            ))}
-            <p>{ticket.description}</p>
-            {partner && (
+          <details className="ticket-intake" open>
+            <summary>
+              <span>
+                <strong>Original request</strong>
+                <small>Opened {stamp(ticket.createdAt)}</small>
+              </span>
+              <span className="ticket-intake-hint">View details</span>
+            </summary>
+            <div className="ticket-intake-content">
               <p>
-                <a
-                  href={ticket.partnership.packUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View modpack ↗
-                </a>{" "}
-                ·{" "}
-                {ticket.partnership.relationship === "owner"
-                  ? "Pack owner"
-                  : "Pack developer"}
+                <strong>
+                  {ticketTypes.find((type) => type.id === ticket.type)?.name}
+                </strong>{" "}
+                · {ticket.location}
               </p>
-            )}
-            <small>
-              Opened by {ticket.owner.name} · {stamp(ticket.createdAt)}
-            </small>
-          </article>
+              {ticket.intakeDetails?.map((detail) => (
+                <p key={detail.label}>
+                  <strong>{detail.label}:</strong> {detail.value}
+                </p>
+              ))}
+              <p>{ticket.description}</p>
+              {partner && (
+                <p>
+                  <a
+                    href={ticket.partnership.packUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View modpack ↗
+                  </a>{" "}
+                  ·{" "}
+                  {ticket.partnership.relationship === "owner"
+                    ? "Pack owner"
+                    : "Pack developer"}
+                </p>
+              )}
+            </div>
+          </details>
           {ticket.deliveryIssues?.length > 0 && (
             <p className="ticket-error" role="alert">
               A contact update could not be confirmed. Check the partnership
@@ -786,7 +827,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
           />
         )}
-        {!active && (
+        {!active && !(staffView && closing && ticket.status !== "closed") && (
           <div className="ticket-finished">
             <p>
               {ticket.status === "awaiting_resolution"
@@ -841,120 +882,190 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
           </div>
         )}
       </section>
-      <aside className="ticket-player">
-        <h3>{partner ? "Partner contact" : "Player information"}</h3>
-        {!partner && (
-          <img
-            className="ticket-skin"
-            src={
-              staffView
-                ? `/apply/api/head/${ticket.ign}`
-                : `/help/api/head/${ticket.ign}`
-            }
-            alt={`${ticket.ign}'s Minecraft skin`}
-          />
-        )}
-        <strong>{ticket.ign}</strong>
-        <span>{ticket.owner.name}</span>
-        <dl>
-          {staffView && !partner && (
-            <>
-              <dt>Minecraft status</dt>
-              <dd>Not connected</dd>
-              <dt>Last online</dt>
-              <dd>Not connected</dd>
-              <dt>Network playtime</dt>
-              <dd>Not connected</dd>
-              {ticket.contactEmail && (
+      <aside
+        className="ticket-player"
+        id={`ticket-details-${id}`}
+        hidden={!detailsOpen}
+        aria-label="Ticket details"
+      >
+        <div className="ticket-panel-heading">
+          <h3>Ticket details</h3>
+          <div
+            className="ticket-panel-tabs"
+            role="group"
+            aria-label="Ticket information"
+          >
+            <button
+              aria-pressed={panel === "details"}
+              onClick={() => setPanel("details")}
+            >
+              Details
+            </button>
+            {staffView && (
+              <button
+                aria-pressed={panel === "activity"}
+                onClick={() => setPanel("activity")}
+              >
+                Activity
+              </button>
+            )}
+            {staffView &&
+              (ticket.resolution || ticket.previousResolutions?.length > 0) && (
+                <button
+                  aria-pressed={panel === "resolution"}
+                  onClick={() => setPanel("resolution")}
+                >
+                  Resolution
+                </button>
+              )}
+          </div>
+        </div>
+        <div className="ticket-panel-content" hidden={panel !== "details"}>
+          <div className="ticket-person">
+            {!partner && (
+              <img
+                className="ticket-skin"
+                src={
+                  staffView
+                    ? `/apply/api/head/${ticket.ign}`
+                    : `/help/api/head/${ticket.ign}`
+                }
+                alt={`${ticket.ign}'s Minecraft skin`}
+              />
+            )}
+            <div>
+              <strong>{ticket.ign}</strong>
+              <span>
+                {ticket.owner.guest ? "Website guest" : ticket.owner.name}
+              </span>
+            </div>
+          </div>
+          <section className="ticket-detail-section">
+            <h3>Assignment</h3>
+            <div className="ticket-assignee">
+              <Avatar actor={ticket.claimedBy || ticket.helpedBy} />
+              <div>
+                <strong>{ticket.claimedBy?.name || "Unclaimed"}</strong>
+                <span>
+                  {ticket.claimedBy
+                    ? "Assigned staff member"
+                    : ticket.helpedBy
+                      ? `First reply by ${ticket.helpedBy.name}`
+                      : "Waiting for a staff member"}
+                </span>
+              </div>
+            </div>
+          </section>
+          <section className="ticket-detail-section">
+            <h3>{partner ? "Partner contact" : "Player information"}</h3>
+            <dl className="ticket-facts">
+              {ticket.helpedBy && (
+                <>
+                  <dt>First staff reply</dt>
+                  <dd>{ticket.helpedBy.name}</dd>
+                </>
+              )}
+              {staffView && !partner && ticket.contactEmail && (
                 <>
                   <dt>Contact email</dt>
                   <dd>{ticket.contactEmail}</dd>
                 </>
               )}
-            </>
+              {partner && (
+                <>
+                  <dt>Email</dt>
+                  <dd>{ticket.contactEmail}</dd>
+                  <dt>Discord</dt>
+                  <dd>{ticket.partnership.discord}</dd>
+                  <dt>Contact preference</dt>
+                  <dd>
+                    {ticket.partnership.emailFallback
+                      ? "Email · Discord messages were blocked"
+                      : ticket.partnership.preference === "discord"
+                        ? "Discord direct messages"
+                        : "Email"}
+                  </dd>
+                </>
+              )}
+              <dt>Ticket opened from</dt>
+              <dd>{ticket.origin === "discord" ? "Discord" : "Website"}</dd>
+              <dt>Opened</dt>
+              <dd>{stamp(ticket.createdAt)}</dd>
+              <dt>Ticket reference</dt>
+              <dd className="ticket-reference">{ticket.id}</dd>
+            </dl>
+          </section>
+          {staffView && !partner && (
+            <p className="ticket-integration-note">
+              Minecraft activity is not connected yet.
+            </p>
           )}
-          {partner && (
-            <>
-              <dt>Email</dt>
-              <dd>{ticket.contactEmail}</dd>
-              <dt>Discord</dt>
-              <dd>{ticket.partnership.discord}</dd>
-              <dt>Contact preference</dt>
-              <dd>
-                {ticket.partnership.emailFallback
-                  ? "Email · Discord messages were blocked"
-                  : ticket.partnership.preference === "discord"
-                    ? "Discord direct messages"
-                    : "Email"}
-              </dd>
-            </>
-          )}
-          <dt>Ticket opened from</dt>
-          <dd>{ticket.origin === "discord" ? "Discord" : "Website"}</dd>
-          <dt>Assigned staff</dt>
-          <dd>{ticket.claimedBy?.name || "Unclaimed"}</dd>
-          {ticket.helpedBy && (
-            <>
-              <dt>First staff reply</dt>
-              <dd>{ticket.helpedBy.name}</dd>
-            </>
-          )}
-        </dl>
+        </div>
         {staffView && (
           <>
-            {ticket.previousResolutions?.map((closure, index) => (
-              <section key={`${closure.at}:${index}`}>
-                <h3>Previous closure · {stamp(closure.at)}</h3>
-                {closure.rating && (
-                  <p>
-                    Private rating: {closure.rating}/5 ·{" "}
-                    {closure.claimedBy?.name || "Support team"}
-                  </p>
-                )}
-                {closure.resolution && (
-                  <>
-                    <p>{closure.resolution.summary}</p>
-                    <p>Commands: {closure.resolution.commands}</p>
-                    <p>Recorded by {closure.resolution.actor.name}</p>
-                    {closure.resolution.attachments.map((file) => (
-                      <FileView key={file.id} file={file} />
-                    ))}
-                  </>
+            <div className="ticket-panel-content" hidden={panel !== "activity"}>
+              <section className="ticket-detail-section">
+                <h3>Staff viewing</h3>
+                {ticket.viewers.length ? (
+                  ticket.viewers.map((user) => (
+                    <div className="ticket-viewer" key={user.id}>
+                      <Avatar actor={user} />
+                      {user.name}
+                    </div>
+                  ))
+                ) : (
+                  <p className="ticket-muted">No staff viewing</p>
                 )}
               </section>
-            ))}
-            {capabilities["moderation.view"] && (
-              <ModerationHistoryCard
-                key={`moderation:${ticket.id}`}
-                endpoint={`/api/tickets/${ticket.id}/moderation`}
-              />
-            )}
-            <h3>Staff viewing</h3>
-            {ticket.viewers.length ? (
-              ticket.viewers.map((user) => (
-                <div className="ticket-viewer" key={user.id}>
-                  <Avatar actor={user} />
-                  {user.name}
-                </div>
-              ))
-            ) : (
-              <p>No staff viewing</p>
-            )}
-            <TicketHistory entries={ticket.history} />
-            {ticket.resolution && (
-              <section className="ticket-resolution">
-                <h3>Private staff resolution</h3>
-                <p>{ticket.resolution.summary}</p>
-                <strong>Commands run</strong>
-                <p>{ticket.resolution.commands}</p>
-                {ticket.resolution.attachments.map((file) => (
-                  <FileView key={file.id} file={file} />
-                ))}
-                <small>
-                  {ticket.resolution.actor.name} · {stamp(ticket.resolution.at)}
-                </small>
-              </section>
-            )}
+              {panel === "activity" && capabilities["moderation.view"] && (
+                <ModerationHistoryCard
+                  key={`moderation:${ticket.id}`}
+                  endpoint={`/api/tickets/${ticket.id}/moderation`}
+                />
+              )}
+              <TicketHistory entries={ticket.history} />
+            </div>
+            <div
+              className="ticket-panel-content"
+              hidden={panel !== "resolution"}
+            >
+              {ticket.previousResolutions?.map((closure, index) => (
+                <section key={`${closure.at}:${index}`}>
+                  <h3>Previous closure · {stamp(closure.at)}</h3>
+                  {closure.rating && (
+                    <p>
+                      Private rating: {closure.rating}/5 ·{" "}
+                      {closure.claimedBy?.name || "Support team"}
+                    </p>
+                  )}
+                  {closure.resolution && (
+                    <>
+                      <p>{closure.resolution.summary}</p>
+                      <p>Commands: {closure.resolution.commands}</p>
+                      <p>Recorded by {closure.resolution.actor.name}</p>
+                      {closure.resolution.attachments.map((file) => (
+                        <FileView key={file.id} file={file} />
+                      ))}
+                    </>
+                  )}
+                </section>
+              ))}
+              {ticket.resolution && (
+                <section className="ticket-resolution">
+                  <h3>Private staff resolution</h3>
+                  <p>{ticket.resolution.summary}</p>
+                  <strong>Commands run</strong>
+                  <p>{ticket.resolution.commands}</p>
+                  {ticket.resolution.attachments.map((file) => (
+                    <FileView key={file.id} file={file} />
+                  ))}
+                  <small>
+                    {ticket.resolution.actor.name} ·{" "}
+                    {stamp(ticket.resolution.at)}
+                  </small>
+                </section>
+              )}
+            </div>
           </>
         )}
       </aside>
@@ -1032,18 +1143,13 @@ export function Tickets({ csrf, capabilities, logs = false }) {
   if (id)
     return (
       <div className="ticket-page ticket-detail">
-        <a
-          className="ticket-back"
-          href={`${new URLSearchParams(location.search).get("view") === "logs" ? "/logs" : "/tickets"}?${listSearch}`}
-        >
-          ← Back to filtered tickets
-        </a>
         <TicketChat
           key={id}
           id={id}
           csrf={csrf}
           staffView
           capabilities={capabilities}
+          backHref={`${new URLSearchParams(location.search).get("view") === "logs" ? "/logs" : "/tickets"}?${listSearch}`}
         />
       </div>
     );

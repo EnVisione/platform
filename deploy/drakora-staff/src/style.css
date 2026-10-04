@@ -338,6 +338,21 @@ button:disabled {
 .sidebar nav {
   padding: 0 8px;
 }
+.sidebar .sidebar-legal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: auto;
+  padding: 20px 18px 16px;
+  color: #949ba4;
+  font-size: 11px;
+}
+.sidebar-legal a:hover {
+  color: #dbdee1;
+}
+.mobile-menu {
+  display: none;
+}
 
 .nav-item {
   display: flex;
@@ -374,7 +389,6 @@ button:disabled {
   align-items: center;
   gap: 10px;
   min-height: 62px;
-  margin-top: auto;
   padding: 10px;
   background: #232428;
 }
@@ -842,7 +856,7 @@ button:disabled {
 
 @media (max-width: 800px) {
   .workspace {
-    grid-template-columns: 64px 208px minmax(0, 1fr);
+    grid-template-columns: 208px minmax(0, 1fr);
   }
 
   .dashboard {
@@ -889,6 +903,7 @@ button:disabled {
 
   .topbar {
     flex-wrap: wrap;
+    position: relative;
     height: auto;
     min-height: 58px;
     padding: 8px 18px;
@@ -896,13 +911,51 @@ button:disabled {
 
   .mobile-nav {
     display: flex;
-    flex-wrap: wrap;
-    max-width: 100%;
-    gap: 12px;
+    flex-direction: column;
+    padding: 8px;
+    gap: 2px;
+    background: #232428;
+    border: 1px solid #404249;
+    border-radius: 10px;
+    color: #dbdee1;
+    font-size: 14px;
+    position: absolute;
+    right: 18px;
+    top: calc(100% + 8px);
+    width: min(240px, calc(100vw - 36px));
+    max-height: min(60dvh, 480px);
+    overflow-y: auto;
+    z-index: 20;
+    box-shadow: 0 12px 32px #0006;
+  }
+  .mobile-nav a {
+    padding: 10px 12px;
+    border-radius: 6px;
+  }
+  .mobile-nav a:hover {
+    background: #404249;
+  }
+  .mobile-menu {
+    display: block;
     margin-left: auto;
-    color: var(--accent);
+  }
+  .mobile-menu summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 7px 10px;
+    border-radius: 6px;
+    background: #404249;
     font-size: 13px;
-    font-weight: 650;
+  }
+  .mobile-menu summary::-webkit-details-marker {
+    display: none;
+  }
+  .mobile-menu summary:focus-visible {
+    outline: 2px solid var(--accent-ink);
+    outline-offset: 3px;
+  }
+  .topbar {
+    gap: 8px 12px;
   }
 
   .dashboard {

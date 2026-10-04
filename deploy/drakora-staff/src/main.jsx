@@ -742,6 +742,7 @@ function App() {
         const target = dashboardDestination(link.href, location.origin);
         if (!target) return;
         event.preventDefault();
+        link.closest(".mobile-menu")?.removeAttribute("open");
         navigateDashboard(target);
       }}
     >
@@ -866,6 +867,17 @@ function App() {
             </a>
           )}
         </nav>
+        <nav className="sidebar-legal" aria-label="Legal and privacy">
+          <a href="/terms" target="_blank" rel="noreferrer">
+            Terms of Service
+          </a>
+          <a href="/privacy" target="_blank" rel="noreferrer">
+            Privacy Policy
+          </a>
+          <a href="mailto:support@drakora.org?subject=Privacy%20request">
+            Privacy request
+          </a>
+        </nav>
         <div className="account-bar">
           {user.avatar ? (
             <img className="account-avatar" src={user.avatar} alt="" />
@@ -910,41 +922,55 @@ function App() {
                                 ? "Website"
                                 : "Overview"}
           </h1>
-          <nav className="mobile-nav" aria-label="Mobile navigation">
-            {(settingsPage ||
-              accountsPage ||
-              applicationsPage ||
-              emailPage ||
-              rolesPage ||
-              websitePage ||
-              ticketsPage ||
-              logsPage ||
-              moderationPage ||
-              workspaceView) && <a href="/">Overview</a>}
-            {user.todo &&
-              dashboardTools
-                .filter((tool) => tool.view !== workspaceView)
-                .map((tool) => (
-                  <a key={tool.view} href={`/${tool.view}`}>
-                    {tool.title}
-                  </a>
-                ))}
-            {user.manager && !accountsPage && <a href="/accounts">Accounts</a>}
-            {user.applications && !applicationsPage && (
-              <a href="/applications">Applications</a>
-            )}
-            {user.capabilities["settings.view"] && !settingsPage && (
-              <a href="/settings">Settings</a>
-            )}
-            {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
-            {user.mail && !emailPage && <a href="/email">Email</a>}
-            {user.website && !websitePage && <a href="/website">Website</a>}
-            {user.tickets && !ticketsPage && <a href="/tickets">Tickets</a>}
-            {user.logs && !logsPage && <a href="/logs">Logs</a>}
-            {user.capabilities["moderation.view"] && !moderationPage && (
-              <a href="/moderation">Moderation</a>
-            )}
-          </nav>
+          <details className="mobile-menu">
+            <summary>☰ Menu</summary>
+            <nav className="mobile-nav" aria-label="Mobile navigation">
+              {(settingsPage ||
+                accountsPage ||
+                applicationsPage ||
+                emailPage ||
+                rolesPage ||
+                websitePage ||
+                ticketsPage ||
+                logsPage ||
+                moderationPage ||
+                workspaceView) && <a href="/">Overview</a>}
+              {user.todo &&
+                dashboardTools
+                  .filter((tool) => tool.view !== workspaceView)
+                  .map((tool) => (
+                    <a key={tool.view} href={`/${tool.view}`}>
+                      {tool.title}
+                    </a>
+                  ))}
+              {user.manager && !accountsPage && (
+                <a href="/accounts">Accounts</a>
+              )}
+              {user.applications && !applicationsPage && (
+                <a href="/applications">Applications</a>
+              )}
+              {user.capabilities["settings.view"] && !settingsPage && (
+                <a href="/settings">Settings</a>
+              )}
+              {user.rolesPanel && !rolesPage && <a href="/roles">Roles</a>}
+              {user.mail && !emailPage && <a href="/email">Email</a>}
+              {user.website && !websitePage && <a href="/website">Website</a>}
+              {user.tickets && !ticketsPage && <a href="/tickets">Tickets</a>}
+              {user.logs && !logsPage && <a href="/logs">Logs</a>}
+              {user.capabilities["moderation.view"] && !moderationPage && (
+                <a href="/moderation">Moderation</a>
+              )}
+              <a href="/terms" target="_blank" rel="noreferrer">
+                Terms of Service ↗
+              </a>
+              <a href="/privacy" target="_blank" rel="noreferrer">
+                Privacy Policy ↗
+              </a>
+              <a href="mailto:support@drakora.org?subject=Privacy%20request">
+                Privacy request
+              </a>
+            </nav>
+          </details>
           <DashboardClock format={preferences.format} timeZone={timeZone} />
           <button className="signout" onClick={logout} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
@@ -1086,7 +1112,6 @@ function App() {
           ) : (
             <Overview user={user} timeFormat={preferences.format} />
           )}
-          <LegalNotice />
         </main>
       </div>
     </div>
