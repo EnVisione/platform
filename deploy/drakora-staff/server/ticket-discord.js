@@ -15,7 +15,7 @@ import {
   ticketIntake,
   ticketDetails,
   ticketPath,
-  ticketStatuses,
+  ticketStatusLabel,
   ticketCategory,
 } from "../shared/tickets.js";
 import { ticketTranscript } from "./ticket-transcript.js";
@@ -355,7 +355,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           name: detail.label,
           value: detail.value,
         })),
-        { name: "Status", value: ticketStatuses[ticket.status], inline: true },
+        { name: "Status", value: ticketStatusLabel(ticket), inline: true },
         {
           name: "Helping you",
           value:
@@ -369,6 +369,99 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         text: "Messages sync with your private web ticket. Attachments are available for 30 days.",
       },
     };
+  }
+  function openingText(ticket) {
+    const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
+    if (ticket.status === "claimed")
+      return `${owner} ${ticketStatusLabel(ticket)}. Continue in this private ticket.`;
+    return `${owner} Your private ticket is ready. Staff will claim it shortly.`;
+  }
+  async function staffUpdate(ticket, notice, target) {
+    if (!notice || ticket.status !== "claimed") return;
+    if (
+      notice.event === "replied"
+        ? ticket.claimedBy || ticket.helpedBy?.id !== notice.actor.id
+        : ticket.claimedBy?.id !== notice.actor.id
+    )
+      return;
+    const key = `${ticket.id}:${notice.revision}`;
+    const kind = "ticket-status-notice";
+    let intent = service.store.get(kind, key);
+    if (intent?.messageId) return;
+    const persist = () =>
+      service.store.set(kind, key, intent, Number.MAX_SAFE_INTEGER);
+    const footer = `Ticket ${ticket.id} · Staff update ${notice.revision}`;
+    const acknowledge = (message) => {
+      intent.messageId = message.id;
+      persist();
+    };
+    if (intent) {
+      for (let page = 0; page < 5; page++) {
+        const recent = await target.messages.fetch({
+          limit: 100,
+          ...(intent.before ? { before: intent.before } : {}),
+        });
+        const sent = recent.find(
+          (message) =>
+            message.author.id === client.user.id &&
+            message.embeds?.some((embed) => embed.footer?.text === footer),
+        );
+        if (sent) return acknowledge(sent);
+        const oldest = [...recent.keys()].sort((a, b) =>
+          BigInt(a) < BigInt(b) ? -1 : 1,
+        )[0];
+        if (recent.size < 100 || BigInt(oldest) <= BigInt(intent.after)) {
+          delete intent.before;
+          persist();
+          break;
+        }
+        intent.before = oldest;
+        persist();
+        if (page === 4) return { pending: true };
+      }
+    } else {
+      const latest = await target.messages.fetch({ limit: 1 });
+      intent = {
+        ticketId: ticket.id,
+        channelId: target.id,
+        after: latest.first()?.id || "0",
+      };
+      persist();
+    }
+    const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
+    const staff = `<@${notice.actor.id}>`;
+    const content =
+      notice.event === "replied"
+        ? `${owner} ${staff} replied to your ticket. You can continue here or on the website.`
+        : notice.event === "taken_over"
+          ? `${owner} ${staff} took over your ticket and is now helping you.`
+          : `${owner} ${staff} claimed your ticket and is now helping you.`;
+    acknowledge(
+      await target.send({
+        content,
+        embeds: [
+          {
+            description: ticketStatusLabel(ticket),
+            color: 0xb92323,
+            footer: { text: footer },
+          },
+        ],
+        allowedMentions: {
+          parse: [],
+          users: [
+            ...new Set([
+              notice.actor.id,
+              ...(!ticket.owner.guest ? [ticket.owner.id] : []),
+            ]),
+          ],
+        },
+        nonce: createHash("sha256")
+          .update(`staff-update:${key}`)
+          .digest("hex")
+          .slice(0, 25),
+        enforceNonce: true,
+      }),
+    );
   }
   const transport = {
     async notice(ticket, job, key) {
@@ -697,7 +790,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           );
       if (!intro)
         intro = await target.send({
-          content: `${ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`} Your private ticket is ready. Staff will claim it shortly.`,
+          content: openingText(ticket),
           embeds: [overview(ticket)],
           components: controls(ticket),
           allowedMentions: { parse: [] },
@@ -715,19 +808,26 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       save(ticket.id, { ...saved, introId: intro.id, webhookId: webhook.id });
       webhooks.set(target.id, webhook);
     },
-    async status(ticket) {
+    async status(ticket, job = {}) {
       await ready();
+      ticket = service.get(ticket.id);
       if (["closed", "awaiting_resolution"].includes(ticket.status))
         return await closeChannel(ticket);
-      const members = await staffMembers();
       const target = await channel(ticket.channelId),
         saved = service.store.get("ticket-discord", ticket.id);
       const intro = await target.messages.fetch(saved.introId);
+      ticket = service.get(ticket.id);
+      if (["closed", "awaiting_resolution"].includes(ticket.status))
+        return await closeChannel(ticket);
       await intro.edit({
+        content: openingText(ticket),
         embeds: [overview(ticket)],
         components: controls(ticket),
         allowedMentions: { parse: [] },
       });
+      const result = await staffUpdate(ticket, job.notice, target);
+      if (result?.pending) return result;
+      const members = await staffMembers();
       await target.permissionOverwrites.set(ticketOverwrites(ticket, members));
     },
     async deleteChannel(ticket) {
@@ -1444,7 +1544,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                     .addOptions(
                       mine.map((ticket) => ({
                         label:
-                          `${ticket.ign} · ${ticketStatuses[ticket.status]} · ${ticket.id.slice(0, 8)}`.slice(
+                          `${ticket.ign} · ${ticketStatusLabel(ticket)} · ${ticket.id.slice(0, 8)}`.slice(
                             0,
                             100,
                           ),
@@ -1510,6 +1610,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (
         [
           "mine-choice",
+          "claim",
+          "takeover",
           "rate",
           "rating",
           "reopen",
@@ -1685,15 +1787,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         }
       } else throw new AuthError("invalid_ticket_action", 400);
       return await interaction.editReply(
-        action === "close"
-          ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
-          : action === "rating"
-            ? "Thank you. Your private rating has been saved."
-            : action === "delete-confirm"
-              ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
-              : action === "reopen"
-                ? "Ticket reopened. Staff can claim it again."
-                : "Ticket updated.",
+        action === "claim" || action === "takeover"
+          ? `${ticketStatusLabel(service.get(id))}. Updates are syncing to Discord and the website.`
+          : action === "close"
+            ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
+            : action === "rating"
+              ? "Thank you. Your private rating has been saved."
+              : action === "delete-confirm"
+                ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
+                : action === "reopen"
+                  ? "Ticket reopened. Staff can claim it again."
+                  : "Ticket updated.",
       );
     } catch (error) {
       const message =

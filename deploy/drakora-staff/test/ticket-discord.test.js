@@ -136,6 +136,9 @@ function setupDiscord(t, notices = false) {
           async edit(data) {
             message.data = data;
             message.embeds = data.embeds || [];
+            if (data.content !== undefined) message.content = data.content;
+            if (data.components !== undefined)
+              message.components = data.components;
           },
         };
         messages.set(message.id, message);
@@ -1206,16 +1209,39 @@ test("native staff replies refresh the Discord overview and only Admin or higher
   );
   assert.equal(
     intro.embeds[0].fields.find((field) => field.name === "Status").value,
-    "Being helped",
+    "Staff replied · Helper",
   );
   assert.equal(
     intro.embeds[0].fields.find((field) => field.name === "Helping you").value,
     "Helper",
   );
   assert.equal(service.get(ticket.id).claimedBy, null);
+  assert.match(intro.content, /Staff replied · Helper/);
+  const replyNotice = [...target.savedMessages.values()].find((message) =>
+    message.content.includes("replied to your ticket"),
+  );
+  assert.deepEqual(replyNotice.data.allowedMentions, {
+    parse: [],
+    users: ["201", "100"],
+  });
   const claimed = await click(client, helper.user, `ticket:claim:${ticket.id}`);
   assert.equal(claimed.flags, 64);
+  assert.match(claimed.data, /Claimed by Helper/);
   await service.pump();
+  assert.equal(
+    intro.embeds[0].fields.find((field) => field.name === "Status").value,
+    "Claimed by Helper",
+  );
+  assert.match(intro.content, /Claimed by Helper/);
+  assert.doesNotMatch(intro.content, /will claim/);
+  const claimNotice = [...target.savedMessages.values()].find((message) =>
+    message.content.includes("claimed your ticket"),
+  );
+  assert.deepEqual(claimNotice.data.allowedMentions, {
+    parse: [],
+    users: ["201", "100"],
+  });
+  assert.match(claimNotice.content, /<@100> <@201>/);
   const control = intro.data.components[0].components.find(
     (button) => button.label === "Take over (Admin+)",
   );
@@ -1225,6 +1251,13 @@ test("native staff replies refresh the Discord overview and only Admin or higher
   const taken = await click(client, manager.user, control.custom_id);
   assert.equal(taken.flags, 64);
   await service.pump();
+  const takeoverNotice = [...target.savedMessages.values()].find((message) =>
+    message.content.includes("took over your ticket"),
+  );
+  assert.deepEqual(takeoverNotice.data.allowedMentions, {
+    parse: [],
+    users: ["200", "100"],
+  });
   assert.equal(service.get(ticket.id).claimedBy.id, "200");
   assert.equal(
     intro.embeds[0].fields.find((field) => field.name === "Helping you").value,
@@ -1236,6 +1269,53 @@ test("native staff replies refresh the Discord overview and only Admin or higher
     `ticket:claim:${ticket.id}`,
   );
   assert.match(ordinaryClaim.data, /already claimed/);
+});
+
+test("guest claim notices only ping staff and recover an uncertain notification without duplicate pings", async (t) => {
+  const { service, transport, channels } = setupDiscord(t);
+  const owner = { id: "guest:claim-fixture", name: "Jojo", guest: true };
+  const ticket = service.create(
+    owner,
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description: "A guest ticket to check staff claim notifications.",
+      email: "jojo@example.invalid",
+    },
+    "web",
+    "a".repeat(64),
+  );
+  await transport.create(ticket);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  target.failAfterBotSend = true;
+  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  await service.pump();
+  const key = `${ticket.id}:status:${ticket.id}`;
+  const job = service.store.get("ticket-outbox", key);
+  assert.equal(job.attempts, 1);
+  job.after = 0;
+  service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
+  await service.pump();
+  const notices = [...target.savedMessages.values()].filter((message) =>
+    message.content.includes("claimed your ticket"),
+  );
+  assert.equal(notices.length, 1);
+  assert.deepEqual(notices[0].data.allowedMentions, {
+    parse: [],
+    users: ["201"],
+  });
+  assert.match(notices[0].content, /^Jojo <@201>/);
+  assert.equal(service.store.get("ticket-outbox", key), undefined);
+  await transport.status(service.get(ticket.id), job);
+  assert.equal(
+    [...target.savedMessages.values()].filter((message) =>
+      message.content.includes("claimed your ticket"),
+    ).length,
+    1,
+  );
 });
 
 test("reopened Discord tickets preserve old messages through reconciliation and private closure cycles", async (t) => {

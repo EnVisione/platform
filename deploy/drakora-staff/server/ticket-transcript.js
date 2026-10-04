@@ -1,5 +1,5 @@
 import {
-  ticketStatuses,
+  ticketStatusLabel,
   ticketTypes,
   ticketDetails,
 } from "../shared/tickets.js";
@@ -85,5 +85,5 @@ export async function ticketTranscript(
     .map((detail) => `<p>${escape(detail.label)}: ${escape(detail.value)}</p>`)
     .join(
       "",
-    )}<p>${escape(ticket.description)}</p><p>${escape(ticketStatuses[ticket.status])} · Opened ${escape(date(ticket.createdAt))}</p>${ticket.claimedBy ? `<p>Assisted by ${escape(ticket.claimedBy.name)}</p>` : ""}${ticket.rating ? `<p>Optional rating: ${ticket.rating}/5</p>` : ""}</section>${messages.join("")}${resolution}<section class="history"><h2>Ticket history</h2>${history.map((entry) => `<p>${escape(date(entry.at))} · ${escape(entry.actor.name)} · ${escape(entry.detail)}</p>`).join("")}</section><small>Generated ${escape(date(Date.now()))}. Server attachments are retained for 30 days; text and ticket history remain in staff logs.</small></main></body></html>`;
+    )}<p>${escape(ticket.description)}</p><p>${escape(ticketStatusLabel(ticket))} · Opened ${escape(date(ticket.createdAt))}</p>${ticket.claimedBy ? `<p>Assisted by ${escape(ticket.claimedBy.name)}</p>` : ""}${ticket.rating ? `<p>Optional rating: ${ticket.rating}/5</p>` : ""}</section>${messages.join("")}${resolution}<section class="history"><h2>Ticket history</h2>${history.map((entry) => `<p>${escape(date(entry.at))} · ${escape(entry.actor.name)} · ${escape(entry.detail)}</p>`).join("")}</section><small>Generated ${escape(date(Date.now()))}. Server attachments are retained for 30 days; text and ticket history remain in staff logs.</small></main></body></html>`;
 }

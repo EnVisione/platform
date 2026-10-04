@@ -9,6 +9,7 @@ import { ticketService } from "../server/tickets.js";
 import { ticketTranscript } from "../server/ticket-transcript.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
+import { ticketStatusLabel } from "../shared/tickets.js";
 
 const config = {
   ...fixture,
@@ -332,6 +333,7 @@ test("staff replies mark a ticket as helped without silently assigning it or ext
   assert.equal(current.status, "claimed");
   assert.equal(current.claimedBy, null);
   assert.equal(current.helpedBy.id, helper.id);
+  assert.equal(ticketStatusLabel(current), "Staff replied · Helper");
   assert.equal(service.get(ticket.id).lastActiveAt, at - 1000);
   assert.ok(store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`));
   service.reply(helper, ticket.id, reply, true);
@@ -339,6 +341,10 @@ test("staff replies mark a ticket as helped without silently assigning it or ext
   service.claim(otherStaff, ticket.id);
   service.reply(helper, ticket.id, message("I found more information."), true);
   assert.equal(service.get(ticket.id).claimedBy.id, otherStaff.id);
+  assert.equal(
+    ticketStatusLabel(service.get(ticket.id)),
+    "Claimed by Other Helper",
+  );
 });
 
 test("Discord staff replies update helped status once and never reopen closed tickets", (t) => {
@@ -372,6 +378,7 @@ test("Discord staff replies update helped status once and never reopen closed ti
     true,
   );
   assert.equal(service.get(ticket.id).status, "closed");
+  assert.equal(ticketStatusLabel(service.get(ticket.id)), "Closed");
   assert.equal(service.get(ticket.id).ratingStaff.id, helper.id);
 });
 

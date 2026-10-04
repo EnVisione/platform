@@ -12,10 +12,19 @@ export const ticketTypes = [
 
 export const ticketStatuses = {
   pending: "Waiting for staff",
-  claimed: "Being helped",
+  claimed: "Claimed or staff replied",
   awaiting_resolution: "Awaiting staff resolution",
   closed: "Closed",
 };
+
+export function ticketStatusLabel(ticket) {
+  if (ticket.status === "claimed") {
+    if (ticket.claimedBy) return `Claimed by ${ticket.claimedBy.name}`;
+    if (ticket.helpedBy) return `Staff replied · ${ticket.helpedBy.name}`;
+    return "Staff replied";
+  }
+  return ticketStatuses[ticket.status];
+}
 
 export const ticketMediaDays = 30;
 export const ticketUploadLimit = 8 * 1024 * 1024;

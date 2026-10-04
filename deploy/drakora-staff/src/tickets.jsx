@@ -4,6 +4,7 @@ import {
   ticketTypes,
   ticketIntake,
   ticketStatuses,
+  ticketStatusLabel,
   ticketUploadLimit,
   ticketMessageUploadLimit,
 } from "../shared/tickets.js";
@@ -115,15 +116,20 @@ function useLive(url, refresh) {
   useEffect(() => {
     if (!url) return;
     const source = new EventSource(url);
-    source.onopen = () => setConnected(true);
+    source.onopen = () => {
+      setConnected(true);
+      callback.current();
+    };
     source.onerror = () => setConnected(false);
     source.onmessage = () => callback.current();
     const visible = () => {
       if (!document.hidden) callback.current();
     };
     document.addEventListener("visibilitychange", visible);
+    const timer = setInterval(visible, 5000);
     return () => {
       source.close();
+      clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
   }, [url]);
@@ -520,7 +526,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
               #{ticket.type}-{ticket.ign}
             </h2>
             <span className={`ticket-state ${ticket.status}`}>
-              {ticketStatuses[ticket.status]}
+              {ticketStatusLabel(ticket)}
             </span>
             <small className="ticket-connection" role="status">
               {connected ? "Live" : "Reconnecting…"}
@@ -1019,11 +1025,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
   useEffect(() => {
     if (id) return;
     void refresh();
-    const interval = setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, 10000);
     return () => {
-      clearInterval(interval);
       latestRequest.current++;
     };
   }, [id, refresh]);
@@ -1216,7 +1218,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
                 </small>
               </div>
               <span className={`ticket-state ${ticket.status}`}>
-                {ticketStatuses[ticket.status]}
+                {ticketStatusLabel(ticket)}
               </span>
               <span>
                 {ticket.claimedBy?.name ||
@@ -1276,17 +1278,26 @@ export function PublicTickets() {
   const emailKey = location.pathname.match(
     /^\/help\/access\/([A-Za-z0-9_-]{43})$/,
   )?.[1];
+  const refreshMine = useCallback(async () => {
+    try {
+      const data = await request("/help/api/tickets");
+      setMine(data.items);
+    } catch (error) {
+      setError(error.message);
+    }
+  }, []);
+  useLive(
+    session?.identity && !id && !emailKey ? "/help/api/tickets/events" : null,
+    refreshMine,
+  );
   useEffect(() => {
     request("/help/api/session")
       .then((data) => {
         setSession(data);
-        if (data.identity && !id)
-          void request("/help/api/tickets")
-            .then((data) => setMine(data.items))
-            .catch((error) => setError(error.message));
+        if (data.identity && !id && !emailKey) void refreshMine();
       })
       .catch((error) => setError(error.message));
-  }, [id]);
+  }, [id, emailKey, refreshMine]);
   async function connect() {
     setBusy(true);
     setError("");
@@ -1529,7 +1540,7 @@ export function PublicTickets() {
               mine.map((ticket) => (
                 <a key={ticket.id} href={ticket.path}>
                   <strong>{ticket.ign}</strong>
-                  <span>{ticketStatuses[ticket.status]}</span>
+                  <span>{ticketStatusLabel(ticket)}</span>
                 </a>
               ))
             ) : (

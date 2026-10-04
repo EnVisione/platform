@@ -250,7 +250,9 @@
   background: #404249;
   padding: 4px 8px;
   border-radius: 3px;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
   display: inline-block;
 }
 .ticket-state.claimed {

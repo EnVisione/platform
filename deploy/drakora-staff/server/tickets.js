@@ -84,21 +84,21 @@ export function ticketService(
     events.emit("changed", { id: ticket.id, revision: ticket.revision });
     void pump();
   }
-  function queue(ticket, kind, ref = ticket.id) {
+  function queue(ticket, kind, ref = ticket.id, notice) {
     const id = `${ticket.id}:${kind}:${ref}`;
-    put(
-      ticket.type === "partnership" ? "partnership-outbox" : "ticket-outbox",
+    const outbox =
+      ticket.type === "partnership" ? "partnership-outbox" : "ticket-outbox";
+    const pendingNotice = notice || store.get(outbox, id)?.notice;
+    put(outbox, id, {
       id,
-      {
-        id,
-        generation: randomUUID(),
-        ticketId: ticket.id,
-        kind,
-        ref,
-        attempts: 0,
-        after: 0,
-      },
-    );
+      generation: randomUUID(),
+      ticketId: ticket.id,
+      kind,
+      ref,
+      attempts: 0,
+      after: 0,
+      ...(pendingNotice ? { notice: pendingNotice } : {}),
+    });
   }
   function audit(ticket, user, action, detail, internal = false) {
     if (ticket.owner.id === user.id) {
@@ -135,6 +135,9 @@ export function ticketService(
         event: action,
         revision: ticket.revision,
         status: ticket.status,
+        actor: publicActor(user),
+        claimedBy: ticket.claimedBy,
+        helpedBy: ticket.helpedBy || null,
         attempts: 0,
         after: 0,
       });
@@ -591,7 +594,12 @@ export function ticketService(
     if (ticket.status !== "pending") return;
     ticket.status = "claimed";
     ticket.helpedBy = publicActor(user);
-    if (ticket.type !== "partnership") queue(ticket, "status");
+    if (ticket.type !== "partnership")
+      queue(ticket, "status", ticket.id, {
+        event: "replied",
+        actor: publicActor(user),
+        revision: ticket.revision + 1,
+      });
   }
   function reply(user, id, input, staffView = false) {
     const ticket = get(id);
@@ -653,7 +661,11 @@ export function ticketService(
       ticket.claimedBy = publicActor(user);
       ticket.status = "claimed";
       audit(ticket, user, "claimed", `${user.name} claimed the ticket`);
-      queue(ticket, "status");
+      queue(ticket, "status", ticket.id, {
+        event: "claimed",
+        actor: ticket.claimedBy,
+        revision: ticket.revision,
+      });
     });
     announce(ticket);
     return ticket;
@@ -676,7 +688,11 @@ export function ticketService(
         "taken_over",
         `${user.name} took over the ticket from ${previous.name}`,
       );
-      queue(ticket, "status");
+      queue(ticket, "status", ticket.id, {
+        event: "taken_over",
+        actor: ticket.claimedBy,
+        revision: ticket.revision,
+      });
     });
     announce(ticket);
     return ticket;
@@ -1167,7 +1183,7 @@ export function ticketService(
               const result =
                 job.kind === "delete"
                   ? await transport.deleteChannel(ticket)
-                  : await transport.status(ticket);
+                  : await transport.status(ticket, job);
               if (result?.pending) continue;
               if (result?.deleted)
                 store.transaction(() => {

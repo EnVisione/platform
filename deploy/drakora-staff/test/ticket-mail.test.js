@@ -63,6 +63,11 @@ test("guest email updates retry durably and contain no chat or staff resolution"
     { requestId: randomUUID(), content: "PRIVATE staff text" },
     true,
   );
+  service.takeover(
+    { id: "201", name: "Admin", roles: ["10", "21"] },
+    ticket.id,
+    staff.id,
+  );
   service.closeTicket(
     staff,
     ticket.id,
@@ -72,17 +77,17 @@ test("guest email updates retry durably and contain no chat or staff resolution"
     },
     true,
   );
-  assert.equal(store.entries("ticket-email-outbox").length, 4);
+  assert.equal(store.entries("ticket-email-outbox").length, 5);
   await mail.pump();
   assert.equal(sent.length, 0);
-  assert.equal(store.entries("ticket-email-outbox").length, 4);
+  assert.equal(store.entries("ticket-email-outbox").length, 5);
   unavailable = false;
   for (const [key, job] of store.entries("ticket-email-outbox")) {
     job.after = 0;
     store.set("ticket-email-outbox", key, job, Number.MAX_SAFE_INTEGER);
   }
   await mail.pump();
-  assert.equal(sent.length, 4);
+  assert.equal(sent.length, 5);
   assert.ok(
     sent.every(
       (message) =>
@@ -90,9 +95,12 @@ test("guest email updates retry durably and contain no chat or staff resolution"
         !message.text.includes("PRIVATE"),
     ),
   );
-  assert.equal(new Set(sent.map((message) => message.messageId)).size, 4);
+  assert.equal(new Set(sent.map((message) => message.messageId)).size, 5);
   assert.match(sent[0].subject, /Your ticket is open/);
+  assert.match(sent[1].subject, /Helper claimed your ticket/);
   assert.match(sent[2].subject, /Staff replied/);
+  assert.match(sent[2].subject, /Helper/);
+  assert.match(sent[3].subject, /Admin took over your ticket/);
   const link = sent[0].text.match(/\/help\/access\/([A-Za-z0-9_-]{43})/)[1];
   assert.equal(service.consumeEmailAccess(link).identity.id, owner.id);
   assert.throws(() => service.consumeEmailAccess(link), {
@@ -100,5 +108,5 @@ test("guest email updates retry durably and contain no chat or staff resolution"
   });
   assert.equal(store.entries("ticket-email-outbox").length, 0);
   await mail.pump();
-  assert.equal(sent.length, 4);
+  assert.equal(sent.length, 5);
 });

@@ -1,7 +1,7 @@
 import { bridgeMailTransport } from "./bridge-mail.js";
 import { hash } from "./store.js";
 import { randomBytes } from "node:crypto";
-import { ticketStatuses } from "../shared/tickets.js";
+import { ticketStatusLabel } from "../shared/tickets.js";
 
 export function ticketMail(config, service, suppliedTransport) {
   const smtp = config.applications?.smtp;
@@ -38,8 +38,12 @@ export function ticketMail(config, service, suppliedTransport) {
             job.event === "opened"
               ? "Your ticket is open"
               : job.event === "message"
-                ? "Staff replied to your ticket"
-                : `Ticket update: ${ticketStatuses[job.status]}`;
+                ? `Staff replied to your ticket${job.actor?.name ? `: ${job.actor.name}` : ""}`
+                : job.event === "claimed"
+                  ? `${job.actor?.name || "A staff member"} claimed your ticket`
+                  : job.event === "taken_over"
+                    ? `${job.actor?.name || "A staff member"} took over your ticket`
+                    : `Ticket update: ${ticketStatusLabel(job)}`;
           try {
             sent++;
             if (!job.accessToken) {

@@ -311,7 +311,7 @@ export function ticketRouter(
     streams.set(user.id, (streams.get(user.id) || 0) + 1);
     res.set({
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-store",
+      "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
       Connection: "keep-alive",
     });
