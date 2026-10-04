@@ -721,6 +721,40 @@ button:disabled {
   flex: 1;
 }
 
+.staff-ticket-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+  margin-top: 16px;
+}
+.staff-ticket-stats > div {
+  min-width: 100px;
+}
+.registered-details .staff-ticket-stats span {
+  font-size: 12px;
+  margin-top: 3px;
+}
+.staff-stars {
+  position: relative;
+  display: inline-block;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+.registered-details .staff-stars span {
+  display: block;
+  color: #676a73;
+  font-size: 18px;
+  margin: 0;
+}
+.registered-details .staff-stars .staff-stars-filled {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  color: #d7c195;
+}
+
 .registered-ranks {
   display: flex;
   flex-wrap: wrap;

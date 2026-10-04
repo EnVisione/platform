@@ -1000,6 +1000,10 @@ app.get("/api/accounts", async (req, res) => {
   const live = new Map(
     (officeSnapshot?.members ?? []).map((member) => [member.id, member]),
   );
+  const stats =
+    tickets && user.capabilities["tickets.view"]
+      ? tickets.staffStats(user)
+      : null;
   const accounts = minecraft.entries().map(([id, link]) => {
     const stored = store.get("user", id);
     const member = live.get(id);
@@ -1012,6 +1016,14 @@ app.get("/api/accounts", async (req, res) => {
       discordStatus: member?.status ?? "unknown",
       lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
       timeZone: timeSettings.get(id).timeZone,
+      ticketStats: stats
+        ? stats.get(id) || {
+            ticketsResolved: 0,
+            activeTickets: 0,
+            reviewCount: 0,
+            averageRating: null,
+          }
+        : null,
     };
   });
   accounts.sort((a, b) => a.name.localeCompare(b.name));

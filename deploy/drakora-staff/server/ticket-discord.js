@@ -153,12 +153,6 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             P.SendMessages,
             P.AttachFiles,
           ];
-          if (permission.id === ticket.owner.id) {
-            permission.allow = permission.allow.filter(
-              (bit) => bit !== P.ViewChannel && bit !== P.ReadMessageHistory,
-            );
-            permission.deny.push(P.ViewChannel, P.ReadMessageHistory);
-          }
         }
     return permissions;
   }
@@ -245,6 +239,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       ["closed", "awaiting_resolution"].includes(ticket.status)
     )
       return [
+        ratingRow(ticket),
         {
           type: 1,
           components: [
@@ -287,16 +282,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       ];
     if (["closed", "awaiting_resolution"].includes(ticket.status))
       return [
+        ratingRow(ticket),
         {
           type: 1,
           components: [
-            {
-              type: 2,
-              style: 1,
-              label: "Rate the help",
-              custom_id: feedbackId("rate", ticket),
-              disabled: ticket.rating !== null,
-            },
             {
               type: 2,
               style: 2,
@@ -364,8 +353,31 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   function feedbackId(action, ticket) {
     return `ticket:${action}:${ticket.id}${ticket.closureId ? `:${ticket.closureId}` : ""}`;
   }
+  function ratingRow(ticket) {
+    return {
+      type: 1,
+      components: [
+        {
+          type: 3,
+          custom_id: feedbackId("rating", ticket),
+          placeholder:
+            ticket.rating === null
+              ? "Rate the support · 1–5 stars"
+              : "Rating saved",
+          disabled: ticket.rating !== null,
+          options: [1, 2, 3, 4, 5].map((value) => ({
+            label: `${value} ${value === 1 ? "star" : "stars"}`,
+            value: String(value),
+          })),
+        },
+      ],
+    };
+  }
   function feedbackQuestion(ticket) {
-    const name = ticket.ratingStaff?.name || ticket.claimedBy?.name;
+    const name =
+      ticket.ratingStaff?.name ||
+      ticket.claimedBy?.name ||
+      ticket.helpedBy?.name;
     return `${name ? `How did ${name.replace(/[\\*_~`|]/g, "")} do?` : "How helpful was the support?"} Rate the help from 1 to 5. Your rating is visible only to you and authorized staff.`;
   }
   function overview(ticket) {
@@ -374,6 +386,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       description: ticket.description,
       color: 0xb92323,
       fields: [
+        { name: "Ticket update", value: openingText(ticket) },
         {
           name: "Player",
           value: ticket.owner.guest
@@ -451,16 +464,35 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const key = notice.id || `${ticket.id}:${notice.revision}`;
     const kind = "ticket-status-notice";
     let intent = service.store.get(kind, key);
-    if (intent?.messageId) return;
     const persist = () =>
       service.store.set(kind, key, intent, Number.MAX_SAFE_INTEGER);
-    const footer = notice.id
+    const legacyFooter = notice.id
       ? `Ticket ${ticket.id} · Activity ${notice.id}`
       : `Ticket ${ticket.id} · Staff update ${notice.revision}`;
-    const acknowledge = (message) => {
+    const url = `${config.staffOrigin}/tickets/${ticket.id}#update=${encodeURIComponent(key)}`;
+    const embed = {
+      title: `${ticketTypes.find((type) => type.id === ticket.type)?.name} · ${ticket.ign}`,
+      url,
+      description: content,
+      fields: [{ name: "Status", value: ticketStatusLabel(ticket) }],
+      color: 0xb92323,
+      footer: { text: `Drakora support · ${ticket.id.slice(0, 8)}` },
+    };
+    const acknowledge = async (message) => {
       intent.messageId = message.id;
       persist();
+      await message.edit({
+        content: "",
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+      });
+      intent.layoutVersion = 2;
+      persist();
     };
+    if (intent?.messageId) {
+      if (intent.layoutVersion === 2) return;
+      return acknowledge(await target.messages.fetch(intent.messageId));
+    }
     if (intent) {
       for (let page = 0; page < 5; page++) {
         const recent = await target.messages.fetch({
@@ -470,9 +502,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         const sent = recent.find(
           (message) =>
             message.author.id === client.user.id &&
-            message.embeds?.some((embed) => embed.footer?.text === footer),
+            message.embeds?.some(
+              (value) =>
+                value.url === url || value.footer?.text === legacyFooter,
+            ),
         );
-        if (sent) return acknowledge(sent);
+        if (sent) return await acknowledge(sent);
         const oldest = [...recent.keys()].sort((a, b) =>
           BigInt(a) < BigInt(b) ? -1 : 1,
         )[0];
@@ -494,21 +529,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       };
       persist();
     }
-    acknowledge(
+    await acknowledge(
       await target.send({
-        content,
-        embeds: [
-          {
-            description: ticketStatusLabel(ticket),
-            color: 0xb92323,
-            footer: { text: footer },
-          },
-        ],
+        content: [...new Set(mentions)].map((id) => `<@${id}>`).join(" "),
+        embeds: [embed],
         components,
-        allowedMentions: {
-          parse: [],
-          users: [...new Set(mentions)],
-        },
+        allowedMentions: { parse: [], users: [...new Set(mentions)] },
         nonce: createHash("sha256")
           .update(`staff-update:${key}`)
           .digest("hex")
@@ -517,6 +543,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }),
     );
   }
+
   async function activityUpdate(ticket, notice) {
     if (
       !notice ||
@@ -556,9 +583,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const target = await channel(ticket.channelId);
     const content = {
       closed:
-        "The player closed this ticket. Their Discord channel access has been removed.",
+        "The player closed this ticket. The closed channel remains visible so they can rate the support.",
       resolved:
-        "Staff recorded the resolution and closed this ticket. The player's Discord channel access has been removed.",
+        "Staff recorded the resolution and closed this ticket. The closed channel remains visible for private feedback.",
       rated:
         "Private feedback received. The player submitted a support rating. Authorized staff can view it in the dashboard.",
       reopened:
@@ -847,10 +874,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
               (intent.route === "channel"
                 ? String(message.nonce) === nonce
                 : message.components?.some((row) =>
-                    row.components.some(
-                      (component) =>
-                        (component.customId || component.custom_id) ===
+                    row.components.some((component) =>
+                      [
                         feedbackId("rate", ticket),
+                        feedbackId("rating", ticket),
+                      ].includes(component.customId || component.custom_id),
                     ),
                   )),
           );
@@ -891,8 +919,24 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           await target.send({
             content:
               intent.route === "dm"
-                ? `Your Drakora ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}`
+                ? ""
                 : `<@${ticket.owner.id}> Your ticket is closed. Use My tickets in the ticket panel to rate the support privately or reopen it.`,
+            embeds:
+              intent.route === "dm"
+                ? [
+                    {
+                      title: "How was your Drakora support?",
+                      description: `Your ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}\n\nAfter you rate it, the closed Discord channel is removed once staff have recorded the resolution. You can still reopen the ticket on the website.`,
+                      color: 0xb92323,
+                      fields: [
+                        {
+                          name: "Ticket",
+                          value: `${ticketTypes.find((type) => type.id === ticket.type)?.name} · ${ticket.ign}`,
+                        },
+                      ],
+                    },
+                  ]
+                : [],
             components: intent.route === "dm" ? controls(ticket) : [],
             allowedMentions:
               intent.route === "dm"
@@ -940,7 +984,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           );
       if (!intro)
         intro = await target.send({
-          content: openingText(ticket),
+          content: "",
           embeds: [overview(ticket)],
           components: controls(ticket),
           allowedMentions: { parse: [] },
@@ -973,7 +1017,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (["closed", "awaiting_resolution"].includes(ticket.status))
         return await closeChannel(ticket);
       await intro.edit({
-        content: openingText(ticket),
+        content: "",
         embeds: [overview(ticket)],
         components: controls(ticket),
         allowedMentions: { parse: [] },
@@ -1375,7 +1419,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       await (
         await target.messages.fetch(saved.introId)
       ).edit({
-        content: openingText(ticket),
+        content: "",
         embeds: [overview(ticket)],
         components: controls(ticket, true),
         allowedMentions: { parse: [] },
@@ -1445,7 +1489,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     if (!deletion) return { closed: true };
     try {
       await target.delete(
-        "Admin deleted closed ticket channel; transcript saved in staff logs",
+        "Closed ticket channel removed; transcript saved in staff logs",
       );
     } catch (error) {
       if (error.code !== 10003) throw error;
@@ -1550,6 +1594,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         console.error("Ticket permission refresh is pending.");
       }
       await notes.recover();
+      let noticeEdits = 0;
+      const oldNotices = service.store
+        .entries("ticket-status-notice")
+        .filter(([, entry]) => entry.messageId && entry.layoutVersion !== 2);
       for (const ticket of service
         .all()
         .filter((ticket) => ticket.channelId)
@@ -1559,6 +1607,59 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         )) {
         try {
           const target = await channel(ticket.channelId);
+          for (const [key, entry] of oldNotices) {
+            if (
+              entry.ticketId !== ticket.id ||
+              entry.channelId !== target.id ||
+              noticeEdits >= 20
+            )
+              continue;
+            noticeEdits++;
+            try {
+              const message = await target.messages.fetch(entry.messageId);
+              if (message.author.id !== client.user.id)
+                throw new Error("Ticket notice ownership changed");
+              const old = message.embeds[0]?.toJSON?.() || message.embeds[0];
+              const url = `${config.staffOrigin}/tickets/${ticket.id}#update=${encodeURIComponent(key)}`;
+              const legacy = old?.footer?.text?.startsWith(
+                `Ticket ${ticket.id} ·`,
+              );
+              if (!old || (!legacy && old.url !== url))
+                throw new Error("Ticket notice marker changed");
+              await message.edit({
+                content: "",
+                embeds: [
+                  {
+                    ...old,
+                    title: `${ticketTypes.find((type) => type.id === ticket.type)?.name} · ${ticket.ign}`,
+                    url,
+                    description: (
+                      (legacy ? message.content : null) ||
+                      old.description ||
+                      "Ticket updated"
+                    ).slice(0, 4096),
+                    fields:
+                      old.fields ||
+                      (legacy && old.description
+                        ? [{ name: "Status", value: old.description }]
+                        : []),
+                    footer: {
+                      text: `Drakora support · ${ticket.id.slice(0, 8)}`,
+                    },
+                  },
+                ],
+                allowedMentions: { parse: [] },
+              });
+            } catch (error) {
+              if (error.code !== 10008) throw error;
+            }
+            service.store.set(
+              "ticket-status-notice",
+              key,
+              { ...entry, layoutVersion: 2 },
+              Number.MAX_SAFE_INTEGER,
+            );
+          }
           if (
             !target
               .permissionsFor(client.user)

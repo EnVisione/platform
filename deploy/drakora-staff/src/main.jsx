@@ -12,6 +12,7 @@ import { accentForeground } from "../shared/accent.js";
 import { dashboardDestination } from "../shared/dashboard-navigation.js";
 import { Overview } from "./overview.jsx";
 import { Tickets } from "./tickets.jsx";
+import { StaffTicketStats } from "./staff-ticket-stats.jsx";
 import { WebsiteEditor } from "./website-editor.jsx";
 import { Moderation } from "./moderation.jsx";
 import {
@@ -423,6 +424,10 @@ function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
           Minecraft links and observed Discord activity across Drakora and
           Drakora Staff.
         </p>
+        <p className="muted">
+          Support statistics include retained tickets your roles can view.
+          Reopened tickets count once per resolving staff member.
+        </p>
       </div>
       {error && (
         <p className="notice" role="alert">
@@ -471,6 +476,7 @@ function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
                     : "Not observed yet"}{" "}
                   · {account.discordStatus}
                 </span>
+                <StaffTicketStats stats={account.ticketStats} />
               </div>
               <div className="registered-minecraft">
                 <strong>{account.minecraft.name}</strong>

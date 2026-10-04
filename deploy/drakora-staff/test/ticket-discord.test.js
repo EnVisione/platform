@@ -142,10 +142,11 @@ function setupDiscord(t, notices = false) {
           components: data.components || [],
           nonce: data.nonce,
           data,
+          sentData: structuredClone(data),
           attachments: new Collection(),
           async edit(data) {
-            message.data = data;
-            message.embeds = data.embeds || [];
+            message.data = { ...message.data, ...data };
+            if (data.embeds !== undefined) message.embeds = data.embeds;
             if (data.content !== undefined) message.content = data.content;
             if (data.components !== undefined)
               message.components = data.components;
@@ -1375,7 +1376,7 @@ test("permission refresh skips externally deleted channels while retaining trans
   );
 });
 
-test("closure removes owner access and preserves paginated history before Admin channel deletion", async (t) => {
+test("closure preserves owner read access and paginated history before Admin channel deletion", async (t) => {
   const { service, transport, channels, user, dms } = setupDiscord(t);
   const ticket = service.create(
     { id: user.id, name: "Player" },
@@ -1439,15 +1440,16 @@ test("closure removes owner access and preserves paginated history before Admin 
   assert.equal((await transport.bytes(file)).toString(), "picture");
   assert.equal(
     dms[0].components[0].components[0].custom_id,
-    `ticket:rate:${ticket.id}:${service.get(ticket.id).closureId}`,
+    `ticket:rating:${ticket.id}:${service.get(ticket.id).closureId}`,
   );
   service.rate({ id: user.id, name: "Player" }, ticket.id, 4);
   assert.equal(service.get(ticket.id).rating, 4);
   const ownerPermissions = target.overwrites.find(
     (entry) => entry.id === user.id,
   );
-  assert.ok(ownerPermissions.deny.includes(P.ViewChannel));
-  assert.ok(!ownerPermissions.allow.includes(P.ViewChannel));
+  assert.ok(!ownerPermissions.deny.includes(P.ViewChannel));
+  assert.ok(ownerPermissions.allow.includes(P.ViewChannel));
+  assert.ok(ownerPermissions.deny.includes(P.SendMessages));
   await assert.rejects(
     service.deleteChannel({ id: "200", roles: ["10", "23"] }, ticket.id),
     { code: "ticket_access_denied" },
@@ -1757,11 +1759,14 @@ test("each closure resolves once across Discord and dashboard without repeated r
   service.closeTicket(user, ticket.id, {});
   await service.pump();
   assert.equal(service.get(ticket.id).status, "awaiting_resolution");
-  const resolve = overview().components[0].components.find(
-    (button) => button.label === "Resolve ticket",
-  );
+  const resolve = overview()
+    .components.flatMap((row) => row.components)
+    .find((button) => button.label === "Resolve ticket");
   assert.ok(resolve);
-  assert.equal(overview().components[0].components.length, 5);
+  assert.equal(
+    overview().components.flatMap((row) => row.components).length,
+    6,
+  );
   const second = await click(client, manager, resolve.custom_id);
   assert.equal(second.modal.custom_id, `ticket:resolve:${ticket.id}:1`);
   const denied = await click(client, user, second.modal.custom_id, [], "2", {
@@ -1791,9 +1796,9 @@ test("each closure resolves once across Discord and dashboard without repeated r
     "Closed",
   );
   assert.equal(
-    overview().components[0].components.some(
-      (button) => button.label === "Resolve ticket",
-    ),
+    overview()
+      .components.flatMap((row) => row.components)
+      .some((button) => button.label === "Resolve ticket"),
     false,
   );
   assert.equal(
@@ -1896,19 +1901,26 @@ test("player closure, private rating and staff resolution each post a notice wit
   );
   await service.pump();
   const notices = [...target.savedMessages.values()].filter((message) =>
-    message.embeds?.some((embed) => embed.footer?.text.includes("Activity")),
+    message.embeds?.some(
+      (embed) =>
+        embed.url?.includes("#update=") &&
+        decodeURIComponent(embed.url).match(/:(closed|resolved|rated):/),
+    ),
   );
   assert.equal(notices.length, 3);
-  assert.match(notices[0].content, /player closed/);
-  assert.match(notices[1].content, /Private feedback received/);
-  assert.match(notices[2].content, /Staff recorded the resolution/);
+  assert.match(notices[0].embeds[0].description, /player closed/);
+  assert.match(notices[1].embeds[0].description, /Private feedback received/);
+  assert.match(
+    notices[2].embeds[0].description,
+    /Staff recorded the resolution/,
+  );
   assert.doesNotMatch(
     JSON.stringify(notices.map((message) => message.data)),
     /PRIVATE|4\/5/,
   );
-  const deletion = notices[0].components[0].components.find((button) =>
-    button.custom_id?.includes(":delete:"),
-  );
+  const deletion = notices[0].components
+    .flatMap((row) => row.components)
+    .find((button) => button.custom_id?.includes(":delete:"));
   assert.equal(deletion.label, "Delete channel · Admin+");
   const denied = await click(
     app.client,
@@ -1922,9 +1934,9 @@ test("player closure, private rating and staff resolution each post a notice wit
     deletion.custom_id,
   );
   assert.equal(confirm.flags, 64);
-  const approved = confirm.data.components[0].components.find((button) =>
-    button.custom_id?.includes(":delete-confirm:"),
-  );
+  const approved = confirm.data.components
+    .flatMap((row) => row.components)
+    .find((button) => button.custom_id?.includes(":delete-confirm:"));
   assert.ok(approved);
   const removed = await click(
     app.client,
@@ -1984,7 +1996,7 @@ test("feedback after channel deletion is delivered privately to staff without ex
   );
   assert.equal(notices.length, 1);
   assert.doesNotMatch(JSON.stringify(notices[0].data), /5\/5|Helper/);
-  assert.deepEqual(notices[0].data.allowedMentions, { parse: [] });
+  assert.deepEqual(notices[0].sentData.allowedMentions, { parse: [] });
   assert.equal(service.get(ticket.id).rating, 5);
   assert.equal(service.store.get("ticket-outbox", key), undefined);
 });
@@ -2004,20 +2016,32 @@ test("existing retained closed tickets receive one silent notice and deletion co
   service.queueClosedUpdates();
   await service.pump();
   const notices = [...target.savedMessages.values()].filter((message) =>
-    message.content.includes("player closed"),
+    message.embeds?.[0]?.description?.includes("player closed"),
   );
   assert.equal(notices.length, 1);
-  assert.deepEqual(notices[0].data.allowedMentions, { parse: [], users: [] });
+  assert.deepEqual(notices[0].sentData.allowedMentions, {
+    parse: [],
+    users: [],
+  });
+  assert.equal(notices[0].content, "");
   assert.ok(
-    notices[0].components[0].components.some((button) =>
-      button.custom_id?.includes(":delete:"),
-    ),
+    notices[0].components
+      .flatMap((row) => row.components)
+      .some((button) => button.custom_id?.includes(":delete:")),
   );
   const intro = await target.messages.fetch(
     service.store.get("ticket-discord", ticket.id).introId,
   );
-  assert.match(intro.content, /closed by the player/);
-  assert.doesNotMatch(intro.content, /will claim/);
+  assert.match(
+    intro.embeds[0].fields.find((field) => field.name === "Ticket update")
+      .value,
+    /closed by the player/,
+  );
+  assert.doesNotMatch(
+    intro.embeds[0].fields.find((field) => field.name === "Ticket update")
+      .value,
+    /will claim/,
+  );
 });
 
 test("an uncertain closure notice is recovered once and old closure controls cannot affect a reopened ticket", async (t) => {
@@ -2037,23 +2061,23 @@ test("an uncertain closure notice is recovered once and old closure controls can
   service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
   await service.pump();
   const notices = [...target.savedMessages.values()].filter((message) =>
-    message.content.includes("player closed"),
+    message.embeds?.[0]?.description?.includes("player closed"),
   );
   assert.equal(notices.length, 1);
-  const oldDelete = notices[0].components[0].components.find((button) =>
-    button.custom_id?.includes(":delete:"),
-  );
+  const oldDelete = notices[0].components
+    .flatMap((row) => row.components)
+    .find((button) => button.custom_id?.includes(":delete:"));
   await service.reopen(owner, ticket.id);
   await service.pump();
   assert.equal(service.get(ticket.id).status, "pending");
   const reopened = [...target.savedMessages.values()].filter((message) =>
-    message.content.includes("was reopened"),
+    message.embeds?.[0]?.description?.includes("was reopened"),
   );
   assert.equal(reopened.length, 1);
   assert.ok(
-    reopened[0].components[0].components.some(
-      (button) => button.custom_id === `ticket:claim:${ticket.id}`,
-    ),
+    reopened[0].components
+      .flatMap((row) => row.components)
+      .some((button) => button.custom_id === `ticket:claim:${ticket.id}`),
   );
   const expired = await click(
     app.client,
@@ -2105,11 +2129,15 @@ test("native staff replies refresh the Discord overview and only Admin or higher
     "Helper",
   );
   assert.equal(service.get(ticket.id).claimedBy, null);
-  assert.match(intro.content, /Staff replied · Helper/);
-  const replyNotice = [...target.savedMessages.values()].find((message) =>
-    message.content.includes("replied to your ticket"),
+  assert.match(
+    intro.embeds[0].fields.find((field) => field.name === "Ticket update")
+      .value,
+    /Staff replied · Helper/,
   );
-  assert.deepEqual(replyNotice.data.allowedMentions, {
+  const replyNotice = [...target.savedMessages.values()].find((message) =>
+    message.embeds?.[0]?.description?.includes("replied to your ticket"),
+  );
+  assert.deepEqual(replyNotice.sentData.allowedMentions, {
     parse: [],
     users: ["201", "100"],
   });
@@ -2121,19 +2149,27 @@ test("native staff replies refresh the Discord overview and only Admin or higher
     intro.embeds[0].fields.find((field) => field.name === "Status").value,
     "Claimed by Helper",
   );
-  assert.match(intro.content, /Claimed by Helper/);
-  assert.doesNotMatch(intro.content, /will claim/);
-  const claimNotice = [...target.savedMessages.values()].find((message) =>
-    message.content.includes("claimed your ticket"),
+  assert.match(
+    intro.embeds[0].fields.find((field) => field.name === "Ticket update")
+      .value,
+    /Claimed by Helper/,
   );
-  assert.deepEqual(claimNotice.data.allowedMentions, {
+  assert.doesNotMatch(
+    intro.embeds[0].fields.find((field) => field.name === "Ticket update")
+      .value,
+    /will claim/,
+  );
+  const claimNotice = [...target.savedMessages.values()].find((message) =>
+    message.embeds?.[0]?.description?.includes("claimed your ticket"),
+  );
+  assert.deepEqual(claimNotice.sentData.allowedMentions, {
     parse: [],
     users: ["201", "100"],
   });
-  assert.match(claimNotice.content, /<@100> <@201>/);
-  const control = intro.data.components[0].components.find(
-    (button) => button.label === "Take over (Admin+)",
-  );
+  assert.match(claimNotice.embeds[0].description, /<@100> <@201>/);
+  const control = intro.data.components
+    .flatMap((row) => row.components)
+    .find((button) => button.label === "Take over (Admin+)");
   assert.equal(control.custom_id, `ticket:takeover:${ticket.id}:201`);
   const denied = await click(client, { ...user, id: "100" }, control.custom_id);
   assert.match(denied.data, /permission/);
@@ -2141,9 +2177,9 @@ test("native staff replies refresh the Discord overview and only Admin or higher
   assert.equal(taken.flags, 64);
   await service.pump();
   const takeoverNotice = [...target.savedMessages.values()].find((message) =>
-    message.content.includes("took over your ticket"),
+    message.embeds?.[0]?.description?.includes("took over your ticket"),
   );
-  assert.deepEqual(takeoverNotice.data.allowedMentions, {
+  assert.deepEqual(takeoverNotice.sentData.allowedMentions, {
     parse: [],
     users: ["200", "100"],
   });
@@ -2189,19 +2225,19 @@ test("guest claim notices only ping staff and recover an uncertain notification 
   service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
   await service.pump();
   const notices = [...target.savedMessages.values()].filter((message) =>
-    message.content.includes("claimed your ticket"),
+    message.embeds?.[0]?.description?.includes("claimed your ticket"),
   );
   assert.equal(notices.length, 1);
-  assert.deepEqual(notices[0].data.allowedMentions, {
+  assert.deepEqual(notices[0].sentData.allowedMentions, {
     parse: [],
     users: ["201"],
   });
-  assert.match(notices[0].content, /^Jojo <@201>/);
+  assert.match(notices[0].embeds[0].description, /^Jojo <@201>/);
   assert.equal(service.store.get("ticket-outbox", key), undefined);
   await transport.status(service.get(ticket.id), job);
   assert.equal(
     [...target.savedMessages.values()].filter((message) =>
-      message.content.includes("claimed your ticket"),
+      message.embeds?.[0]?.description?.includes("claimed your ticket"),
     ).length,
     1,
   );
@@ -2226,7 +2262,7 @@ test("reopened Discord tickets preserve old messages through reconciliation and 
   service.closeTicket(user, ticket.id, {});
   await service.pump();
   assert.equal(dms.length, 1);
-  assert.match(dms[0].content, /How did Helper do/);
+  assert.match(dms[0].embeds[0].description, /How did Helper do/);
   const oldCycle = service.get(ticket.id).closureId;
   let result = await click(client, user, "ticket:mine");
   assert.equal(result.flags, 64);
@@ -2446,4 +2482,133 @@ test("retention erasure deletes only its owned channel and tracked bot notices",
   assert.equal(app.channels.has(current.channelId), false);
   assert.equal(app.staffChannel.savedMessages.has(notice.id), false);
   assert.equal(app.staffChannel.savedMessages.has(pending.id), false);
+});
+
+test("rating is available by DM and retained channel, then auto-deletes only after resolution and saved history", async (t) => {
+  const { service, transport, user, client, channels, dms } = setupDiscord(t);
+  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
+  const ticket = await supportTicket(service, user, transport);
+  service.claim(helper, ticket.id);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  const intro = await target.messages.fetch(
+    service.store.get("ticket-discord", ticket.id).introId,
+  );
+  assert.equal(intro.content, "");
+  assert.ok(
+    target.overwrites
+      .find((entry) => entry.id === user.id)
+      .allow.includes(P.ViewChannel),
+  );
+  const select = dms[0].components[0].components[0];
+  assert.equal(select.type, 3);
+  assert.deepEqual(
+    select.options.map((option) => option.value),
+    ["1", "2", "3", "4", "5"],
+  );
+  assert.equal(intro.components[0].components[0].custom_id, select.custom_id);
+  assert.equal(
+    service.view(helper, ticket.id, true).feedbackDelivery.status,
+    "dm",
+  );
+  const denied = await click(
+    client,
+    { ...user, id: "intruder" },
+    select.custom_id,
+    ["5"],
+  );
+  assert.equal(service.get(ticket.id).rating, null);
+  assert.match(denied.data, /not found|permission/i);
+  const result = await click(client, user, select.custom_id, ["5"]);
+  assert.match(result.data, /private rating has been saved/);
+  await service.pump();
+  assert.equal(channels.has(target.id), true);
+  assert.equal(
+    service.view(helper, ticket.id, true).feedbackDelivery.status,
+    "rated",
+  );
+  const duplicate = await click(client, user, select.custom_id, ["1"]);
+  assert.match(duplicate.data, /already rated/);
+  service.closeTicket(
+    helper,
+    ticket.id,
+    { summary: "Solved", commands: "None" },
+    true,
+  );
+  await service.pump();
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.get(ticket.id).rating, 5);
+  assert.equal(service.get(ticket.id).resolution.summary, "Solved");
+  assert.equal(service.staffStats(helper).get(helper.id).ticketsResolved, 1);
+  assert.equal(service.staffStats(helper).get(helper.id).averageRating, 5);
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  assert.notEqual(service.get(ticket.id).channelId, target.id);
+  const stale = await click(client, user, select.custom_id, ["1"]);
+  assert.match(stale.data, /earlier closure/);
+});
+
+test("ticket notice cleanup retries the same embed without a second mention", async (t) => {
+  const { service, transport, user, channels } = setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  const originalSend = target.send;
+  target.send = async (data) => {
+    const sent = await originalSend(data);
+    const edit = sent.edit;
+    sent.edit = async (data) => {
+      sent.edit = edit;
+      throw new Error("Temporary edit failure");
+    };
+    return sent;
+  };
+  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  await service.pump();
+  const [key, job] = service.store
+    .entries("ticket-outbox")
+    .find(([, job]) => job.kind === "status");
+  job.after = 0;
+  service.store.set("ticket-outbox", key, job, Number.MAX_SAFE_INTEGER);
+  await service.pump();
+  const notices = [...target.savedMessages.values()].filter((message) =>
+    message.embeds?.[0]?.description?.includes("claimed your ticket"),
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].content, "");
+  assert.equal(notices[0].sentData.content, "<@201> <@100>");
+  assert.deepEqual(notices[0].data.allowedMentions, { parse: [] });
+});
+
+test("existing managed ticket notices move into embeds without sending another message", async (t) => {
+  const { service, transport, user, channels } = setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  await service.pump();
+  const target = channels.get(service.get(ticket.id).channelId);
+  const [key, entry] = service.store.entries("ticket-status-notice")[0];
+  const message = target.savedMessages.get(entry.messageId);
+  await message.edit({
+    content: "Helper claimed your ticket.",
+    embeds: [
+      {
+        description: "Claimed by Helper",
+        footer: { text: `Ticket ${ticket.id} · Staff update 1` },
+      },
+    ],
+  });
+  delete entry.layoutVersion;
+  service.store.set(
+    "ticket-status-notice",
+    key,
+    entry,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const count = target.savedMessages.size;
+  await transport.recover();
+  assert.equal(target.savedMessages.size, count);
+  assert.equal(message.content, "");
+  assert.equal(message.embeds[0].description, "Helper claimed your ticket.");
+  assert.equal(message.embeds[0].fields[0].value, "Claimed by Helper");
+  assert.equal(service.store.get("ticket-status-notice", key).layoutVersion, 2);
 });

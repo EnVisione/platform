@@ -1312,3 +1312,66 @@ test("reopening waits for transcript capture instead of racing a pending closure
   assert.equal(service.get(ticket.id).status, "awaiting_resolution");
   assert.equal(service.get(ticket.id).channelId, "old-channel");
 });
+
+test("staff support summaries preserve closure attribution, deduplicate resolutions and enforce category visibility and erasure", async (t) => {
+  const { service } = setup(t);
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async status() {
+      return { closed: true };
+    },
+    async deleteChannel() {
+      return { deleted: true };
+    },
+    async eraseTicket() {},
+  });
+  const founder = { id: "300", name: "Founder", roles: ["10", "20"] };
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  service.closeTicket(
+    manager,
+    ticket.id,
+    { summary: "Fixed", commands: "None" },
+    true,
+  );
+  service.rate(owner, ticket.id, 4, ticket.closureId);
+  await service.reopen(owner, ticket.id);
+  service.claim(helper, ticket.id);
+  service.closeTicket(
+    manager,
+    ticket.id,
+    { summary: "Done", commands: "None" },
+    true,
+  );
+  service.rate(owner, ticket.id, 2, service.get(ticket.id).closureId);
+  const billing = service.create(owner, input({ type: "billing" }));
+  service.claim(founder, billing.id);
+  service.closeTicket(
+    founder,
+    billing.id,
+    { summary: "Refund checked", commands: "None" },
+    true,
+  );
+  service.rate(owner, billing.id, 5, service.get(billing.id).closureId);
+  const active = service.create(owner, input());
+  service.claim(helper, active.id);
+  assert.deepEqual(service.staffStats(manager).get(helper.id), {
+    averageRating: 3,
+    reviewCount: 2,
+    ticketsResolved: 0,
+    activeTickets: 1,
+  });
+  assert.equal(service.staffStats(manager).get(manager.id).ticketsResolved, 1);
+  assert.equal(service.staffStats(manager).has(founder.id), false);
+  assert.equal(service.staffStats(founder).get(founder.id).averageRating, 5);
+  fails(() => service.staffStats(owner), "ticket_access_denied");
+  await service.pump();
+  assert.equal(
+    await service.eraseInactive(ticket.id, service.get(ticket.id).lastActiveAt),
+    true,
+  );
+  assert.equal(service.staffStats(manager).get(helper.id).reviewCount, 0);
+  assert.equal(service.staffStats(manager).has(manager.id), false);
+});

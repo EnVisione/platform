@@ -1,4 +1,4 @@
-export const legalVersion = "2026-10-03";
+export const legalVersion = "2026-10-04";
 export const inactivityMonths = 12;
 
 export function monthsAfter(at, months) {

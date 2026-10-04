@@ -1106,6 +1106,8 @@ function TicketChat({
                       ? `How did ${ticket.ratingStaff.name} do?`
                       : "How helpful was the support?"}{" "}
                     Your 1–5 rating is private to you and authorized staff.
+                    After rating, the closed Discord channel is removed once the
+                    resolution and transcript are saved.
                   </span>
                   {[1, 2, 3, 4, 5].map((value) => (
                     <button
@@ -1222,6 +1224,29 @@ function TicketChat({
               </div>
             </div>
           </section>
+          {staffView && ticket.feedbackDelivery && (
+            <section className="ticket-detail-section">
+              <h3>Player feedback</h3>
+              <p>
+                {
+                  {
+                    rated: `Rated ${ticket.rating} / 5`,
+                    dm: "Rating request sent by Discord DM",
+                    channel: "DMs blocked · private rating fallback sent",
+                    pending: "Rating request queued",
+                    failed: "Rating delivery needs attention",
+                    website: "Rating available in the private web ticket",
+                  }[ticket.feedbackDelivery.status]
+                }
+              </p>
+              {ticket.feedbackDelivery.at && (
+                <p className="muted">{stamp(ticket.feedbackDelivery.at)}</p>
+              )}
+              {ticket.ratingStaff && (
+                <p>Feedback for {ticket.ratingStaff.name}</p>
+              )}
+            </section>
+          )}
           <section className="ticket-detail-section">
             <h3>{partner ? "Partner contact" : "Player information"}</h3>
             <dl className="ticket-facts">
