@@ -717,8 +717,8 @@ function InternalNotes({ base, csrf, active, canReply }) {
         )}
         {data && !messages.length && (
           <p className="ticket-empty">
-            No internal notes yet. Discuss this ticket here or in its private
-            Discord thread.
+            No internal notes yet. Discuss this ticket here
+            {data.discordUrl ? " or in its private Discord thread." : "."}
           </p>
         )}
         {messages.map((message) => (
@@ -741,7 +741,10 @@ function InternalNotes({ base, csrf, active, canReply }) {
                 <FileView key={file.id} file={file} />
               ))}
               {message.delivery === "pending" && (
-                <small>Saved · syncing to the staff Discord thread…</small>
+                <small>Saved · syncing to the private Discord thread…</small>
+              )}
+              {message.delivery === "stored" && (
+                <small>Saved in dashboard</small>
               )}
             </div>
           </article>

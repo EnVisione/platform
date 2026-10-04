@@ -682,7 +682,6 @@ export function ticketService(
         throw new AuthError("partnership_limit", 409);
       audit(ticket, user, "opened", "Modpack partnership request submitted");
       queue(ticket, "opened");
-      if (transport?.notesThread) queue(ticket, "notes-thread");
       if (config.tickets.staffChannelId)
         for (const event of ["opened", "unclaimed"])
           put("ticket-notice-outbox", `${ticket.id}:${event}`, {
@@ -845,9 +844,12 @@ export function ticketService(
           .filter(Boolean),
       })),
       hasOlder: page.total > page.items.length,
-      discordUrl: link?.threadId
-        ? `https://discord.com/channels/${config.guildId}/${link.threadId}`
-        : null,
+      discordUrl:
+        link?.threadId &&
+        link.guildId === config.tickets.guildId &&
+        link.parentId === ticket.channelId
+          ? `https://discord.com/channels/${link.guildId}/${link.threadId}`
+          : null,
     };
   }
   function claim(user, id) {
@@ -1199,6 +1201,8 @@ export function ticketService(
         ticket,
         ticket.type === "partnership" || ticket.channelId ? "status" : "create",
       );
+      if (transport?.notesThread && ticket.type !== "partnership")
+        queue(ticket, "notes-thread");
       queueActivity(ticket, "reopened", user);
       if (config.tickets.staffChannelId) {
         const cycle = `${id}:reopened:${ticket.reopenedCount}`;
@@ -1436,7 +1440,9 @@ export function ticketService(
         ticketId: id,
         uploader: incoming.actor.id,
         internal,
-        ...(internal ? { staffGuildId: config.guildId } : {}),
+        ...(internal
+          ? { staffGuildId: incoming.guildId || config.guildId }
+          : {}),
         used: true,
         createdAt,
         expiresAt: createdAt + ticketMediaDays * 86400000,
@@ -1701,13 +1707,14 @@ export function ticketService(
                     message,
                     store.get(`ticket-messages:${ticket.id}`, job.ref),
                   );
-                message.discordId = delivered.id;
-                message.delivery = "delivered";
+                message.discordId = delivered.id || null;
+                message.delivery = delivered.local ? "stored" : "delivered";
                 put(`ticket-messages:${ticket.id}`, job.ref, message);
-                put("ticket-discord-message", delivered.id, {
-                  ticketId: ticket.id,
-                  key: job.ref,
-                });
+                if (delivered.id)
+                  put("ticket-discord-message", delivered.id, {
+                    ticketId: ticket.id,
+                    key: job.ref,
+                  });
                 store.delete(
                   "ticket-send",
                   job.kind === "note" ? `note:${message.id}` : message.id,
@@ -1901,6 +1908,7 @@ export function ticketService(
         for (const [, ticket] of store.entries("ticket"))
           if (
             !ticket.erasingAt &&
+            ticket.type !== "partnership" &&
             ["pending", "claimed"].includes(ticket.status) &&
             !store.get("ticket-notes-discord", ticket.id)?.threadId &&
             !store.get(

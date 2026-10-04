@@ -80,6 +80,15 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       categories.every(
         (entry) => user.capabilities[`tickets.category.${entry}.reply`],
       );
+    const ownerNotesReply = members.some(
+      (user) =>
+        user.id === owner &&
+        user.capabilities["tickets.view"] &&
+        categories.every(
+          (entry) => user.capabilities[`tickets.category.${entry}.view`],
+        ) &&
+        canReply(user),
+    );
     const staff = members
       .filter(
         (user) =>
@@ -97,15 +106,37 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           P.ViewChannel,
           P.ReadMessageHistory,
           ...(canReply(user)
-            ? [P.SendMessages, P.AttachFiles, P.EmbedLinks]
+            ? [
+                P.SendMessages,
+                P.SendMessagesInThreads,
+                P.AttachFiles,
+                P.EmbedLinks,
+              ]
             : []),
         ],
-        deny: canReply(user) ? [] : [P.SendMessages, P.AttachFiles],
+        deny: [
+          P.ManageThreads,
+          P.CreatePublicThreads,
+          P.CreatePrivateThreads,
+          ...(canReply(user)
+            ? []
+            : [P.SendMessages, P.SendMessagesInThreads, P.AttachFiles]),
+        ],
       }));
     if (staff.length > (owner ? 97 : 98))
       throw new Error("Ticket access capacity exceeded");
     return [
-      { id: settings.guildId, type: 0, deny: [P.ViewChannel] },
+      {
+        id: settings.guildId,
+        type: 0,
+        deny: [
+          P.ViewChannel,
+          P.ManageThreads,
+          P.CreatePublicThreads,
+          P.CreatePrivateThreads,
+          P.SendMessagesInThreads,
+        ],
+      },
       ...staff,
       {
         id: client.user.id,
@@ -119,6 +150,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           P.ManageChannels,
           P.ManageWebhooks,
           P.ManageMessages,
+          P.CreatePrivateThreads,
+          P.SendMessagesInThreads,
+          P.ManageThreads,
         ],
       },
       ...(owner
@@ -132,6 +166,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 P.ReadMessageHistory,
                 P.AttachFiles,
                 P.EmbedLinks,
+                ...(ownerNotesReply ? [P.SendMessagesInThreads] : []),
+              ],
+              deny: [
+                P.ManageThreads,
+                P.CreatePublicThreads,
+                P.CreatePrivateThreads,
+                ...(!ownerNotesReply ? [P.SendMessagesInThreads] : []),
               ],
             },
           ]
@@ -147,13 +188,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     if (["closed", "awaiting_resolution"].includes(ticket.status))
       for (const permission of permissions)
         if (permission.id !== client.user.id) {
+          const notesReply = permission.allow?.includes(
+            P.SendMessagesInThreads,
+          );
           permission.allow = (permission.allow || []).filter(
-            (bit) => bit !== P.SendMessages && bit !== P.AttachFiles,
+            (bit) =>
+              bit !== P.SendMessages && (notesReply || bit !== P.AttachFiles),
           );
           permission.deny = [
             ...(permission.deny || []),
             P.SendMessages,
-            P.AttachFiles,
+            ...(notesReply ? [] : [P.AttachFiles]),
           ];
         }
     return permissions;
@@ -1338,9 +1383,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   const notes = ticketNotesDiscord(config, service, client, {
     staffUser,
     staffMembers,
-    overwrites,
+    ticketOverwrites,
     ready,
     bytes: (file) => transport.bytes(file),
+    retainMedia,
   });
   transport.note = notes.send;
   transport.notesThread = notes.ensure;
@@ -1380,6 +1426,52 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       },
       closing,
     );
+  }
+  async function retainMedia(ticket, channelId) {
+    let copied = 0;
+    const needsCopy = (file) =>
+      file &&
+      file.ticketId === ticket.id &&
+      file.channelId === channelId &&
+      !file.purged &&
+      !file.removed &&
+      file.expiresAt > Date.now();
+    for (const [id, file] of service.store.entries("ticket-media")) {
+      if (!needsCopy(file)) continue;
+      if (copied++ === 5) return false;
+      const stored = await transport.upload(
+        await transport.bytes(file),
+        file.name,
+        file.type,
+        ticket,
+      );
+      const current = service.store.get("ticket-media", id);
+      if (
+        !needsCopy(current) ||
+        current.messageId !== file.messageId ||
+        current.attachmentId !== file.attachmentId
+      ) {
+        await transport.removeMedia(stored);
+        continue;
+      }
+      service.store.set(
+        "ticket-media",
+        id,
+        {
+          ...current,
+          ...stored,
+          sourceChannelId: current.channelId,
+          sourceAttachmentId: current.attachmentId,
+          sourceMessageId: current.messageId,
+          mirrorChannelId: null,
+          mirrorMessageId: null,
+        },
+        Number.MAX_SAFE_INTEGER,
+      );
+    }
+    return !service.store
+      .entries("ticket-media")
+      .some(([, file]) => needsCopy(file));
   }
   async function closeChannel(ticket, deletion = false) {
     let snapshot = service.store.get("ticket-discord-close", ticket.id);
@@ -1442,56 +1534,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         persist();
       }
       if (!snapshot.historySaved) return { pending: true };
-      let copied = 0;
-      const needsCopy = (file) =>
-        file.ticketId === ticket.id &&
-        file.channelId === target.id &&
-        !file.purged &&
-        !file.removed &&
-        file.expiresAt > Date.now();
-      for (const [id, file] of service.store.entries("ticket-media")) {
-        if (!needsCopy(file)) continue;
-        if (copied++ === 5) return { pending: true };
-        const stored = await transport.upload(
-          await transport.bytes(file),
-          file.name,
-          file.type,
-          ticket,
-        );
-        const current = service.store.get("ticket-media", id);
-        if (
-          !needsCopy(current) ||
-          current.messageId !== file.messageId ||
-          current.attachmentId !== file.attachmentId
-        ) {
-          await transport.removeMedia(stored);
-          continue;
-        }
-        service.store.set(
-          "ticket-media",
-          id,
-          {
-            ...current,
-            ...stored,
-            sourceChannelId: current.channelId,
-            sourceAttachmentId: current.attachmentId,
-            sourceMessageId: current.messageId,
-            mirrorChannelId: null,
-            mirrorMessageId: null,
-          },
-          Number.MAX_SAFE_INTEGER,
-        );
-      }
-      if (
-        service.store
-          .entries("ticket-media")
-          .some(([, file]) => needsCopy(file))
-      )
-        return { pending: true };
+      if (!(await retainMedia(ticket, target.id))) return { pending: true };
       snapshot.ready = true;
       persist();
     }
     if (!deletion) return { closed: true };
+    if ((await notes.deleteThread(ticket))?.pending) return { pending: true };
     try {
       await target.delete(
         "Closed ticket channel removed; transcript saved in staff logs",

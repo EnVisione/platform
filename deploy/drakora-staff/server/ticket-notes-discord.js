@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { ChannelType, PermissionFlagsBits as P } from "discord.js";
-import { ticketCategory } from "../shared/tickets.js";
+import { ChannelType } from "discord.js";
+import { discordMembers } from "./discord-members.js";
 
 const forever = Number.MAX_SAFE_INTEGER;
 const title = (id) => `ticket-${id}-internal-notes`;
@@ -10,103 +10,40 @@ export function ticketNotesDiscord(
   config,
   service,
   client,
-  { staffUser, staffMembers, overwrites, ready, bytes },
+  { staffUser, staffMembers, ticketOverwrites, ready, bytes, retainMedia },
 ) {
   let running,
     stopped = false;
   const store = service.store;
   const pendingThreads = new Map();
-  const pendingParents = new Map();
   const save = (kind, id, value) => store.set(kind, id, value, forever);
-  const guild = () => client.guilds.fetch(config.guildId);
+  const guild = (id = config.tickets.guildId) => client.guilds.fetch(id);
+  const stateGuild = (state) => state?.guildId || config.guildId;
   const linked = (id) => {
     const ref = store.get("ticket-notes-channel", id);
     return ref ? service.get(ref.ticketId) : null;
   };
-  function permissions(members, category) {
-    return overwrites(members, null, category).map((entry) => {
-      if (entry.id === config.tickets.guildId)
-        return {
-          ...entry,
-          id: config.guildId,
-          deny: [
-            ...entry.deny,
-            P.ManageThreads,
-            P.CreatePublicThreads,
-            P.CreatePrivateThreads,
-          ],
-        };
-      if (entry.id === client.user.id)
-        return {
-          ...entry,
-          allow: [
-            ...entry.allow,
-            P.CreatePrivateThreads,
-            P.SendMessagesInThreads,
-            P.ManageThreads,
-          ],
-        };
-      const reply = entry.allow.includes(P.SendMessages);
-      return {
-        ...entry,
-        allow: entry.allow
-          .filter((bit) => bit !== P.SendMessages)
-          .concat(reply ? [P.SendMessagesInThreads] : []),
-        deny: [
-          ...entry.deny,
-          P.SendMessages,
-          P.ManageThreads,
-          P.CreatePublicThreads,
-          P.CreatePrivateThreads,
-          ...(reply ? [] : [P.SendMessagesInThreads]),
-        ],
-      };
-    });
-  }
-  async function createParent(ticket, members) {
-    const category = ticketCategory(ticket),
-      main = await guild();
-    const settings = store.get("ticket-notes-settings", "parents") || {};
-    const channels = await main.channels.fetch();
-    const topic = `Drakora staff-only ${category} ticket notes.`;
-    let target =
-      channels.get(settings[category]) ||
-      [...channels.values()].find((value) => value?.topic === topic);
+  async function parent(ticket, members) {
+    if (ticket.type === "partnership" || !ticket.channelId) return null;
+    let target;
+    try {
+      target = await (await guild()).channels.fetch(ticket.channelId);
+    } catch (error) {
+      if (error.code !== 10003) throw error;
+    }
+    if (!target) return null;
     if (
-      target &&
-      (target.guildId !== config.guildId ||
-        target.type !== ChannelType.GuildText ||
-        target.topic !== topic)
+      target.guildId !== config.tickets.guildId ||
+      target.type !== ChannelType.GuildText ||
+      target.topic !== `Drakora ticket ${ticket.id}`
     )
-      throw new Error("Internal notes parent ownership does not match");
-    if (!target)
-      target = await main.channels.create({
-        name: `${category}-internal-notes`,
-        type: ChannelType.GuildText,
-        topic,
-        permissionOverwrites: permissions(members, category),
-      });
-    await target.permissionOverwrites.set(permissions(members, category));
-    save("ticket-notes-settings", "parents", {
-      ...store.get("ticket-notes-settings", "parents"),
-      [category]: target.id,
-    });
+      throw new Error("Internal notes ticket channel ownership does not match");
+    await target.permissionOverwrites.set(ticketOverwrites(ticket, members));
     return target;
-  }
-  function parent(ticket, members) {
-    const category = ticketCategory(ticket);
-    if (!pendingParents.has(category))
-      pendingParents.set(
-        category,
-        createParent(ticket, members).finally(() =>
-          pendingParents.delete(category),
-        ),
-      );
-    return pendingParents.get(category);
   }
   function owned(target, ticket, state) {
     if (
-      target.guildId !== config.guildId ||
+      target.guildId !== stateGuild(state) ||
       target.type !== ChannelType.PrivateThread ||
       target.parentId !== state.parentId ||
       target.ownerId !== client.user.id ||
@@ -142,9 +79,11 @@ export function ticketNotesDiscord(
     return { pending: true };
   }
   async function synchronize(target, ticket, members) {
+    const present = await discordMembers(client, await guild());
     const allowed = new Set(
       members
         .filter((user) => {
+          if (!present.has(user.id)) return false;
           try {
             service.staff(user, ticket);
             return true;
@@ -165,41 +104,55 @@ export function ticketNotesDiscord(
     }
     if (target.invitable !== false) await target.setInvitable(false);
   }
-  async function thread(ticket, create = true, batch) {
+  async function thread(ticket, batch) {
     await ready();
+    if (stopped) return { pending: true };
     const members = batch?.members || (await staffMembers());
-    const category = ticketCategory(ticket);
-    if (batch && !batch.parents.has(category))
-      batch.parents.set(category, parent(ticket, members));
-    const target = batch
-      ? await batch.parents.get(category)
-      : await parent(ticket, members);
+    const target = await parent(ticket, members);
+    const existing = store.get("ticket-notes-discord", ticket.id);
+    if (!target) {
+      if (
+        ticket.type !== "partnership" &&
+        ["pending", "claimed"].includes(ticket.status)
+      )
+        return { pending: true };
+      if (existing && (await retire(ticket, existing))?.pending)
+        return { pending: true };
+      return null;
+    }
     let state = store.get("ticket-notes-discord", ticket.id) || {
       ticketId: ticket.id,
       parentId: target.id,
+      guildId: config.tickets.guildId,
     };
-    if (state.parentId !== target.id) {
-      let previous;
-      try {
-        previous = await (await guild()).channels.fetch(state.parentId);
-      } catch (error) {
-        if (error.code !== 10003) throw error;
-      }
-      if (previous) throw new Error("Internal notes parent changed");
-      if (state.threadId) store.delete("ticket-notes-channel", state.threadId);
-      state = { ticketId: ticket.id, parentId: target.id };
+    if (
+      state.parentId !== target.id ||
+      stateGuild(state) !== config.tickets.guildId
+    ) {
+      if ((await retire(ticket, state))?.pending) return { pending: true };
+      state = {
+        ticketId: ticket.id,
+        parentId: target.id,
+        guildId: config.tickets.guildId,
+      };
       save("ticket-notes-discord", ticket.id, state);
     }
     let result;
     if (state.threadId) {
       try {
-        result = await (await guild()).channels.fetch(state.threadId);
+        result = await (
+          await guild(stateGuild(state))
+        ).channels.fetch(state.threadId);
       } catch (error) {
         if (error.code !== 10003) throw error;
       }
       if (!result) {
         store.delete("ticket-notes-channel", state.threadId);
-        state = { ticketId: ticket.id, parentId: target.id };
+        state = {
+          ticketId: ticket.id,
+          parentId: target.id,
+          guildId: config.tickets.guildId,
+        };
         save("ticket-notes-discord", ticket.id, state);
       }
     }
@@ -207,7 +160,6 @@ export function ticketNotesDiscord(
       save("ticket-notes-discord", ticket.id, state);
       result = await findThread(target, ticket, state);
       if (result?.pending) return result;
-      if (!result && !create) return null;
       if (!result)
         result = await target.threads.create({
           name: title(ticket.id),
@@ -225,11 +177,11 @@ export function ticketNotesDiscord(
     await synchronize(result, ticket, members);
     return result;
   }
-  function ensure(ticket, create = true, batch) {
+  function ensure(ticket, batch) {
     if (!pendingThreads.has(ticket.id))
       pendingThreads.set(
         ticket.id,
-        thread(ticket, create, batch).finally(() =>
+        thread(service.get(ticket.id), batch).finally(() =>
           pendingThreads.delete(ticket.id),
         ),
       );
@@ -239,6 +191,7 @@ export function ticketNotesDiscord(
     if (!message.internal)
       throw new Error("Only internal notes can use the staff thread");
     const target = await ensure(ticket);
+    if (!target) return { local: true };
     if (target.pending) return target;
     if (target.archived) await target.setArchived(false);
     const takeover = () =>
@@ -404,17 +357,13 @@ export function ticketNotesDiscord(
     });
     return acknowledge(sent);
   }
-  async function observe(message) {
-    if (
-      stopped ||
-      message.author?.bot ||
-      message.system ||
-      message.webhookId ||
-      message.guildId !== config.guildId
-    )
+  async function observe(message, closing = false) {
+    if (stopped || message.author?.bot || message.system || message.webhookId)
       return;
     const ticket = linked(message.channelId);
     if (!ticket) return;
+    const state = store.get("ticket-notes-discord", ticket.id);
+    if (!state || message.guildId !== stateGuild(state)) return;
     const user = await staffUser(message.author.id);
     try {
       service.staff(user || { roles: [] }, ticket, "tickets.reply");
@@ -422,60 +371,50 @@ export function ticketNotesDiscord(
       if (error.code === "ticket_access_denied") return;
       throw error;
     }
-    service.ingest(ticket.id, {
-      id: message.id,
-      channelId: message.channelId,
-      actor: user,
-      staff: true,
-      internal: true,
-      at: message.createdTimestamp,
-      editedAt: message.editedTimestamp,
-      content: message.content,
-      attachments: [...message.attachments.values()].map((file) => ({
+    service.ingest(
+      ticket.id,
+      {
+        id: message.id,
         channelId: message.channelId,
-        messageId: message.id,
-        attachmentId: file.id,
-        name: file.name.slice(0, 120),
-        type: file.contentType || "application/octet-stream",
-        size: file.size,
-      })),
-    });
+        actor: user,
+        staff: true,
+        internal: true,
+        guildId: message.guildId,
+        at: message.createdTimestamp,
+        editedAt: message.editedTimestamp,
+        content: message.content,
+        attachments: [...message.attachments.values()].map((file) => ({
+          channelId: message.channelId,
+          messageId: message.id,
+          attachmentId: file.id,
+          name: file.name.slice(0, 120),
+          type: file.contentType || "application/octet-stream",
+          size: file.size,
+        })),
+      },
+      closing,
+    );
   }
   async function refreshPermissions() {
     const members = await staffMembers();
-    const parents = store.get("ticket-notes-settings", "parents") || {};
-    for (const [category, id] of Object.entries(parents)) {
-      const target = await (await guild()).channels.fetch(id);
-      if (target)
-        await target.permissionOverwrites.set(permissions(members, category));
-    }
     for (const [, state] of store.entries("ticket-notes-discord")) {
       const ticket = service.get(state.ticketId);
-      if (!state.threadId) continue;
-      let target;
-      try {
-        target = await (await guild()).channels.fetch(state.threadId);
-      } catch (error) {
-        if (error.code !== 10003) throw error;
-      }
-      if (target) {
-        owned(target, ticket, state);
-        await synchronize(target, ticket, members);
-      }
+      await ensure(ticket, { members });
     }
   }
   async function recover() {
     if (stopped || running || !client.isReady()) return running;
     running = (async () => {
       if (!store.entries("ticket-notes-discord").length) return;
-      const context = { members: await staffMembers(), parents: new Map() };
+      const context = { members: await staffMembers() };
       for (const [, state] of store.entries("ticket-notes-discord")) {
         let ticket;
         try {
           ticket = service.get(state.ticketId);
-          const target = await ensure(ticket, !state.threadId, context);
+          const target = await ensure(ticket, context);
           if (!target || target.pending) continue;
-          let after = state.after || target.id;
+          let after =
+            store.get("ticket-notes-discord", ticket.id)?.after || target.id;
           for (let page = 0; page < 5; page++) {
             const batch = await target.messages.fetch({ limit: 100, after });
             const sorted = [...batch.values()].sort((a, b) =>
@@ -540,20 +479,77 @@ export function ticketNotesDiscord(
     });
     return running;
   }
+  async function retire(
+    ticket,
+    state = store.get("ticket-notes-discord", ticket.id),
+  ) {
+    if (!state) return;
+    let target;
+    try {
+      const main = await guild(stateGuild(state));
+      if (state.threadId) target = await main.channels.fetch(state.threadId);
+      else {
+        const previous = await main.channels.fetch(state.parentId);
+        if (previous) target = await findThread(previous, ticket, state);
+      }
+    } catch (error) {
+      if (error.code !== 10003) throw error;
+    }
+    if (target?.pending) return target;
+    if (target) {
+      owned(target, ticket, state);
+      state.threadId = target.id;
+      save("ticket-notes-channel", target.id, { ticketId: ticket.id });
+      if (!target.locked) await target.setLocked(true);
+      if (!target.archived) await target.setArchived(true);
+      for (let page = 0; !state.historySaved && page < 5; page++) {
+        const messages = await target.messages.fetch({
+          limit: 100,
+          ...(state.captureBefore ? { before: state.captureBefore } : {}),
+        });
+        for (const message of messages.values()) await observe(message, true);
+        state.captureBefore =
+          messages.size === 100
+            ? [...messages.keys()].sort((a, b) =>
+                BigInt(a) < BigInt(b) ? -1 : 1,
+              )[0]
+            : null;
+        state.historySaved = !state.captureBefore;
+        save("ticket-notes-discord", ticket.id, state);
+      }
+      if (!state.historySaved || !(await retainMedia(ticket, target.id)))
+        return { pending: true };
+      try {
+        await target.delete("Internal notes preserved in the ticket dashboard");
+      } catch (error) {
+        if (error.code !== 10003) throw error;
+      }
+    }
+    if (state.threadId) store.delete("ticket-notes-channel", state.threadId);
+    store.delete("ticket-notes-discord", ticket.id);
+  }
+  async function deleteThread(ticket) {
+    await pendingThreads.get(ticket.id);
+    return retire(ticket);
+  }
   async function erase(ticket) {
     const state = store.get("ticket-notes-discord", ticket.id);
     if (!state) return;
     let target;
     if (state.threadId) {
       try {
-        target = await (await guild()).channels.fetch(state.threadId);
+        target = await (
+          await guild(stateGuild(state))
+        ).channels.fetch(state.threadId);
       } catch (error) {
         if (error.code !== 10003) throw error;
       }
     } else {
       let parent;
       try {
-        parent = await (await guild()).channels.fetch(state.parentId);
+        parent = await (
+          await guild(stateGuild(state))
+        ).channels.fetch(state.parentId);
       } catch (error) {
         if (error.code !== 10003) throw error;
       }
@@ -573,7 +569,6 @@ export function ticketNotesDiscord(
   };
   const onRaw = (event) => {
     if (
-      event.d?.guild_id !== config.guildId ||
       !["MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK"].includes(
         event.t,
       )
@@ -586,12 +581,16 @@ export function ticketNotesDiscord(
       return;
     }
     if (!ticket) return;
+    const state = store.get("ticket-notes-discord", ticket.id);
+    if (!state || event.d.guild_id !== stateGuild(state)) return;
     if (event.t !== "MESSAGE_UPDATE") {
       for (const id of event.d.ids || [event.d.id])
         service.ingest(ticket.id, { id, deleted: true, internal: true });
     } else
       void (async () => {
-        const target = await (await guild()).channels.fetch(event.d.channel_id);
+        const target = await (
+          await guild(stateGuild(state))
+        ).channels.fetch(event.d.channel_id);
         await observe(await target.messages.fetch(event.d.id));
       })().catch(() =>
         console.error("Internal ticket note edit recovery is pending."),
@@ -607,6 +606,7 @@ export function ticketNotesDiscord(
     send,
     recover,
     refreshPermissions,
+    deleteThread,
     erase,
     async close() {
       stopped = true;

@@ -74,9 +74,13 @@ function setupDiscord(t, notices = false) {
       ownerId:
         data.type === ChannelType.PrivateThread ? client.user.id : undefined,
       archived: false,
+      locked: false,
       invitable: data.invitable,
       async setArchived(value) {
         target.archived = value;
+      },
+      async setLocked(value) {
+        target.locked = value;
       },
       async setInvitable(value) {
         target.invitable = value;
@@ -94,6 +98,12 @@ function setupDiscord(t, notices = false) {
         target.parentId = parent;
       },
       async delete() {
+        for (const [threadId, thread] of channels)
+          if (
+            thread.parentId === id &&
+            thread.type === ChannelType.PrivateThread
+          )
+            channels.delete(threadId);
         channels.delete(id);
       },
       async fetchWebhooks() {
@@ -259,7 +269,9 @@ function setupDiscord(t, notices = false) {
       },
     },
     members: {
-      async fetch() {
+      async fetch(query) {
+        if (!query)
+          return new Collection([[user.id, { user }], ...staffMembers]);
         return { user };
       },
     },
@@ -365,8 +377,8 @@ function setupDiscord(t, notices = false) {
   };
 }
 
-test("ticket opening creates empty private staff threads for website, Discord and partnership intake", async (t) => {
-  const { service, transport, channels, user } = setupDiscord(t);
+test("ticket opening creates private threads directly under regular tickets and excludes partnerships", async (t) => {
+  const { service, transport, channels, user, config } = setupDiscord(t);
   await transport.recover();
   const input = {
     type: "general",
@@ -396,20 +408,31 @@ test("ticket opening creates empty private staff threads for website, Discord an
     "a".repeat(64),
   );
   await service.pump();
-  for (const ticket of [website, discord, partner]) {
+  for (const ticket of [website, discord]) {
     const state = service.store.get("ticket-notes-discord", ticket.id);
     const thread = channels.get(state.threadId);
     assert.equal(thread.type, ChannelType.PrivateThread);
+    assert.equal(thread.guildId, config.tickets.guildId);
+    assert.equal(thread.parentId, service.get(ticket.id).channelId);
     assert.equal(thread.invitable, false);
     assert.equal(thread.savedMessages.size, 0);
     assert.equal(service.messages(ticket.id).length, 0);
     assert.equal((await thread.members.fetch()).has(user.id), false);
-    assert.deepEqual(
-      [...(await thread.members.fetch()).keys()].sort(),
-      ticket.type === "partnership" ? ["200", "bot"] : ["200", "201", "bot"],
-    );
+    assert.deepEqual([...(await thread.members.fetch()).keys()].sort(), [
+      "200",
+      "201",
+      "bot",
+    ]);
   }
   assert.equal(service.get(partner.id).channelId, null);
+  assert.equal(
+    service.store.get("ticket-notes-discord", partner.id),
+    undefined,
+  );
+  assert.equal(
+    channels.some((value) => value.topic?.startsWith("Drakora staff-only")),
+    false,
+  );
   const before = channels.filter(
     (value) => value.type === ChannelType.PrivateThread,
   ).size;
@@ -446,7 +469,7 @@ test("ticket opening creates empty private staff threads for website, Discord an
 });
 
 test("failed opening thread creation retries without blocking player replies or duplicating threads", async (t) => {
-  const { service, transport, channels, user } = setupDiscord(t);
+  const { service, transport, channels, user, client } = setupDiscord(t);
   await transport.recover();
   const input = {
     requestId: randomUUID(),
@@ -455,12 +478,14 @@ test("failed opening thread creation retries without blocking player replies or 
     location: "Void",
     description: "Staff can discuss this ticket before the first panel note.",
   };
-  const first = service.create(user, input);
-  await service.pump();
-  const parent = channels.get(
-    service.store.get("ticket-notes-discord", first.id).parentId,
-  );
-  parent.failThreadCreation = true;
+  const main = await client.guilds.fetch("2");
+  const create = main.channels.create;
+  main.channels.create = async (options) => {
+    const target = await create(options);
+    if (options.topic?.startsWith("Drakora ticket "))
+      target.failThreadCreation = true;
+    return target;
+  };
   const ticket = service.create(user, { ...input, requestId: randomUUID() });
   service.reply(user, ticket.id, {
     requestId: randomUUID(),
@@ -504,7 +529,59 @@ test("failed opening thread creation retries without blocking player replies or 
   );
 });
 
-test("internal notes sync privately in both directions and survive customer channel deletion", async (t) => {
+test("internal notes wait for a delayed ticket channel instead of creating an orphan or marking Discord delivery complete", async (t) => {
+  const { service, transport, client, user, channels } = setupDiscord(t);
+  await transport.recover();
+  const main = await client.guilds.fetch("2");
+  const create = main.channels.create;
+  let unavailable = true;
+  main.channels.create = async (options) => {
+    if (options.topic?.startsWith("Drakora ticket ") && unavailable)
+      throw new Error("Ticket channel temporarily unavailable");
+    return create(options);
+  };
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description:
+      "A support ticket waiting for its Discord channel to become available.",
+  });
+  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  service.addNote(manager, ticket.id, {
+    requestId: randomUUID(),
+    content: "Prepare private handling guidance.",
+  });
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].delivery,
+    "pending",
+  );
+  assert.equal(
+    channels.some((value) => value.type === ChannelType.PrivateThread),
+    false,
+  );
+  unavailable = false;
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "create")
+      service.store.set(
+        "ticket-outbox",
+        key,
+        { ...job, after: 0 },
+        Number.MAX_SAFE_INTEGER,
+      );
+  await service.pump();
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].delivery,
+    "delivered",
+  );
+  const state = service.store.get("ticket-notes-discord", ticket.id);
+  assert.equal(state.parentId, service.get(ticket.id).channelId);
+});
+
+test("internal notes sync privately and remain in the dashboard after the ticket and its thread are deleted", async (t) => {
   const app = setupDiscord(t),
     { service, transport, channels, client, user, config } = app;
   await transport.recover();
@@ -529,7 +606,8 @@ test("internal notes sync privately in both directions and survive customer chan
     thread = channels.get(state.threadId),
     parent = channels.get(state.parentId);
   assert.equal(thread.type, ChannelType.PrivateThread);
-  assert.equal(thread.guildId, config.guildId);
+  assert.equal(thread.guildId, config.tickets.guildId);
+  assert.equal(parent.id, service.get(ticket.id).channelId);
   assert.equal(thread.invitable, false);
   assert.deepEqual([...(await thread.members.fetch()).keys()].sort(), [
     "200",
@@ -538,7 +616,7 @@ test("internal notes sync privately in both directions and survive customer chan
   ]);
   assert.equal(
     parent.overwrites
-      .find((entry) => entry.id === config.guildId)
+      .find((entry) => entry.id === config.tickets.guildId)
       .deny.includes(P.ViewChannel),
     true,
   );
@@ -548,6 +626,17 @@ test("internal notes sync privately in both directions and survive customer chan
       .deny.includes(P.ManageThreads),
     true,
   );
+  for (const bit of [
+    P.ManageThreads,
+    P.CreatePrivateThreads,
+    P.CreatePublicThreads,
+    P.SendMessagesInThreads,
+  ])
+    assert.ok(
+      parent.overwrites
+        .find((entry) => entry.id === user.id)
+        .deny.includes(bit),
+    );
   assert.equal(
     channels
       .get(service.get(ticket.id).channelId)
@@ -579,7 +668,7 @@ test("internal notes sync privately in both directions and survive customer chan
   const native = {
     id: "9900",
     channelId: thread.id,
-    guildId: config.guildId,
+    guildId: config.tickets.guildId,
     author: { ...user, id: "200" },
     content: "Native private discussion",
     createdTimestamp: Date.now(),
@@ -612,7 +701,8 @@ test("internal notes sync privately in both directions and survive customer chan
   );
   await service.pump();
   assert.equal(service.get(ticket.id).channelId, null);
-  assert.ok(channels.has(thread.id));
+  assert.equal(channels.has(thread.id), false);
+  assert.equal(service.notes(manager, ticket.id).discordUrl, null);
   service.addNote(manager, ticket.id, {
     requestId: randomUUID(),
     content: "Follow-up after channel deletion.",
@@ -621,9 +711,12 @@ test("internal notes sync privately in both directions and survive customer chan
   await service.pump();
   assert.equal(
     service.notes(manager, ticket.id).messages.at(-1).delivery,
-    "delivered",
+    "stored",
   );
   assert.equal(service.view(user, ticket.id).messages.length, 0);
+  await transport.recover();
+  assert.equal(service.store.get("ticket-notes-discord", ticket.id), undefined);
+  assert.equal(channels.has(thread.id), false);
   const before = service.notes(manager, ticket.id).messages.length;
   const unauthorized = {
     ...native,
@@ -638,6 +731,191 @@ test("internal notes sync privately in both directions and survive customer chan
   await service.eraseInactive(ticket.id, Date.now());
   assert.equal(channels.has(thread.id), false);
   assert.equal(service.store.entries("ticket-notes-discord").length, 0);
+});
+
+test("legacy staff-server threads migrate to the ticket with saved private history and attachments", async (t) => {
+  const { service, transport, channels, user, config, createChannel } =
+    setupDiscord(t);
+  await transport.recover();
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description:
+      "A ticket whose old staff discussion needs to move with its history.",
+  });
+  await service.pump();
+  const original = service.store.get("ticket-notes-discord", ticket.id);
+  channels.delete(original.threadId);
+  service.store.delete("ticket-notes-channel", original.threadId);
+  const legacyParent = createChannel({
+    type: ChannelType.GuildText,
+    guildId: config.guildId,
+    topic: "Drakora staff-only support ticket notes.",
+  });
+  const legacy = await legacyParent.threads.create({
+    name: `ticket-${ticket.id}-internal-notes`,
+    type: ChannelType.PrivateThread,
+    invitable: false,
+  });
+  service.store.set(
+    "ticket-notes-discord",
+    ticket.id,
+    {
+      ticketId: ticket.id,
+      parentId: legacyParent.id,
+      threadId: legacy.id,
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  service.store.set(
+    "ticket-notes-channel",
+    legacy.id,
+    { ticketId: ticket.id },
+    Number.MAX_SAFE_INTEGER,
+  );
+  legacy.savedMessages.set("9900", {
+    id: "9900",
+    channelId: legacy.id,
+    guildId: config.guildId,
+    author: { ...user, id: "200" },
+    content: "Legacy private discussion",
+    createdTimestamp: Date.now(),
+    attachments: new Collection([
+      [
+        "proof",
+        {
+          id: "proof",
+          name: "proof.png",
+          size: 5,
+          contentType: "image/png",
+          url: `https://cdn.discordapp.com/attachments/${legacy.id}/proof/proof.png`,
+        },
+      ],
+    ]),
+  });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(Buffer.from("proof")),
+  );
+  await transport.recover();
+  const state = service.store.get("ticket-notes-discord", ticket.id);
+  assert.equal(state.guildId, config.tickets.guildId);
+  assert.equal(state.parentId, service.get(ticket.id).channelId);
+  assert.notEqual(state.threadId, legacy.id);
+  assert.equal(channels.has(legacy.id), false);
+  assert.equal(service.store.get("ticket-notes-channel", legacy.id), undefined);
+  const notes = service.notes({ id: "200", roles: ["10", "28"] }, ticket.id);
+  assert.equal(notes.messages[0].content, "Legacy private discussion");
+  assert.equal(notes.messages[0].attachments.length, 1);
+  const file = service.store.entries("ticket-media")[0][1];
+  assert.equal(file.internal, true);
+  assert.notEqual(file.channelId, legacy.id);
+  assert.equal(file.sourceChannelId, legacy.id);
+  assert.equal(service.view(user, ticket.id).messages.length, 0);
+  assert.match(
+    notes.discordUrl,
+    new RegExp(`/channels/${config.tickets.guildId}/${state.threadId}$`),
+  );
+  await transport.recover();
+  assert.equal(channels.filter((value) => value.name === legacy.name).size, 1);
+});
+
+test("ticket deletion saves final thread notes and waits for proof before removing either channel", async (t) => {
+  const { service, transport, channels, user, config } = setupDiscord(t);
+  await transport.recover();
+  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description:
+      "A ticket with final native staff notes that must be saved before deletion.",
+  });
+  await service.pump();
+  const current = service.get(ticket.id);
+  const thread = channels.get(
+    service.store.get("ticket-notes-discord", ticket.id).threadId,
+  );
+  thread.savedMessages.set("9900", {
+    id: "9900",
+    channelId: thread.id,
+    guildId: config.tickets.guildId,
+    author: { ...user, id: "200" },
+    content: "Final handling note",
+    createdTimestamp: Date.now(),
+    attachments: new Collection([
+      [
+        "proof",
+        {
+          id: "proof",
+          name: "proof.png",
+          size: 5,
+          contentType: "image/png",
+          url: `https://cdn.discordapp.com/attachments/${thread.id}/proof/proof.png`,
+        },
+      ],
+    ]),
+  });
+  let proofUnavailable = true;
+  t.mock.method(globalThis, "fetch", async () => {
+    if (proofUnavailable) throw new Error("Attachment temporarily unavailable");
+    return new Response(Buffer.from("proof"));
+  });
+  service.closeTicket(
+    manager,
+    ticket.id,
+    { summary: "Done", commands: "None" },
+    true,
+  );
+  await service.pump();
+  assert.equal(channels.has(thread.id), true);
+  await service.deleteChannel(
+    manager,
+    ticket.id,
+    service.get(ticket.id).closureId,
+  );
+  await service.pump();
+  assert.equal(channels.has(thread.id), true);
+  assert.equal(channels.has(current.channelId), true);
+  assert.equal(thread.locked, true);
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].content,
+    "Final handling note",
+  );
+  proofUnavailable = false;
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "delete")
+      service.store.set(
+        "ticket-outbox",
+        key,
+        { ...job, after: 0 },
+        Number.MAX_SAFE_INTEGER,
+      );
+  await service.pump();
+  assert.equal(channels.has(thread.id), false);
+  assert.equal(channels.has(current.channelId), false);
+  assert.equal(service.notes(manager, ticket.id).discordUrl, null);
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].attachments.length,
+    1,
+  );
+  assert.equal(service.view(user, ticket.id).messages.length, 0);
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  const reopened = service.get(ticket.id);
+  const next = service.store.get("ticket-notes-discord", ticket.id);
+  assert.ok(reopened.channelId);
+  assert.notEqual(reopened.channelId, current.channelId);
+  assert.equal(next.parentId, reopened.channelId);
+  assert.notEqual(next.threadId, thread.id);
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].content,
+    "Final handling note",
+  );
 });
 
 test("notes threads enforce category access and revoke old thread membership", async (t) => {
