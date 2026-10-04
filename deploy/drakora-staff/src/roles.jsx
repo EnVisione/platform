@@ -19,6 +19,8 @@ const messages = {
   discord_member_required:
     "This account could not be found in either Drakora server.",
   role_permission_dependency: "Enable the required permissions before saving.",
+  ticket_category_protected:
+    "Billing is limited to Founders. Partnerships, staff reports and the partners inbox are limited to Managers and Founders.",
 };
 async function request(path, options = {}) {
   const response = await fetch(`/api/roles${path}`, options);

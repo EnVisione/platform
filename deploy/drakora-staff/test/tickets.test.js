@@ -207,12 +207,12 @@ test("player reports require a target and have an independent authorized reports
     input({ type: "staff", reportTarget: "ReportedStaff" }),
   );
   service.create(owner, input());
-  assert.equal(service.list(helper).total, 1);
+  assert.equal(service.list(helper).total, 2);
   assert.equal(
     service
       .list(helper)
       .categories.some((category) => category.id === "reports"),
-    false,
+    true,
   );
   assert.deepEqual(
     service
@@ -1003,7 +1003,14 @@ test("category permissions guard lists, attention, messages, files and transcrip
     type: "text/plain",
     size: 3,
   });
-  for (const user of [helper, manager]) {
+  for (const user of [
+    helper,
+    manager,
+    ...["21", "29", "22", "30", "25", "unknown"].map((rank) => ({
+      id: `staff-${rank}`,
+      roles: ["10", rank],
+    })),
+  ]) {
     assert.equal(service.list(user).items.length, 0);
     assert.equal(service.attention(user).count, 0);
     for (const action of [
@@ -1033,12 +1040,11 @@ test("category permissions guard lists, attention, messages, files and transcrip
     roles.find((role) => role.id === "23").permissions[
       `tickets.category.billing.${key}`
     ] = true;
-  policy.save(founder, { revision: model.revision, roles });
-  assert.equal(service.list(helper, { category: "billing" }).items.length, 1);
-  assert.equal(
-    service.reply(helper, ticket.id, message("Billing reply"), true).content,
-    "Billing reply",
+  fails(
+    () => policy.save(founder, { revision: model.revision, roles }),
+    "ticket_category_protected",
   );
+  assert.equal(service.list(helper, { category: "billing" }).items.length, 0);
   const updated = policy.read(founder);
   const revocation = updated.roles
     .filter((role) => role.id)
@@ -1046,12 +1052,13 @@ test("category permissions guard lists, attention, messages, files and transcrip
       id: role.id,
       permissions: { ...role.permissions },
     }));
-  for (const key of ["view", "reply", "claim", "close"])
-    revocation.find((role) => role.id === "23").permissions[
+  for (const key of ["view", "reply", "claim", "takeover", "close", "delete"])
+    revocation.find((role) => role.id === "20").permissions[
       `tickets.category.billing.${key}`
     ] = false;
   policy.save(founder, { revision: updated.revision, roles: revocation });
   fails(() => service.view(helper, ticket.id, true), "ticket_access_denied");
+  fails(() => service.view(founder, ticket.id, true), "ticket_access_denied");
 });
 
 test("reopening preserves private resolutions and ratings and reapplies quotas and category permissions", async (t) => {

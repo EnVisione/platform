@@ -591,7 +591,9 @@ test("Discord reports have dedicated forms, persist the reported person and isol
   assert.equal(report.reportTarget, "ReportedPlayer");
   const target = channels.get(report.channelId);
   assert.ok(target.overwrites.some((entry) => entry.id === "200"));
-  assert.ok(!target.overwrites.some((entry) => entry.id === "201"));
+  const helperAccess = target.overwrites.find((entry) => entry.id === "201");
+  assert.ok(helperAccess.allow.includes(P.ViewChannel));
+  assert.ok(helperAccess.deny.includes(P.SendMessages));
   const header = [...target.savedMessages.values()].find(
     (message) => message.data.embeds?.[0]?.title,
   )?.data.embeds[0];
@@ -611,7 +613,7 @@ test("Discord reports have dedicated forms, persist the reported person and isol
     (channel) => channel.name === "reports-tickets",
   );
   assert.ok(notices.overwrites.some((entry) => entry.id === "200"));
-  assert.ok(!notices.overwrites.some((entry) => entry.id === "201"));
+  assert.ok(notices.overwrites.some((entry) => entry.id === "201"));
   assert.ok(
     ![...notices.savedMessages.values()].some((message) =>
       JSON.stringify(message.data).includes("ReportedPlayer"),
@@ -619,8 +621,65 @@ test("Discord reports have dedicated forms, persist the reported person and isol
   );
 });
 
+test("managed Discord tickets and attachment archives enforce staff rank boundaries", async (t) => {
+  const { service, transport, channels, user, staffMembers } = setupDiscord(t);
+  for (const [id, rank] of [
+    ["202", "20"],
+    ["203", "21"],
+    ["204", "25"],
+    ["205", "unknown"],
+  ])
+    staffMembers.set(id, {
+      id,
+      user: { ...user, id },
+      roles: { cache: new Collection(["10", rank].map((role) => [role, {}])) },
+    });
+  await transport.recover();
+  for (const [type, visible] of [
+    ["player", ["200", "201", "202", "203", "204", "205"]],
+    ["staff", ["200", "202"]],
+    ["billing", ["202"]],
+  ]) {
+    const ticket = service.create(user, {
+      requestId: randomUUID(),
+      ign: "Reporter",
+      type,
+      reportTarget: "Reported person",
+      location: "Discord",
+      description:
+        "A private request used to verify category-specific Discord access.",
+    });
+    await transport.create(ticket);
+    const channel = channels.get(service.get(ticket.id).channelId);
+    assert.deepEqual(
+      channel.overwrites
+        .filter((entry) => staffMembers.has(entry.id))
+        .map((entry) => entry.id)
+        .sort(),
+      visible.sort(),
+      type,
+    );
+    if (type === "staff") {
+      const archived = await transport.upload(
+        Buffer.from("proof"),
+        "proof.txt",
+        "text/plain",
+        { ...ticket, type: "partnership" },
+      );
+      const storage = channels.get(archived.channelId);
+      assert.deepEqual(
+        storage.overwrites
+          .filter((entry) => staffMembers.has(entry.id))
+          .map((entry) => entry.id)
+          .sort(),
+        ["200", "202"],
+      );
+    }
+  }
+});
+
 test("historical report files in shared support storage require both category grants", async (t) => {
-  const { service, transport, channels, user } = setupDiscord(t);
+  const { service, transport, channels, user, policy } = setupDiscord(t);
   await transport.recover();
   const report = service.create(user, {
     requestId: randomUUID(),
@@ -648,6 +707,17 @@ test("historical report files in shared support storage require both category gr
   );
   await transport.refreshPermissions();
   const storage = channels.get(archived.channelId);
+  assert.ok(storage.overwrites.some((entry) => entry.id === "201"));
+  const founder = { id: "founder", roles: ["10", "20"] };
+  const model = policy.read(founder);
+  const roles = model.roles
+    .filter((role) => role.id)
+    .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
+  roles.find((role) => role.id === "23").permissions[
+    "tickets.category.reports.view"
+  ] = false;
+  policy.save(founder, { revision: model.revision, roles });
+  await transport.refreshPermissions();
   assert.ok(storage.overwrites.some((entry) => entry.id === "200"));
   assert.ok(!storage.overwrites.some((entry) => entry.id === "201"));
 });

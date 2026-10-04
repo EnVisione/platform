@@ -230,8 +230,10 @@ export function staffPermissionCatalog(identities = []) {
           label: `${{ view: "View", reply: "Reply to", claim: "Claim", takeover: "Take over", close: "Resolve", delete: "Delete channels for" }[action]} ${name.toLowerCase()} tickets`,
           description:
             category === "billing"
-              ? "Billing access defaults to Founders. Only a Founder can change these grants."
-              : "Applies to the queue, messages, files, history and transcripts in this category.",
+              ? "Billing access is limited to Founders. Only a Founder can change these grants."
+              : ["partnership", "staff"].includes(category)
+                ? "Access is limited to Managers and Founders, including messages, files, history and transcripts."
+                : "All dashboard staff have view access by default. Replying, claiming and resolving use separate permissions.",
           requires: [
             "dashboard.view",
             "tickets.view",

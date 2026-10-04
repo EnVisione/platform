@@ -92,6 +92,138 @@ function change(input, rank, key, value) {
   input.roles.find((role) => role.id === rank).permissions[key] = value;
 }
 
+test("legacy ticket visibility migrates once without broadening actions or resetting later revocations", (t) => {
+  const { store } = setup(t);
+  store.set(
+    "role-permissions",
+    "current",
+    {
+      revision: 7,
+      overrides: {
+        51: {
+          "tickets.view": false,
+          "logs.view": false,
+          "tickets.category.support.view": false,
+          "tickets.category.reports.view": false,
+          "tickets.reply": false,
+          "mail.view": true,
+        },
+      },
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const migrated = rolePermissions(settings, store);
+  const caps = migrated.apply(actor("51")).capabilities;
+  for (const key of [
+    "tickets.view",
+    "logs.view",
+    "tickets.category.support.view",
+    "tickets.category.reports.view",
+  ])
+    assert.equal(caps[key], true);
+  assert.equal(caps["tickets.reply"], false);
+  assert.equal(caps["tickets.claim"], false);
+  assert.equal(caps["mail.view"], true);
+  assert.equal(migrated.read(actor("20")).revision, 8);
+  assert.equal(migrated.history(actor("20")).items[0].actor.id, "system");
+  const edit = input(migrated);
+  change(edit, "51", "tickets.category.reports.view", false);
+  migrated.save(actor("20"), edit);
+  const restarted = rolePermissions(settings, store);
+  assert.equal(restarted.read(actor("20")).revision, 9);
+  assert.equal(
+    restarted.apply(actor("51")).capabilities["tickets.category.reports.view"],
+    false,
+  );
+  assert.equal(restarted.history(actor("20")).items.length, 2);
+});
+
+test("restricted categories reject lower-rank grants and mask stale saved grants across combined roles", (t) => {
+  const { store } = setup(t);
+  const config = {
+    ...settings,
+    mail: { identities: [{ address: "partners@drakora.org" }] },
+  };
+  const policy = rolePermissions(config, store);
+  const restricted = [
+    ["28", "tickets.category.billing.view"],
+    ["21", "tickets.category.partnership.view"],
+    ["23", "tickets.category.staff.view"],
+    ["21", "mail.inbox.partners@drakora.org.view"],
+  ];
+  for (const [rank, key] of restricted) {
+    const edit = input(policy);
+    change(edit, rank, key, true);
+    assert.throws(() => policy.save(actor("20"), edit), {
+      code: "ticket_category_protected",
+    });
+    assert.ok(
+      policy
+        .read(actor("20"))
+        .roles.find((role) => role.id === rank)
+        .locked.includes(key),
+    );
+  }
+  store.set(
+    "role-permissions",
+    "current",
+    {
+      revision: 4,
+      overrides: Object.fromEntries(
+        ["28", "21", "23", "51", "25", "52"].map((rank) => [
+          rank,
+          {
+            "tickets.category.billing.view": true,
+            "tickets.category.billing.reply": true,
+            "tickets.category.partnership.view": true,
+            "tickets.category.staff.view": true,
+            "mail.view": true,
+            "mail.inbox.partners@drakora.org.view": true,
+          },
+        ]),
+      ),
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const restarted = rolePermissions(config, store);
+  for (const rank of ["28", "21", "23", "51", "25", "52"]) {
+    const caps = restarted.apply(actor(rank)).capabilities;
+    assert.equal(caps["tickets.category.billing.view"], false);
+    assert.equal(caps["tickets.category.billing.reply"], false);
+    for (const key of [
+      "tickets.category.partnership.view",
+      "tickets.category.staff.view",
+      "mail.inbox.partners@drakora.org.view",
+    ])
+      assert.equal(caps[key], rank === "28");
+  }
+  const combined = restarted.apply(
+    actor("21", ["10", "23", "51", "25", "52"]),
+  ).capabilities;
+  assert.equal(combined["tickets.category.billing.view"], false);
+  assert.equal(combined["tickets.category.staff.view"], false);
+  assert.equal(
+    restarted.apply(actor("21", ["10", "28"])).capabilities[
+      "tickets.category.partnership.view"
+    ],
+    true,
+  );
+  assert.equal(
+    restarted.apply(actor("21", ["10", "20"])).capabilities[
+      "tickets.category.billing.view"
+    ],
+    true,
+  );
+  const fallback = restarted.apply(actor("unknown", ["10"])).capabilities;
+  assert.equal(fallback["tickets.category.support.view"], true);
+  assert.equal(fallback["tickets.category.reports.view"], true);
+  assert.equal(fallback["tickets.category.billing.view"], false);
+  assert.equal(
+    restarted.apply(actor("21", [])).capabilities["tickets.view"],
+    false,
+  );
+});
+
 test("defaults admit dashboard staff to the workspace and preserve role boundaries", (t) => {
   const { policy } = setup(t);
   assert.deepEqual(
@@ -132,6 +264,13 @@ test("defaults admit dashboard staff to the workspace and preserve role boundari
       ["20", "28", "21", "29", "22", "30"].includes(rank),
     );
     assert.equal(caps["applications.approve"], ["20", "28"].includes(rank));
+    for (const key of [
+      "tickets.view",
+      "logs.view",
+      "tickets.category.support.view",
+      "tickets.category.reports.view",
+    ])
+      assert.equal(caps[key], true, `${rank} ${key}`);
     assert.equal(
       caps["applications.comment"],
       ["20", "28", "21", "29", "22", "30"].includes(rank),
@@ -315,7 +454,7 @@ test("category and inbox defaults preserve billing and partnership privacy acros
     assert.equal(user.capabilities["tickets.category.support.view"], true);
   for (const user of [founder, manager, admin, policy.apply(actor("29"))])
     assert.equal(user.capabilities["tickets.category.reports.view"], true);
-  assert.equal(helper.capabilities["tickets.category.reports.view"], false);
+  assert.equal(helper.capabilities["tickets.category.reports.view"], true);
   assert.equal(admin.capabilities["tickets.category.staff.view"], false);
   assert.equal(founder.capabilities["tickets.category.billing.view"], true);
   for (const user of [manager, admin, helper])
@@ -338,10 +477,12 @@ test("category and inbox defaults preserve billing and partnership privacy acros
   assert.throws(() => policy.save(actor("28"), edit), {
     code: "founder_role_required",
   });
-  policy.save(actor("20"), edit);
+  assert.throws(() => policy.save(actor("20"), edit), {
+    code: "ticket_category_protected",
+  });
   assert.equal(
     policy.apply(actor("28")).capabilities["tickets.category.billing.view"],
-    true,
+    false,
   );
   const revoke = input(policy);
   change(revoke, "28", "mail.inbox.partners@drakora.org.send", false);

@@ -42,6 +42,7 @@ export function rolePermissions(config, store) {
   let state = store.get("role-permissions", "current") ?? {
     revision: 0,
     overrides: {},
+    ticketVisibilityVersion: 1,
   };
   const defaults = (role) =>
     Object.fromEntries(
@@ -76,6 +77,7 @@ export function rolePermissions(config, store) {
           enabled = admins.includes(role.name);
         if (key.startsWith("tickets.") || key === "logs.view")
           enabled = [...reviewers, "Helper"].includes(role.name);
+        if (key === "tickets.view" || key === "logs.view") enabled = true;
         if (key.startsWith("tickets.category.")) {
           const category = key.split(".")[2];
           enabled =
@@ -86,6 +88,11 @@ export function rolePermissions(config, store) {
                 : category === "reports"
                   ? reviewers.includes(role.name)
                   : managers.includes(role.name);
+          if (
+            ["support", "reports"].includes(category) &&
+            key.endsWith(".view")
+          )
+            enabled = true;
         }
         if (key.startsWith("mail.inbox.partners@drakora.org."))
           enabled = managers.includes(role.name);
@@ -94,6 +101,33 @@ export function rolePermissions(config, store) {
         return [key, enabled];
       }),
     );
+  if (!state.ticketVisibilityVersion) {
+    const overrides = { ...state.overrides };
+    for (const role of roles.filter((role) => role.id && overrides[role.id]))
+      overrides[role.id] = {
+        ...overrides[role.id],
+        "tickets.view": true,
+        "logs.view": true,
+        "tickets.category.support.view": true,
+        "tickets.category.reports.view": true,
+      };
+    const next = {
+      ...state,
+      overrides,
+      ticketVisibilityVersion: 1,
+      revision: state.revision + 1,
+      updatedAt: Date.now(),
+      updatedBy: { id: "system", name: "System" },
+    };
+    store.transaction(() => {
+      store.set("role-permissions", "current", next, Number.MAX_SAFE_INTEGER);
+      audit(next.updatedBy, "permissions", {
+        revision: next.revision,
+        reason: "Support and report visibility updated for all staff",
+      });
+    });
+    state = next;
+  }
   const deletion = (key) =>
     key === "tickets.delete" ||
     (key.startsWith("tickets.category.") && key.endsWith(".delete"));
@@ -101,12 +135,20 @@ export function rolePermissions(config, store) {
     key === "tickets.takeover" ||
     (key.startsWith("tickets.category.") && key.endsWith(".takeover"));
   const adminOnly = (key) => deletion(key) || takeover(key);
+  const restricted = (key, role) =>
+    (key.startsWith("tickets.category.billing.") && role.name !== "Founder") ||
+    ((key.startsWith("tickets.category.partnership.") ||
+      key.startsWith("tickets.category.staff.") ||
+      key.startsWith("mail.inbox.partners@drakora.org.")) &&
+      !managers.includes(role.name));
   const values = (role) =>
     Object.fromEntries(
       Object.entries({ ...defaults(role), ...state.overrides[role.id] }).map(
         ([key, value]) => [
           key,
-          value && (!adminOnly(key) || admins.includes(role.name)),
+          value &&
+            !restricted(key, role) &&
+            (!adminOnly(key) || admins.includes(role.name)),
         ],
       ),
     );
@@ -174,6 +216,7 @@ export function rolePermissions(config, store) {
           role.id && (role.name !== "Founder" || isFounder(current)),
         ),
         locked: [
+          ...keys.filter((key) => restricted(key, role)),
           ...(!admins.includes(role.name) ? keys.filter(adminOnly) : []),
           ...(!isFounder(current)
             ? keys.filter((key) => key.startsWith("tickets.category.billing."))
@@ -260,10 +303,13 @@ export function rolePermissions(config, store) {
         )
       )
         throw new AuthError("founder_role_required");
+      if (keys.some((key) => entry.permissions[key] && restricted(key, role)))
+        throw new AuthError("ticket_category_protected", 400);
       overrides[role.id] = { ...entry.permissions };
     }
     const next = {
       revision: state.revision + 1,
+      ticketVisibilityVersion: 1,
       overrides,
       updatedAt: Date.now(),
       updatedBy: { id: user.id, name: user.name },
