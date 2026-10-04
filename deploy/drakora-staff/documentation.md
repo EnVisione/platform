@@ -244,6 +244,8 @@ The composer allowlists From addresses, validates up to twenty recipients across
 
 Interactive sending is limited to thirty requests per hour per Discord account. Each draft carries a stable random send ID. The encrypted staff database retains a payload hash, Message-ID and send result for thirty days, without a body or attachment copy. Concurrent duplicates are rejected; an accepted duplicate returns its original receipt. A changed payload with the same ID is rejected. An uncertain SMTP result is not retried automatically, including after restart. Staff must inspect Sent before starting a new draft. Partial recipient acceptance is shown explicitly. SMTP acceptance is not proof of inbox delivery. Draft content stays in React memory and is cleared on discard, successful sending or page reload. Navigation and discard warnings protect unsent drafts.
 
+Discord received-mail alerts poll the shared Inbox and exclude messages sent from any configured Drakora identity, including sent copies present in that folder. Skipped outgoing messages still advance the polling cursor so later incoming replies are processed. This does not change mailbox browsing or the Sent folder. Alerts contain no sender, subject or body, and access follows the relevant inbox permissions.
+
 Unit and HTTP tests cover rank access, host and CSRF boundaries, scoped pagination, UIDVALIDITY changes, sanitizer behavior, MIME attachments, flag restrictions, header and sender validation, reply threading and duplicate or uncertain sends. Mail fixtures use in-memory databases and synthetic messages; the test suite sends no live email.
 
 ## Dashboard role management

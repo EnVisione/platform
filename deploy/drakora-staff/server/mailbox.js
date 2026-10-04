@@ -461,7 +461,9 @@ export function mailboxService(config, store, dependencies = {}) {
           return {
             validity,
             through: matches.length > uids.length ? uids.at(-1) : end,
-            items: records.map(summary),
+            items: records
+              .filter((record) => !matchesIdentity(record.envelope?.from))
+              .map(summary),
           };
         }),
       );

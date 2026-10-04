@@ -43,7 +43,7 @@ const input = () => ({
 });
 const key = { folder: "INBOX", uid: 4, validity: "51" };
 
-function harness(t, overrides = {}) {
+function harness(t, overrides = {}, config = settings) {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   const state = {
     clients: [],
@@ -205,7 +205,7 @@ function harness(t, overrides = {}) {
     },
     close() {},
   };
-  const service = mailboxService(settings, store, {
+  const service = mailboxService(config, store, {
     createClient: (options) => new Client(options),
     transport,
   });
@@ -320,6 +320,44 @@ test("new mail scans bounded UID ranges and fetches only shared headers without 
     items: [],
   });
   assert.equal(state.searches.at(-1).uid, "1001:1500");
+});
+
+test("incoming alerts skip shared sent copies and advance to genuine replies", async (t) => {
+  const config = {
+    ...settings,
+    mail: {
+      ...settings.mail,
+      identities: [
+        ...settings.mail.identities,
+        { address: "partners@drakora.org", name: "Drakora Partnerships" },
+      ],
+    },
+  };
+  const { service, state } = harness(t, {}, config);
+  for (const record of state.records.slice(0, 10)) {
+    record.envelope.from =
+      record.uid === 2
+        ? [{ group: [{ address: "support@drakora.org" }] }]
+        : [{ address: "PARTNERS@DRAKORA.ORG" }];
+    record.envelope.to = [{ address: "player@example.invalid" }];
+  }
+  state.records[2].envelope.to = [{ address: "support@drakora.org" }];
+  state.records[10].envelope.to = [{ address: "partners@drakora.org" }];
+  const skipped = await service.incoming({ validity: "51", uid: 0 });
+  assert.deepEqual(skipped, { validity: "51", through: 10, items: [] });
+  const next = await service.incoming({
+    validity: skipped.validity,
+    uid: skipped.through,
+  });
+  assert.equal(next.through, 20);
+  assert.deepEqual(
+    next.items.map((item) => item.uid),
+    [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+  );
+  assert.equal(next.items[0].to[0].address, "partners@drakora.org");
+  assert.deepEqual(state.flags, []);
+  assert.equal(state.downloads?.length ?? 0, 0);
+  assert.ok(state.clients.every((client) => client.readOnly));
 });
 
 test("mail permission requires Dashboard and Admin, Manager or Founder", () => {
