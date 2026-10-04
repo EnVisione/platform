@@ -903,7 +903,7 @@ export function ticketService(
       return file.id;
     };
     if (ref) {
-      if (ref.ticketId !== id) return;
+      if (ref.ticketId !== id || (incoming.deleted && ref.mediaRemoved)) return;
       const message = store.get(`ticket-messages:${id}`, ref.key);
       if (
         !incoming.deleted &&

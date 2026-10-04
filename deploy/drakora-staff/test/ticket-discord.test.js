@@ -1038,8 +1038,8 @@ test("a lost channel deletion response resumes from the saved transcript checkpo
   assert.equal(dms.length, 1);
 });
 
-test("attachment copy failure keeps the original channel and resumes without extending retention", async (t) => {
-  const { service, transport, channels, user } = setupDiscord(t);
+test("attachment copies resume without extending retention and expiry removes the retained original without losing text", async (t) => {
+  const { service, transport, channels, user, client } = setupDiscord(t);
   const ticket = service.create(
     { id: user.id, name: "Player" },
     {
@@ -1103,6 +1103,42 @@ test("attachment copy failure keeps the original channel and resumes without ext
   assert.equal(channels.has(target.id), true);
   assert.equal(service.store.get("ticket-media", id).expiresAt, file.expiresAt);
   assert.equal(service.messages(ticket.id).length, 1);
+  const copied = service.store.get("ticket-media", id);
+  assert.equal(copied.sourceMessageId, "2000");
+  const remove = target.messages.delete;
+  target.messages.delete = async (messageId) => {
+    await remove(messageId);
+    client.emit("raw", {
+      t: "MESSAGE_DELETE",
+      d: { channel_id: target.id, id: messageId },
+    });
+  };
+  service.store.set(
+    "ticket-media",
+    id,
+    { ...copied, expiresAt: Date.now() - 1 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await service.expire();
+  assert.equal(target.savedMessages.has("2000"), false);
+  assert.equal(
+    channels.get(copied.channelId).savedMessages.has(copied.messageId),
+    false,
+  );
+  assert.equal(service.store.get("ticket-media", id).purged, true);
+  assert.equal(
+    service.messages(ticket.id)[0].content,
+    "Here is the screenshot.",
+  );
+  assert.equal(service.messages(ticket.id)[0].deleted, false);
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  await transport.recover();
+  assert.equal(
+    service.messages(ticket.id)[0].content,
+    "Here is the screenshot.",
+  );
+  assert.equal(service.messages(ticket.id)[0].deleted, false);
 });
 
 function click(client, user, customId, values = [], guildId = "2") {

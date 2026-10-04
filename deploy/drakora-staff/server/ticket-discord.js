@@ -923,8 +923,20 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       for (const [channelId, messageId] of [
         [file.channelId, file.messageId],
         [file.mirrorChannelId, file.mirrorMessageId],
+        [file.sourceChannelId, file.sourceMessageId],
       ]) {
         if (!channelId || !messageId) continue;
+        const reference = service.store.get(
+          "ticket-discord-message",
+          messageId,
+        );
+        if (reference && reference.ticketId === file.ticketId)
+          service.store.set(
+            "ticket-discord-message",
+            messageId,
+            { ...reference, mediaRemoved: true },
+            Number.MAX_SAFE_INTEGER,
+          );
         try {
           await (await channel(channelId)).messages.delete(messageId);
         } catch (error) {
@@ -1063,6 +1075,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             ...stored,
             sourceChannelId: current.channelId,
             sourceAttachmentId: current.attachmentId,
+            sourceMessageId: current.messageId,
             mirrorChannelId: null,
             mirrorMessageId: null,
           },
