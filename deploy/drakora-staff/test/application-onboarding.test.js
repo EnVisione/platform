@@ -21,7 +21,13 @@ const config = {
     notificationChannelId: "50",
     specialistRoles: { builder: "51", developer: "25", artist: "52" },
   },
-  roleSync: { guildId: "2" },
+  roleSync: {
+    guildId: "2",
+    roles: [
+      { staffId: "22", mainId: "122" },
+      { staffId: "23", mainId: "123" },
+    ],
+  },
 };
 const record = {
   id,
@@ -31,7 +37,16 @@ const record = {
   discord: { id: "123" },
   decision: { author: { id: "20", name: "Founder" }, reason: "Welcome" },
 };
-function setup(t) {
+function setup(
+  t,
+  grantResult = {
+    request: { status: "applied" },
+    discord: {
+      "Staff server": { status: "synced" },
+      "Main server": { status: "synced" },
+    },
+  },
+) {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   store.set("application", id, record, Number.MAX_SAFE_INTEGER);
   const client = new EventEmitter();
@@ -72,10 +87,7 @@ function setup(t) {
     list: async () => ({ members: [{ id: "123", version: "a".repeat(64) }] }),
     async grant(user, target, version, roleId) {
       grants.push({ user, target, version, roleId });
-      return {
-        request: { status: "applied" },
-        discord: { staff: { status: "synced" }, main: { status: "synced" } },
-      };
+      return grantResult;
     },
   };
   const service = applicationOnboarding(
@@ -175,7 +187,10 @@ test("role selection is private, bound to its reviewer and uses synchronized rol
     actorId: "28",
     values: ["22"],
   });
-  assert.match(granted.content, /Moderator: Role saved and synced/);
+  assert.equal(
+    granted.content,
+    "Moderator: Applied in the main Discord server. Applied in the staff Discord server.",
+  );
   assert.equal(app.grants[0].target, "123");
   assert.equal(app.grants[0].roleId, "22");
   assert.equal(app.grants[0].version, "a".repeat(64));
@@ -185,6 +200,59 @@ test("role selection is private, bound to its reviewer and uses synchronized rol
     /expired/,
   );
   assert.equal(app.grants.length, 1);
+});
+
+test("role confirmations distinguish each server's delivery and staff-only access", async (t) => {
+  for (const scenario of [
+    {
+      role: "23",
+      request: "waiting_member",
+      main: "synced",
+      staff: "waiting_member",
+      expected:
+        "Helper: Applied in the main Discord server. Queued for the staff server; it will apply when the applicant joins.",
+    },
+    {
+      role: "23",
+      request: "waiting_member",
+      main: "retry",
+      staff: "waiting_member",
+      expected:
+        "Helper: Main server synchronization is pending. Check Roles for its delivery status. Queued for the staff server; it will apply when the applicant joins.",
+    },
+    {
+      role: "23",
+      request: "waiting_screening",
+      main: "synced",
+      staff: "waiting_screening",
+      expected:
+        "Helper: Applied in the main Discord server. Queued for the staff server until the applicant completes membership screening.",
+    },
+    {
+      role: config.accessRoles.dashboard,
+      request: "waiting_member",
+      main: "synced",
+      staff: "waiting_member",
+      expected:
+        "Dashboard access: Queued for the staff server; it will apply when the applicant joins.",
+    },
+  ]) {
+    const app = setup(t, {
+      request: { status: scenario.request },
+      discord: {
+        "Staff server": { status: scenario.staff },
+        "Main server": { status: scenario.main },
+      },
+    });
+    const menu = await app.interact(`application:onboard:choose:${id}`);
+    const result = await app.interact(
+      menu.components[0].components[0].custom_id,
+      {
+        values: [scenario.role],
+      },
+    );
+    assert.equal(result.content, scenario.expected);
+  }
 });
 
 test("onboarding rechecks current permissions, application state and server", async (t) => {

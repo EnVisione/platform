@@ -254,6 +254,13 @@ test("individual onboarding grants preserve queued access and specialist roles b
     new Set(app.roster.get("2:42").roles),
     new Set(["99", "123"]),
   );
+  assert.equal(
+    app.assignments.status("42").discord["Main server"].status,
+    "synced",
+  );
+  await app.restart();
+  assert.ok(app.roster.get("2:42").roles.includes("123"));
+  assert.equal(app.assignments.status("42").request.status, "waiting_member");
   app.roster.set("1:42", member("1", "42", ["98"]));
   await app.sync.join(app.roster.get("1:42"));
   await app.assignments.reconcile("42");

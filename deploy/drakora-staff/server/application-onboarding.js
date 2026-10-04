@@ -136,7 +136,7 @@ export function applicationOnboarding(
     });
     await interaction.editReply({
       content:
-        "Choose a role for the accepted applicant. A staff rank replaces their current rank; specialist and Dashboard roles are added. Existing access is preserved.",
+        "Choose a role for the accepted applicant. Mapped roles apply in each Discord server they have joined and remain queued for the other. A staff rank replaces their current rank; specialist and Dashboard roles are added. Existing access is preserved.",
       components: [
         {
           type: 1,
@@ -184,19 +184,29 @@ export function applicationOnboarding(
       );
       approved(selection.applicationId);
       const status = result.request?.status;
-      const detail =
-        status === "applied" &&
-        Object.values(result.discord).every(
-          (delivery) => delivery.status === "synced",
-        )
-          ? "Role saved and synced."
+      const staff = result.discord["Staff server"];
+      const main = result.discord["Main server"];
+      const details = [
+        status === "applied" && staff?.status === "synced"
+          ? "Applied in the staff Discord server."
           : status === "waiting_member"
-            ? "Role saved. It will sync when the applicant joins the staff server."
+            ? "Queued for the staff server; it will apply when the applicant joins."
             : status === "waiting_screening"
-              ? "Role saved. It will sync when the applicant completes server screening."
-              : "Role saved; Discord synchronization is pending. Check Roles for its delivery status.";
+              ? "Queued for the staff server until the applicant completes membership screening."
+              : "Staff server synchronization is pending. Check Roles for its delivery status.",
+      ];
+      if (config.roleSync?.roles?.some((role) => role.staffId === roleId))
+        details.unshift(
+          main?.status === "synced"
+            ? "Applied in the main Discord server."
+            : main?.status === "waiting_member"
+              ? "Queued for the main server; it will apply when the applicant joins."
+              : main?.status === "waiting_screening"
+                ? "Queued for the main server until the applicant completes membership screening."
+                : "Main server synchronization is pending. Check Roles for its delivery status.",
+        );
       await interaction.editReply({
-        content: `${selected.label}: ${detail}`,
+        content: `${selected.label}: ${details.join(" ")}`,
         components: [],
         allowedMentions: mentions,
       });
