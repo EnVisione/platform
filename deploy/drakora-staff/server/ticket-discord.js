@@ -10,6 +10,7 @@ import {
   AttachmentBuilder,
 } from "discord.js";
 import { AuthError } from "./discord.js";
+import { discordMembers } from "./discord-members.js";
 import {
   ticketTypes,
   ticketIntake,
@@ -60,7 +61,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   }
   async function staffMembers() {
     const staffGuild = await client.guilds.fetch(config.guildId);
-    const members = await staffGuild.members.fetch();
+    const members = await discordMembers(client, staffGuild);
     return [...members.values()]
       .filter((member) => !member.pending && !member.user.bot)
       .map((member) =>
@@ -247,6 +248,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         {
           type: 1,
           components: [
+            ...(ticket.status === "awaiting_resolution"
+              ? [
+                  {
+                    type: 2,
+                    style: 1,
+                    label: "Resolve ticket",
+                    custom_id: feedbackId("close", ticket),
+                  },
+                ]
+              : []),
             {
               type: 2,
               style: 2,
@@ -1814,10 +1825,22 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         });
       }
       if (
-        ["rate", "rating", "reopen", "delete", "delete-confirm"].includes(
-          action,
-        ) &&
+        [
+          "rate",
+          "rating",
+          "reopen",
+          "delete",
+          "delete-confirm",
+          ...(closureId ? ["close"] : []),
+        ].includes(action) &&
         (closureId ? ticket.closureId !== closureId : ticket.reopenedCount)
+      )
+        throw new AuthError("ticket_feedback_expired", 409);
+      if (
+        action === "resolve" &&
+        (closureId === undefined
+          ? ticket.reopenedCount
+          : closureId !== String(ticket.reopenedCount || 0))
       )
         throw new AuthError("ticket_feedback_expired", 409);
       if (action === "mine-choice") {
@@ -1851,9 +1874,15 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             (ticket.type !== "staff" || rolePolicy.isManager(staffIdentity))))
       ) {
         service.staff(user, ticket, "tickets.close");
+        if (ticket.status === "closed")
+          return await interaction.reply({
+            content:
+              "The resolution for this closure is already saved. No further resolution is needed.",
+            flags: 64,
+          });
         return await interaction.showModal(
           new ModalBuilder()
-            .setCustomId(`ticket:resolve:${id}`)
+            .setCustomId(`ticket:resolve:${id}:${ticket.reopenedCount || 0}`)
             .setTitle("Record the ticket resolution")
             .addComponents(
               input(
@@ -1931,6 +1960,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           {
             summary: interaction.fields.getTextInputValue("summary"),
             commands: interaction.fields.getTextInputValue("commands"),
+            cycle: closureId === undefined ? 0 : Number(closureId),
           },
           true,
         );

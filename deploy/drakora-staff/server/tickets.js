@@ -771,6 +771,11 @@ export function ticketService(
   function closeTicket(user, id, input, staffView = false) {
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.close");
+    if (
+      input?.cycle !== undefined &&
+      input.cycle !== (ticket.reopenedCount || 0)
+    )
+      throw new AuthError("ticket_feedback_expired", 409);
     if (ticket.status === "closed") return ticket;
     if (!staffView && ticket.status === "awaiting_resolution") return ticket;
     const resolution = staffView

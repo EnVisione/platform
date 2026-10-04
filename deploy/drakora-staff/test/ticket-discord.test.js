@@ -284,6 +284,7 @@ function setupDiscord(t, notices = false) {
     ]),
   );
   const staffGuild = {
+    id: config.guildId,
     channels: {
       async create(data) {
         const channel = createChannel(data);
@@ -302,6 +303,7 @@ function setupDiscord(t, notices = false) {
       },
     },
     members: {
+      cache: staffMembers,
       async fetchMe() {
         return { id: client.user.id };
       },
@@ -1695,7 +1697,7 @@ test("Managers keep their staff permissions while claiming and resolving their o
   assert.doesNotMatch(String(claimed.data), /permission/);
   assert.equal(service.get(ticket.id).claimedBy.id, manager.id);
   const opened = await click(client, manager, `ticket:close:${ticket.id}`);
-  assert.equal(opened.modal.custom_id, `ticket:resolve:${ticket.id}`);
+  assert.equal(opened.modal.custom_id, `ticket:resolve:${ticket.id}:0`);
   assert.equal(opened.modal.components[0].components[0].min_length, 1);
   await click(client, manager, `ticket:resolve:${ticket.id}`, [], "2", {
     summary: "   ",
@@ -1709,6 +1711,96 @@ test("Managers keep their staff permissions while claiming and resolving their o
   assert.equal(service.get(ticket.id).status, "closed");
   assert.equal(service.get(ticket.id).resolution.summary, "user error");
   assert.equal(service.get(ticket.id).resolution.actor.id, manager.id);
+});
+
+test("each closure resolves once across Discord and dashboard without repeated roster requests", async (t) => {
+  const { service, transport, channels, client, user } = setupDiscord(t);
+  const staffGuild = await client.guilds.fetch(fixture.guildId);
+  const fetch = staffGuild.members.fetch;
+  let rosterRequests = 0;
+  staffGuild.members.fetch = async (query) => {
+    if (!query?.user && ++rosterRequests > 1)
+      throw new Error("Gateway rate limited");
+    return fetch(query);
+  };
+  const manager = { ...user, id: "200", username: "Manager" };
+  const staff = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const ticket = await supportTicket(service, user, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  const overview = () =>
+    target.savedMessages.get(
+      service.store.get("ticket-discord", ticket.id).introId,
+    );
+  const first = await click(client, manager, `ticket:close:${ticket.id}`);
+  await click(client, manager, first.modal.custom_id, [], "2", {
+    summary: "First closure",
+    commands: "None",
+  });
+  await service.pump();
+  const oldClosure = service.get(ticket.id).closureId;
+  assert.equal(service.get(ticket.id).status, "closed");
+  const repeated = await click(client, manager, `ticket:close:${ticket.id}`);
+  assert.equal(repeated.modal, undefined);
+  assert.match(repeated.data.content, /already saved/);
+  assert.equal(
+    service.closeTicket(staff, ticket.id, {}, true).resolution.summary,
+    "First closure",
+  );
+  await service.reopen(staff, ticket.id, true);
+  await service.pump();
+  const stale = await click(client, manager, first.modal.custom_id, [], "2", {
+    summary: "Stale resolution",
+    commands: "None",
+  });
+  assert.match(stale.data.content, /earlier closure/);
+  assert.equal(service.get(ticket.id).status, "pending");
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  assert.equal(service.get(ticket.id).status, "awaiting_resolution");
+  const resolve = overview().components[0].components.find(
+    (button) => button.label === "Resolve ticket",
+  );
+  assert.ok(resolve);
+  assert.equal(overview().components[0].components.length, 5);
+  const second = await click(client, manager, resolve.custom_id);
+  assert.equal(second.modal.custom_id, `ticket:resolve:${ticket.id}:1`);
+  const denied = await click(client, user, second.modal.custom_id, [], "2", {
+    summary: "Owner cannot resolve",
+    commands: "None",
+  });
+  assert.match(denied.data, /permission/);
+  service.closeTicket(
+    staff,
+    ticket.id,
+    { summary: "Second closure", commands: "None" },
+    true,
+  );
+  await service.pump();
+  await click(client, manager, second.modal.custom_id, [], "2", {
+    summary: "Duplicate form",
+    commands: "None",
+  });
+  assert.equal(service.get(ticket.id).resolution.summary, "Second closure");
+  assert.equal(
+    service.store.get(`ticket-closures:${ticket.id}`, oldClosure).resolution
+      .summary,
+    "First closure",
+  );
+  assert.equal(
+    overview().embeds[0].fields.find((field) => field.name === "Status").value,
+    "Closed",
+  );
+  assert.equal(
+    overview().components[0].components.some(
+      (button) => button.label === "Resolve ticket",
+    ),
+    false,
+  );
+  assert.equal(
+    service.store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`),
+    undefined,
+  );
+  assert.equal(rosterRequests, 1);
 });
 
 test("website reopening replaces an externally deleted Discord channel and keeps saved history", async (t) => {

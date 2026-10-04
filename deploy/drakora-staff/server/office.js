@@ -9,6 +9,7 @@ import {
 } from "discord.js";
 import { meetingService } from "./meetings.js";
 import { AuthError } from "./discord.js";
+import { discordMembers } from "./discord-members.js";
 import { canHost, permissions } from "./roles.js";
 import { discordOverview } from "./discord-overview.js";
 import { discordAvatar } from "./avatar.js";
@@ -224,7 +225,7 @@ export function discordOffice(config, store, dependencies = {}) {
     clearTimeout(reconnectTimer);
     try {
       guild = await client.guilds.fetch(config.guildId);
-      await guild.members.fetch({ withPresences: true });
+      await discordMembers(client, guild);
       if (stopped) return;
       for (const member of guild.members.cache.values())
         if (!member.user.bot)

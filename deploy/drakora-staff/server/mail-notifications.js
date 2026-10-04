@@ -1,6 +1,7 @@
 import { inboxPermission } from "../shared/staff-permissions.js";
 import { createHash } from "node:crypto";
 import { ChannelType, PermissionFlagsBits } from "discord.js";
+import { discordMembers } from "./discord-members.js";
 
 const topic =
   "Private shared mailbox alerts. Access follows the dashboard View email permission.";
@@ -74,7 +75,7 @@ export function discordMailTransport(config, store, policy, client) {
     let channel = channelsByScope.get(key);
     if (!client.isReady()) throw new Error("Discord unavailable");
     const guild = await client.guilds.fetch(config.guildId);
-    const members = await guild.members.fetch();
+    const members = await discordMembers(client, guild);
     const viewers = [...members.values()].filter(
       (member) =>
         !member.user.bot &&
