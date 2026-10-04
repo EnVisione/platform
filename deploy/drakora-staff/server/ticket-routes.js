@@ -55,7 +55,7 @@ export function ticketRouter(
   config,
   service,
   transport,
-  { staffView = false, authorize, mutation, dist, database },
+  { staffView = false, authorize, mutation, dist, database, macros },
 ) {
   const router = express.Router();
   const prefix = staffView ? "/api/tickets" : "/help/api/tickets";
@@ -95,6 +95,46 @@ export function ticketRouter(
     prefix,
     rateLimit({ windowMs: 60000, limit: 180, legacyHeaders: false }),
   );
+  if (staffView && macros) {
+    router.use(
+      "/api/ticket-macros",
+      rateLimit({ windowMs: 60000, limit: 120, legacyHeaders: false }),
+    );
+    router.get("/api/ticket-macros", async (req, res) => {
+      res.json(macros.list(await identity(req), req.query.category));
+    });
+    router.post(
+      "/api/ticket-macros",
+      express.json({ limit: "16kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        res.status(201).json(macros.save(await identity(req), null, req.body));
+      },
+    );
+    router.put(
+      "/api/ticket-macros/:macroId",
+      express.json({ limit: "16kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        res.json(
+          macros.save(await identity(req), req.params.macroId, req.body),
+        );
+      },
+    );
+    router.delete(
+      "/api/ticket-macros/:macroId",
+      express.json({ limit: "16kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        macros.remove(
+          await identity(req),
+          req.params.macroId,
+          req.body?.revision,
+        );
+        res.json({ ok: true });
+      },
+    );
+  }
   if (!staffView) {
     router.get("/help/api/session", async (req, res) => {
       req.session.csrf ??= randomBytes(32).toString("base64url");

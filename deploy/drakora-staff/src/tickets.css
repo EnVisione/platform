@@ -471,6 +471,64 @@
 .ticket-composer-resolution {
   max-height: 60%;
 }
+.ticket-macro-library {
+  margin: 0 0 1.25rem;
+}
+.ticket-macro-panel {
+  padding: 1.25rem;
+  margin-top: 1rem;
+  background: var(--surface, #292b30);
+  border-radius: 12px;
+}
+.ticket-macro-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  gap: 1.25rem;
+}
+.ticket-macro-grid form,
+.ticket-macro-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.ticket-macro-grid form {
+  gap: 1rem;
+}
+.ticket-macro-grid ul {
+  padding: 0;
+  list-style: none;
+}
+.ticket-macro-grid li {
+  margin: 0.6rem 0;
+}
+.ticket-macro-grid li button {
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.ticket-macro-grid small {
+  display: block;
+  opacity: 0.75;
+}
+.ticket-macro-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.65rem;
+  padding: 0.65rem 0;
+}
+.ticket-macro-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 150px;
+}
+@media (max-width: 700px) {
+  .ticket-macro-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .ticket-composer-resolution h3,
 .ticket-composer-resolution p {
   margin-bottom: 10px;

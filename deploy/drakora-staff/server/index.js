@@ -51,6 +51,7 @@ import { partnershipContact } from "./partnership-contact.js";
 import { ticketMail } from "./ticket-mail.js";
 import { ticketNotices } from "./ticket-notices.js";
 import { ticketRouter } from "./ticket-routes.js";
+import { ticketMacros } from "./ticket-macros.js";
 import { discordHoneypot } from "./honeypot-discord.js";
 import { moderationHistory } from "./moderation.js";
 import { moderationRouter } from "./moderation-routes.js";
@@ -486,6 +487,7 @@ function requireMutation(req) {
 if (tickets) {
   const staffTickets = ticketRouter(config, tickets, ticketTransport, {
     staffView: true,
+    macros: ticketMacros(ticketDatabase.store, rolePolicy),
     authorize: async (req) => {
       if (!req.session.userId || req.session.until <= Date.now())
         throw new AuthError("login_required", 401);

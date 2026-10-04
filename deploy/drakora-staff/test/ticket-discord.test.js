@@ -192,6 +192,8 @@ function setupDiscord(t, notices = false) {
     id: "2",
     channels: {
       async fetch(id) {
+        if (id && !channels.has(id))
+          throw Object.assign(new Error("Unknown channel"), { code: 10003 });
         return id ? channels.get(id) : channels;
       },
       async create(data) {
@@ -1267,14 +1269,25 @@ test("attachment copies resume without extending retention and expiry removes th
   assert.equal(service.messages(ticket.id)[0].deleted, false);
 });
 
-function click(client, user, customId, values = [], guildId = "2") {
+function click(
+  client,
+  user,
+  customId,
+  values = [],
+  guildId = "2",
+  fields = {},
+) {
   return new Promise((resolve) =>
     client.emit("interactionCreate", {
       guildId,
       user,
       customId,
       values,
+      fields: { getTextInputValue: (id) => fields[id] },
       isChatInputCommand: () => false,
+      async showModal(modal) {
+        resolve({ modal: modal.toJSON() });
+      },
       async deferReply(data) {
         this.deferred = true;
         this.flags = data.flags;
@@ -1302,6 +1315,101 @@ async function supportTicket(service, user, transport) {
   await service.pump();
   return ticket;
 }
+
+test("Managers keep their staff permissions while claiming and resolving their own Discord tickets", async (t) => {
+  const { service, transport, client, user } = setupDiscord(t);
+  const manager = { ...user, id: "200", username: "Manager" };
+  const ticket = await supportTicket(service, manager, transport);
+  const claimed = await click(client, manager, `ticket:claim:${ticket.id}`);
+  assert.doesNotMatch(String(claimed.data), /permission/);
+  assert.equal(service.get(ticket.id).claimedBy.id, manager.id);
+  const opened = await click(client, manager, `ticket:close:${ticket.id}`);
+  assert.equal(opened.modal.custom_id, `ticket:resolve:${ticket.id}`);
+  assert.equal(opened.modal.components[0].components[0].min_length, 1);
+  await click(client, manager, `ticket:resolve:${ticket.id}`, [], "2", {
+    summary: "   ",
+    commands: "None",
+  });
+  assert.equal(service.get(ticket.id).status, "claimed");
+  await click(client, manager, `ticket:resolve:${ticket.id}`, [], "2", {
+    summary: "user error",
+    commands: "None",
+  });
+  assert.equal(service.get(ticket.id).status, "closed");
+  assert.equal(service.get(ticket.id).resolution.summary, "user error");
+  assert.equal(service.get(ticket.id).resolution.actor.id, manager.id);
+});
+
+test("website reopening replaces an externally deleted Discord channel and keeps saved history", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  const oldId = service.get(ticket.id).channelId;
+  service.reply(user, ticket.id, {
+    requestId: randomUUID(),
+    content: "Saved before closing",
+  });
+  await service.pump();
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  channels.delete(oldId);
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  const newId = service.get(ticket.id).channelId;
+  assert.ok(newId && newId !== oldId);
+  assert.equal(service.linked(oldId), null);
+  assert.equal(service.linked(newId).id, ticket.id);
+  await transport.recover();
+  assert.equal(service.messages(ticket.id)[0].content, "Saved before closing");
+  assert.equal(service.messages(ticket.id)[0].deleted, false);
+  service.reply(user, ticket.id, {
+    requestId: randomUUID(),
+    content: "Reply after reopening",
+  });
+  await service.pump();
+  assert.equal(service.messages(ticket.id)[1].delivery, "delivered");
+  assert.equal(
+    channels
+      .get(newId)
+      .savedMessages.get(service.messages(ticket.id)[1].discordId).content,
+    "Reply after reopening",
+  );
+});
+
+test("pending website replies recover missing channels once while access errors preserve the channel", async (t) => {
+  const { service, transport, channels, user, client } = setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  const oldId = service.get(ticket.id).channelId;
+  const guild = await client.guilds.fetch("2");
+  const originalFetch = guild.channels.fetch;
+  guild.channels.fetch = async (id) => {
+    if (id === oldId)
+      throw Object.assign(new Error("Missing access"), { code: 50001 });
+    return originalFetch(id);
+  };
+  service.reply(user, ticket.id, {
+    requestId: randomUUID(),
+    content: "Reply awaiting Discord",
+  });
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, oldId);
+  assert.equal(service.messages(ticket.id)[0].delivery, "pending");
+  guild.channels.fetch = originalFetch;
+  channels.delete(oldId);
+  await transport.recover();
+  await service.pump();
+  const newId = service.get(ticket.id).channelId;
+  assert.ok(newId && newId !== oldId);
+  assert.equal(service.messages(ticket.id)[0].delivery, "delivered");
+  await transport.recover();
+  await service.pump();
+  assert.equal(
+    [...channels.get(newId).savedMessages.values()].filter(
+      (message) => message.content === "Reply awaiting Discord",
+    ).length,
+    1,
+  );
+  assert.equal(service.messages(ticket.id).length, 1);
+});
 
 test("player closure, private rating and staff resolution each post a notice with guarded Admin deletion", async (t) => {
   const app = setupDiscord(t, true),

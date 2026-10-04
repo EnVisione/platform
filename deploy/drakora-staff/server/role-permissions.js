@@ -98,6 +98,8 @@ export function rolePermissions(config, store) {
           enabled = managers.includes(role.name);
         if (key === "tickets.takeover" || key.endsWith(".takeover"))
           enabled = enabled && admins.includes(role.name);
+        if (key === "tickets.macros.manage")
+          enabled = admins.includes(role.name);
         return [key, enabled];
       }),
     );

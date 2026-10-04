@@ -728,8 +728,8 @@ export function ticketService(
     if (!staffView && ticket.status === "awaiting_resolution") return ticket;
     const resolution = staffView
       ? {
-          summary: text(input.summary, 20, 4000, "resolution_required"),
-          commands: text(input.commands, 4, 2000, "commands_required"),
+          summary: text(input.summary, 1, 4000, "resolution_required"),
+          commands: text(input.commands, 1, 2000, "commands_required"),
           actor: publicActor(user),
           at: now(),
         }
@@ -769,6 +769,8 @@ export function ticketService(
   }
   async function reopen(user, id, staffView = false, closureId) {
     authorize(user, get(id), staffView, "tickets.close");
+    if (get(id).channelId && transport?.checkChannel)
+      await transport.checkChannel(get(id));
     await pump();
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.close");
@@ -1006,6 +1008,52 @@ export function ticketService(
     });
     announce(ticket);
   }
+  function missingChannel(id, channelId) {
+    const ticket = get(id);
+    if (!channelId || ticket.channelId !== channelId) return false;
+    store.transaction(() => {
+      store.delete("ticket-channel", channelId);
+      ticket.channelId = null;
+      ticket.reopenedSequence = ticket.sequence;
+      delete ticket.lastDiscordId;
+      for (const kind of [
+        "ticket-discord",
+        "ticket-discord-close",
+        "ticket-discord-cursor",
+        "ticket-discord-sweep",
+      ])
+        store.delete(kind, id);
+      for (const [key, job] of store.entries("ticket-outbox")) {
+        if (job.ticketId !== id) continue;
+        if (["status", "delete"].includes(job.kind))
+          store.delete("ticket-outbox", key);
+        if (job.kind === "message") {
+          const message = store.get(`ticket-messages:${id}`, job.ref);
+          if (message) store.delete("ticket-send", message.id);
+          put("ticket-outbox", key, {
+            ...job,
+            generation: randomUUID(),
+            attempts: 0,
+            after: 0,
+          });
+        }
+      }
+      if (["pending", "claimed"].includes(ticket.status)) {
+        delete ticket.discordDeletedAt;
+        delete ticket.discordArchivedAt;
+        queue(ticket, "create");
+      } else ticket.discordDeletedAt = now();
+      audit(
+        ticket,
+        { id: "system", name: "Drakora" },
+        "channel_missing",
+        "Discord confirmed the ticket channel is missing; saved conversation is kept",
+        true,
+      );
+    });
+    announce(ticket);
+    return true;
+  }
   function ingest(id, incoming, closing = false) {
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
@@ -1200,7 +1248,10 @@ export function ticketService(
               config.tickets.staffChannelId
             )
           ) {
-            if (ticket.discordDeletedAt || ticket.discordArchivedAt)
+            if (
+              (ticket.discordDeletedAt || ticket.discordArchivedAt) &&
+              job.kind !== "message"
+            )
               store.delete("ticket-outbox", key);
             continue;
           }
@@ -1256,6 +1307,7 @@ export function ticketService(
                 message.attachments.map((id) => store.get("ticket-media", id)),
                 { retry: job.attempts > 0 },
               );
+              if (delivered?.pending) continue;
               store.transaction(() => {
                 message.discordId = delivered.id;
                 message.delivery = "delivered";
@@ -1434,6 +1486,7 @@ export function ticketService(
     },
     linked,
     bind,
+    missingChannel,
     events,
     store,
     staff,

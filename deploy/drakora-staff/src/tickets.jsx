@@ -12,6 +12,7 @@ import logo from "./assets/drakora-logo.png";
 import "./tickets.css";
 import { ModerationHistoryCard } from "./moderation.jsx";
 import { DateFilters } from "./list-filters.jsx";
+import { MacroPicker, TicketMacroLibrary } from "./ticket-macros.jsx";
 
 const errors = {
   invalid_ticket_category:
@@ -46,7 +47,7 @@ const errors = {
   attachment_too_large: "Each attachment must be no larger than 8 MB.",
   attachments_too_large:
     "Attachments in one message must total no more than 20 MB.",
-  resolution_required: "Explain what was done in at least 20 characters.",
+  resolution_required: "Enter a nonblank resolution, up to 4,000 characters.",
   commands_required: "Record the commands used, or enter None.",
   ticket_already_rated: "You have already rated this ticket.",
   ticket_close_first: "Close the ticket before deleting its Discord channel.",
@@ -141,6 +142,7 @@ function Composer({
   internal = false,
   onSent,
   resolution = false,
+  macroCategory,
   uploadLimit = ticketMessageUploadLimit,
 }) {
   const [content, setContent] = useState(""),
@@ -289,7 +291,6 @@ function Composer({
             ? "What did you do, and how was the player's issue resolved?"
             : "Message the ticket…"
         }
-        minLength={resolution ? 20 : undefined}
         maxLength={resolution ? 4000 : 2000}
         required={resolution || !files.length}
         rows={resolution ? 4 : 2}
@@ -300,13 +301,28 @@ function Composer({
           Enter to send · Shift+Enter for a new line
         </small>
       )}
+      {macroCategory && !resolution && (
+        <MacroPicker
+          category={macroCategory}
+          disabled={busy}
+          onInsert={(value) => {
+            const next = content ? `${content}\n${value}` : value;
+            if (next.length > 2000) {
+              setError(errors.invalid_message);
+              return;
+            }
+            setContent(next);
+            pending.current = null;
+            message.current?.focus();
+          }}
+        />
+      )}
       {resolution && (
         <label>
           Commands run
           <textarea
             value={commands}
             onChange={(event) => setCommands(event.target.value)}
-            minLength={4}
             maxLength={2000}
             required
             rows={2}
@@ -856,6 +872,7 @@ function TicketChat({
             base={base}
             csrf={csrf}
             onSent={refresh}
+            macroCategory={staffView ? ticket.category : undefined}
             uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
           />
         )}
@@ -1198,6 +1215,9 @@ export function Tickets({ csrf, capabilities, logs = false }) {
         </div>
         <button onClick={refresh}>Refresh</button>
       </div>
+      {!logs && capabilities["tickets.macros.manage"] && (
+        <TicketMacroLibrary csrf={csrf} initialCategory={category} />
+      )}
       {logs && (
         <div className="ticket-log-tabs">
           <strong>Ticket transcripts</strong>

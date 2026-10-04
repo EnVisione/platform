@@ -227,6 +227,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     if (!value?.isTextBased()) throw new Error("Ticket channel is unavailable");
     return value;
   }
+  async function ticketChannel(ticket) {
+    try {
+      return await channel(ticket.channelId);
+    } catch (error) {
+      if (error.code !== 10003) throw error;
+      webhooks.delete(ticket.channelId);
+      service.missingChannel(ticket.id, ticket.channelId);
+      return null;
+    }
+  }
   function controls(ticket, staffControls = false) {
     if (
       staffControls &&
@@ -931,8 +941,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         return await activityUpdate(ticket, job.notice);
       if (["closed", "awaiting_resolution"].includes(ticket.status))
         return await closeChannel(ticket);
-      const target = await channel(ticket.channelId),
-        saved = service.store.get("ticket-discord", ticket.id);
+      const target = await ticketChannel(ticket);
+      if (!target) return { pending: true };
+      const saved = service.store.get("ticket-discord", ticket.id);
       const intro = await target.messages.fetch(saved.introId);
       ticket = service.get(ticket.id);
       if (["closed", "awaiting_resolution"].includes(ticket.status))
@@ -951,6 +962,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async deleteChannel(ticket) {
       await ready();
       return await closeChannel(ticket, true);
+    },
+    async checkChannel(ticket) {
+      await ready();
+      return await ticketChannel(ticket);
     },
     async eraseTicket(ticket) {
       await ready();
@@ -1019,8 +1034,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async message(ticket, message, attachments, { retry = false } = {}) {
       await ready();
-      const target = await channel(ticket.channelId),
-        saved = service.store.get("ticket-discord", ticket.id);
+      const target = await ticketChannel(ticket);
+      if (!target) return { pending: true };
+      const saved = service.store.get("ticket-discord", ticket.id);
       const key = String(message.sequence).padStart(12, "0");
       const delivered = service.store.get(`ticket-messages:${ticket.id}`, key);
       if (delivered?.id === message.id && delivered.discordId)
@@ -1544,8 +1560,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             { before },
             Number.MAX_SAFE_INTEGER,
           );
-        } catch {
-          console.error("Ticket channel recovery is pending.");
+        } catch (error) {
+          if (error.code === 10003) {
+            webhooks.delete(ticket.channelId);
+            service.missingChannel(ticket.id, ticket.channelId);
+          } else console.error("Ticket channel recovery is pending.");
         }
       }
     })()
@@ -1741,7 +1760,14 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         await interaction.deferReply({ flags: 64 });
       const staffIdentity =
         !owner ||
-        ["close", "takeover", "delete", "delete-confirm"].includes(action)
+        [
+          "claim",
+          "close",
+          "resolve",
+          "takeover",
+          "delete",
+          "delete-confirm",
+        ].includes(action)
           ? await staffUser(interaction.user.id)
           : null;
       const user = staffIdentity || actor(interaction.user, interaction.member);
@@ -1793,14 +1819,14 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 "summary",
                 "What did you do to resolve the issue?",
                 TextInputStyle.Paragraph,
-                20,
+                1,
                 4000,
               ),
               input(
                 "commands",
                 "Commands run (enter None if none)",
                 TextInputStyle.Paragraph,
-                4,
+                1,
                 2000,
               ),
             ),

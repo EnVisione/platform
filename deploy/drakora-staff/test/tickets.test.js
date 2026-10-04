@@ -616,7 +616,7 @@ test("owner close requires a later staff resolution, optional rating accepts onl
       service.closeTicket(
         helper,
         ticket.id,
-        { summary: "done", commands: "None" },
+        { summary: "   ", commands: "None" },
         true,
       ),
     "resolution_required",
@@ -625,14 +625,14 @@ test("owner close requires a later staff resolution, optional rating accepts onl
     helper,
     ticket.id,
     {
-      summary:
-        "Restored the missing quest state and verified the player's progress.",
+      summary: "x",
       commands: "None",
     },
     true,
   );
   assert.equal(service.get(ticket.id).status, "closed");
   assert.equal(service.get(ticket.id).resolution.actor.id, helper.id);
+  assert.equal(service.get(ticket.id).resolution.summary, "x");
   assert.equal(service.list(helper).total, 0);
   assert.equal(service.list(helper, { closed: true }).total, 1);
   fails(() => service.rate(owner, ticket.id, 6), "invalid_rating");

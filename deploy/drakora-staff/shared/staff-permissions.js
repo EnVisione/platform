@@ -42,6 +42,13 @@ export const staffPermissions = [
     ["tickets.view"],
   ],
   [
+    "tickets.macros.manage",
+    "Tickets",
+    "Manage ticket macros",
+    "Create, edit and remove shared reply templates in ticket categories you can reply to.",
+    ["tickets.view", "tickets.reply"],
+  ],
+  [
     "tickets.delete",
     "Tickets",
     "Delete closed Discord channels",
