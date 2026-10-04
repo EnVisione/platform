@@ -54,6 +54,7 @@ export function applicationService(
   fetcher = fetch,
   getMinecraftLink = () => undefined,
   getStaffAvatar = () => undefined,
+  onActivity = () => {},
 ) {
   const notifications = applicationNotifications(config, store, fetcher);
   const forms = applicationForms(config, store);
@@ -102,6 +103,8 @@ export function applicationService(
     const draft = load(sessionId);
     if (draft.submittedId) {
       const record = store.get("application", draft.submittedId);
+      if (!record || record.erasingAt)
+        throw new AuthError("application_not_found", 404);
       return {
         submitted: {
           emailEnabled: Boolean(config.applications.smtp),
@@ -371,7 +374,8 @@ export function applicationService(
         const draft = load(sessionId);
         const record =
           draft.submittedId && store.get("application", draft.submittedId);
-        if (!record) throw new AuthError("application_not_found", 404);
+        if (!record || record.erasingAt)
+          throw new AuthError("application_not_found", 404);
         if (input.preference === "discord" && !record.discord)
           throw new AuthError("invalid_notification_preference", 400);
         record.notificationPreference = input.preference;
@@ -392,6 +396,8 @@ export function applicationService(
               { until: record.decision.reapplyAfter },
               record.decision.reapplyAfter,
             );
+        record.lastActiveAt = Date.now();
+        if (record.discord) onActivity(record.discord.id, record.lastActiveAt);
         store.set("application", record.id, record, permanent);
         notifications.reconcile(record);
         return view(sessionId);
@@ -475,7 +481,7 @@ export function applicationService(
       errors.scenarioAnswer = "Choose a role to receive your scenario.";
     if (a.privacyConsent !== true)
       errors.privacyConsent =
-        "Confirm that staff may store and read your application.";
+        "Read the Privacy Policy and agree to the Terms before submitting.";
     if (a.accuracyConfirmed !== true)
       errors.accuracyConfirmed = "Confirm that your answers are accurate.";
     return errors;
@@ -579,6 +585,7 @@ export function applicationService(
         },
         permanent,
       );
+      if (record.discord) onActivity(record.discord.id, createdAt);
       notifications.queueStaff(record);
       notifications.queueApplicant(record, "received");
       current.submittedId = record.id;
@@ -594,7 +601,8 @@ export function applicationService(
       throw new AuthError("invalid_application_comment", 400);
     return store.transaction(() => {
       const record = store.get("application", id);
-      if (!record) throw new AuthError("application_not_found", 404);
+      if (!record || record.erasingAt)
+        throw new AuthError("application_not_found", 404);
       record.comments ??= [];
       if (record.comments.length >= 100)
         throw new AuthError("application_comments_full", 409);
@@ -609,7 +617,7 @@ export function applicationService(
     });
   }
   function applicationView(record) {
-    return record
+    return record && !record.erasingAt
       ? {
           ...record,
           comments: (record.comments ?? []).map((entry) => ({
@@ -644,7 +652,8 @@ export function applicationService(
       throw new AuthError("application_decision_role_required");
     return store.transaction(() => {
       const record = store.get("application", id);
-      if (!record) throw new AuthError("application_not_found", 404);
+      if (!record || record.erasingAt)
+        throw new AuthError("application_not_found", 404);
       if (record.status === "Reviewing") return applicationView(record);
       if (record.status !== "Received")
         throw new AuthError("application_already_decided", 409);
@@ -680,7 +689,8 @@ export function applicationService(
       throw new AuthError("invalid_reapplication_wait", 400);
     return store.transaction(() => {
       const record = store.get("application", id);
-      if (!record) throw new AuthError("application_not_found", 404);
+      if (!record || record.erasingAt)
+        throw new AuthError("application_not_found", 404);
       if (!["Received", "Reviewing"].includes(record.status))
         throw new AuthError("application_already_decided", 409);
       record.status = decision === "approve" ? "Approved" : "Denied";
@@ -732,18 +742,16 @@ export function applicationService(
       "application-summary",
       50,
       offset,
-      role || status || search || from || to
-        ? (item) =>
-            withinDate(item.createdAt) &&
-            (!role || item.role === role) &&
-            (!status || item.status === status) &&
-            (!search ||
-              [item.name, item.ign, item.discordId].some(
-                (value) =>
-                  typeof value === "string" &&
-                  value.toLowerCase().includes(search),
-              ))
-        : undefined,
+      (item) =>
+        !item.erasingAt &&
+        withinDate(item.createdAt) &&
+        (!role || item.role === role) &&
+        (!status || item.status === status) &&
+        (!search ||
+          [item.name, item.ign, item.discordId].some(
+            (value) =>
+              typeof value === "string" && value.toLowerCase().includes(search),
+          )),
     );
     return {
       ...page,
@@ -761,10 +769,11 @@ export function applicationService(
       pageSize,
       offset,
       (summary) =>
-        summary.discordId
+        !summary.erasingAt &&
+        (summary.discordId
           ? summary.discordId === draft.identity?.id
           : summary.browserSessionHash === sessionHash ||
-            summary.id === draft.submittedId,
+            summary.id === draft.submittedId),
     );
     return {
       total: page.total,
@@ -782,7 +791,8 @@ export function applicationService(
     if (!Number.isSafeInteger(offset) || offset < 0)
       throw new AuthError("invalid_request", 400);
     const record = store.get("application", id);
-    if (!record) throw new AuthError("application_not_found", 404);
+    if (!record || record.erasingAt)
+      throw new AuthError("application_not_found", 404);
     const email = text(record.contactEmail).toLowerCase();
     const ign = text(record.answers.ign).toLowerCase();
     const pageSize = 5;
@@ -791,7 +801,7 @@ export function applicationService(
       pageSize,
       offset,
       (summary) => {
-        if (summary.id === record.id) return false;
+        if (summary.erasingAt || summary.id === record.id) return false;
         if (record.discord?.id && summary.discordId)
           return summary.discordId === record.discord.id;
         if (!email || !ign || text(summary.ign).toLowerCase() !== ign)
@@ -813,6 +823,43 @@ export function applicationService(
     };
   }
   return {
+    async eraseInactive(id, lastActiveAt) {
+      const record = store.get("application", id);
+      if (
+        !record ||
+        (record.lastActiveAt || record.createdAt) > lastActiveAt ||
+        store.get("privacy-hold", id)
+      )
+        return false;
+      record.erasingAt ||= Date.now();
+      store.set("application", id, record, permanent);
+      const summary = store.get(
+        "application-summary",
+        `${record.createdAt}.${id}`,
+      );
+      if (summary)
+        store.set(
+          "application-summary",
+          `${record.createdAt}.${id}`,
+          { ...summary, erasingAt: record.erasingAt },
+          permanent,
+        );
+      await notifications.erase(record);
+      store.transaction(() => {
+        for (const kind of store.kinds()) {
+          if (!kind.startsWith("application")) continue;
+          for (const [key, value] of store.entries(kind))
+            if (
+              key === id ||
+              key.startsWith(`${id}:`) ||
+              value?.id === id ||
+              value?.submittedId === id
+            )
+              store.delete(kind, key);
+        }
+      });
+      return true;
+    },
     forms,
     view,
     patch,

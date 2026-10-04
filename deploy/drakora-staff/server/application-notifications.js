@@ -240,7 +240,7 @@ export function applicationNotifications(
       }
       throw error;
     }
-    return response.json();
+    return response.status === 204 ? undefined : response.json();
   }
   async function post(path, payload) {
     const result = await request(path, "POST", payload);
@@ -351,6 +351,7 @@ export function applicationNotifications(
       const record = store.get("application", pending.id);
       if (
         !record ||
+        record.erasingAt ||
         notificationMode(record) !== "email" ||
         store.get("application-dm-delivery", key)?.sentAt
       ) {
@@ -428,7 +429,7 @@ export function applicationNotifications(
       const key = pending.key ?? pending.id;
       const applicant = Boolean(pending.event && pending.target !== "staff");
       const record = store.get("application", pending.id);
-      if (!record || (applicant && !record.discord)) {
+      if (!record || record.erasingAt || (applicant && !record.discord)) {
         store.delete("application-notification", key);
         continue;
       }
@@ -520,6 +521,7 @@ export function applicationNotifications(
           pending.channelId = channel.id;
           pending.channelUrl = channel.url;
           store.set("application-notification", key, pending, permanent);
+          channelId = channel.id;
           message = await send(channel.id);
         }
         store.transaction(() => {
@@ -528,6 +530,7 @@ export function applicationNotifications(
             key,
             {
               messageId: message.id,
+              channelId,
               sentAt: Date.now(),
               ...(applicant
                 ? {
@@ -606,6 +609,53 @@ export function applicationNotifications(
     return running;
   }
   return {
+    async erase(record) {
+      await running;
+      for (const kind of ["application-delivery", "application-dm-delivery"]) {
+        for (const [key, value] of store.entries(kind)) {
+          if (
+            !(key === record.id || key.startsWith(`${record.id}:`)) ||
+            !value.messageId ||
+            value.route === "email"
+          )
+            continue;
+          let channelId =
+            value.route === "private" && value.channelUrl
+              ? value.channelUrl.split("/").at(-1)
+              : value.channelId;
+          if (!channelId && kind === "application-delivery")
+            channelId = config.applications.notificationChannelId;
+          if (!channelId && value.channelUrl)
+            channelId = value.channelUrl.split("/").at(-1);
+          if (!channelId && record.discord)
+            channelId = (
+              await post("/users/@me/channels", {
+                recipient_id: record.discord.id,
+              })
+            ).id;
+          if (!channelId)
+            throw new Error("Application notification destination unavailable");
+          try {
+            await request(
+              `/channels/${channelId}/messages/${value.messageId}`,
+              "DELETE",
+            );
+          } catch (error) {
+            if (error.status !== 404) throw error;
+          }
+        }
+      }
+      if (
+        record.discord &&
+        !store
+          .entries("application")
+          .some(
+            ([, other]) =>
+              other.id !== record.id && other.discord?.id === record.discord.id,
+          )
+      )
+        await fallback.erase(record.discord.id);
+    },
     queueStaff,
     queueApplicant,
     preferencesChanged,

@@ -63,6 +63,7 @@ export function discordClient(
       tokens,
       tokenExpires: Date.now() + tokens.expires_in * 1000,
       checkedAt: 0,
+      lastActiveAt: Date.now(),
     };
     store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
     const admitted = await check(user.id, true);
@@ -89,6 +90,11 @@ export function discordClient(
           user.tokens.access_token,
         );
     const latest = store.get("user", id);
+    if (!latest) throw new AuthError("discord_login_required", 401);
+    user.lastActiveAt = Math.max(
+      user.lastActiveAt || 0,
+      latest.lastActiveAt || 0,
+    );
     if ((latest?.accessRevision || 0) !== revision) return latest;
     user.staffMember = Boolean(member && !member.pending);
     user.roles = member?.pending ? [] : (member?.roles ?? []);

@@ -1,3 +1,4 @@
+import { LegalNotice } from "./legal-notice.jsx";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -528,9 +529,9 @@ function PublicSite() {
             </span>
             <span className="public-status-copy">
               <span className="public-eyebrow">
-                {status?.discord.active == null
+                {status?.discord.total == null
                   ? "OUR COMMUNITY"
-                  : `${status.discord.active} MEMBERS ONLINE${status.discord.stale ? " · LAST CHECK" : ""}`}
+                  : `${status.discord.total.toLocaleString()} TOTAL MEMBERS${status.discord.stale ? " · LAST CHECK" : ""}`}
               </span>
               <strong>
                 Join our Discord <PublicIcon name="external" />
@@ -727,6 +728,9 @@ function PublicSite() {
           <p>Not affiliated with Mojang or Microsoft.</p>
         </div>
         <nav aria-label="Footer links">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Service</a>
+          <a href="/privacy-settings">Privacy information</a>
           <a href={content?.discordInvite || "/discord"}>
             <PublicIcon name="discord" /> Discord
           </a>
@@ -743,6 +747,7 @@ function PublicSite() {
             <PublicIcon name="help" /> Need help?
           </a>
         </nav>
+        <LegalNotice />
         <small>© {new Date().getFullYear()} Drakora</small>
       </footer>
     </div>

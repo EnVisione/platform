@@ -54,6 +54,8 @@ import { ticketRouter } from "./ticket-routes.js";
 import { discordHoneypot } from "./honeypot-discord.js";
 import { moderationHistory } from "./moderation.js";
 import { moderationRouter } from "./moderation-routes.js";
+import { retentionService, privacyActivity } from "./retention.js";
+import { legalRouter } from "./legal.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -85,6 +87,7 @@ const applications = applicationDatabase
       fetch,
       minecraft.get,
       (id) => store.get("user", id)?.avatar,
+      (id, at) => privacyActivity(store, id, at),
     )
   : undefined;
 const rolePolicy = rolePermissions(config, store);
@@ -94,8 +97,15 @@ const ticketDatabase = config.tickets
   ? openStore(`${ticketPath}/tickets.sqlite`, config.tickets.databaseKey)
   : undefined;
 const tickets = ticketDatabase
-  ? ticketService(config, ticketDatabase.store, rolePolicy)
+  ? ticketService(config, ticketDatabase.store, rolePolicy, {
+      onActivity: (id, at) => privacyActivity(store, id, at),
+    })
   : undefined;
+const retention = retentionService(config, store, {
+  tickets,
+  applications,
+  applicationStore: applicationDatabase?.store,
+});
 const ticketEmails = tickets ? ticketMail(config, tickets) : undefined;
 const discord = discordClient(
   config,
@@ -314,6 +324,13 @@ app.use((req, res, next) => {
   next();
 });
 
+const legalPages = legalRouter(config);
+app.use((req, res, next) =>
+  [staffHost, applicationHost].includes(req.headers.host)
+    ? legalPages(req, res, next)
+    : next(),
+);
+
 if (website) {
   const publicWebsite = publicWebsiteRouter(
     website,
@@ -409,6 +426,14 @@ async function signedIn(
   if (!user.permissions.dashboard)
     throw new AuthError("dashboard_role_required");
   const link = minecraft.get(user.id);
+  const path = req.originalUrl.split("?")[0];
+  if (
+    !["GET", "HEAD"].includes(req.method) ||
+    (req.method === "GET" &&
+      !path.startsWith("/api/") &&
+      !path.startsWith("/huly/"))
+  )
+    retention.touch(user.id);
   if (!allowUnlinked && !link)
     throw new AuthError("minecraft_name_required", 428);
   if (
@@ -1565,10 +1590,12 @@ server.listen(3000, "0.0.0.0", () =>
 todoSync?.start();
 applications?.start();
 tickets?.start();
+retention.start();
 partnerships?.start();
 ticketEmails?.start();
 ticketStaffNotices?.start();
 async function stop() {
+  await retention.close();
   clearInterval(sweep);
   clearInterval(assignmentTimer);
   await assignments?.close();

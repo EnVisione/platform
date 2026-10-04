@@ -1984,12 +1984,21 @@ const fallbackConfig = {
 
 test("blocked DMs use one private channel, repair its permissions, and report the delivery route", async (t) => {
   const fixture = fallbackFetcher();
-  const { service } = setup(t, fixture.fetcher, undefined, fallbackConfig);
+  const { service, store } = setup(
+    t,
+    fixture.fetcher,
+    undefined,
+    fallbackConfig,
+  );
   connectedDraft(service);
   const { id } = await service.submit("session");
   await service.delivery();
   const delivery = service.get(id).notifications[0];
   assert.equal(delivery.route, "private");
+  assert.equal(
+    store.get("application-dm-delivery", `${id}:received`).channelId,
+    "200",
+  );
   assert.ok(delivery.sentAt);
   assert.equal(delivery.channelUrl, "https://discord.com/channels/60/200");
   const created = fixture.calls.find(

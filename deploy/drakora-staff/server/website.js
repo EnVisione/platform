@@ -10,11 +10,11 @@ import {
 export function websiteAccess(config, user) {
   return Boolean(
     user.permissions?.dashboard &&
-      config.ranks.some(
-        (rank) =>
-          ["Founder", "Manager", "Admin"].includes(rank.name) &&
-          user.roles?.includes(rank.id),
-      ),
+    config.ranks.some(
+      (rank) =>
+        ["Founder", "Manager", "Admin"].includes(rank.name) &&
+        user.roles?.includes(rank.id),
+    ),
   );
 }
 
@@ -273,11 +273,11 @@ export function communityStatus(config, fetcher = fetch, now = Date.now) {
           if (!response.ok) return;
           const data = await response.json();
           if (
-            Number.isSafeInteger(data.approximate_presence_count) &&
-            data.approximate_presence_count >= 0
+            Number.isSafeInteger(data.approximate_member_count) &&
+            data.approximate_member_count >= 0
           )
             cached = {
-              active: data.approximate_presence_count,
+              total: data.approximate_member_count,
               checkedAt: now(),
             };
         } catch {
@@ -293,7 +293,7 @@ export function communityStatus(config, fetcher = fetch, now = Date.now) {
       discord:
         cached && now() - cached.checkedAt < 15 * 60000
           ? { ...cached, stale: now() - cached.checkedAt >= 60000 }
-          : { active: null, checkedAt: null, stale: false },
+          : { total: null, checkedAt: null, stale: false },
     };
   };
 }

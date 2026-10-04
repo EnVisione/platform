@@ -127,6 +127,7 @@ export function partnershipContact(
             save("partnership-dm-send", key, {
               ...intent,
               messageId: found.id,
+              channelId: channel.id,
             });
             last = found.id;
             continue;
@@ -156,7 +157,11 @@ export function partnershipContact(
           enforceNonce: true,
           allowedMentions: { parse: [] },
         });
-        save("partnership-dm-send", key, { at: now(), messageId: sent.id });
+        save("partnership-dm-send", key, {
+          at: now(),
+          messageId: sent.id,
+          channelId: channel.id,
+        });
         last = sent.id;
       }
       return { id: last, via: "discord" };
@@ -192,6 +197,7 @@ export function partnershipContact(
             continue;
           }
           processed++;
+          if (store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = tickets.get(job.ticketId);
           const message =
             job.kind === "message"
@@ -264,6 +270,7 @@ export function partnershipContact(
       )
       .find(Boolean);
     if (!ticketId) return;
+    if (store.get("ticket", ticketId)?.erasingAt) return;
     const ticket = tickets.get(ticketId);
     if (
       ticket.type !== "partnership" ||
@@ -441,6 +448,9 @@ export function partnershipContact(
       }
     }
   }
+  tickets.registerCleanupWaiter?.(() =>
+    Promise.all([running, incoming, ...dmRequests.values()]),
+  );
   const changed = () => void pump();
   const dm = (message) => {
     void receiveDm(message).catch((error) =>

@@ -31,6 +31,7 @@ export function ticketNotices(
         let processed = 0;
         for (const [key, job] of store.entries("ticket-notice-outbox")) {
           if (stopped || processed >= 20) break;
+          if (store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = service.get(job.ticketId);
           if (
             (job.cycle || 0) !== (ticket.reopenedCount || 0) ||
@@ -72,7 +73,11 @@ export function ticketNotices(
               job,
               sent.cancelled
                 ? { status: "cancelled" }
-                : { status: "sent", messageId: sent.id },
+                : {
+                    status: "sent",
+                    messageId: sent.id,
+                    channelId: sent.channelId || job.channelId,
+                  },
             );
           } catch (error) {
             job.attempts++;
@@ -90,6 +95,7 @@ export function ticketNotices(
       });
     return running;
   }
+  service.registerCleanupWaiter?.(() => running);
   const changed = () => void pump();
   return {
     pump,

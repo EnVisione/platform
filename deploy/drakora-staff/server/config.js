@@ -2,6 +2,25 @@ import { validMailAddress } from "./mail-address.js";
 import { isIP } from "node:net";
 
 export function validateConfig(config) {
+  if (config.privacy !== undefined) {
+    const privacy = config.privacy;
+    if (
+      !privacy ||
+      Array.isArray(privacy) ||
+      typeof privacy !== "object" ||
+      typeof privacy.retentionEnabled !== "boolean" ||
+      typeof privacy.published !== "boolean" ||
+      (privacy.controllerName !== undefined &&
+        (typeof privacy.controllerName !== "string" ||
+          !privacy.controllerName.trim() ||
+          privacy.controllerName.length > 150)) ||
+      (privacy.published &&
+        (!privacy.retentionEnabled || !privacy.controllerName))
+    )
+      throw new Error(
+        "Configure privacy retention, publication and the legal operator name before publishing",
+      );
+  }
   for (const key of ["staffOrigin", "todoOrigin"]) {
     const url = new URL(config[key]);
     if (url.protocol !== "https:" || url.origin !== config[key])

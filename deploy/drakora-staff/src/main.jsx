@@ -1,3 +1,4 @@
+import { LegalNotice } from "./legal-notice.jsx";
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
@@ -712,7 +713,10 @@ function App() {
               </a>
             )}
           </section>
-          <footer className="login-footer">Drakora Network · Staff</footer>
+          <footer className="login-footer">
+            Drakora Network · Staff
+            <LegalNotice />
+          </footer>
         </div>
       </main>
     );
@@ -1082,6 +1086,7 @@ function App() {
           ) : (
             <Overview user={user} timeFormat={preferences.format} />
           )}
+          <LegalNotice />
         </main>
       </div>
     </div>

@@ -28,6 +28,7 @@ export function ticketMail(config, service, suppliedTransport) {
             blocked.add(job.ticketId);
             continue;
           }
+          if (service.store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = service.get(job.ticketId);
           if (!ticket.contactEmail) {
             service.store.delete("ticket-email-outbox", key);
@@ -120,6 +121,7 @@ export function ticketMail(config, service, suppliedTransport) {
       });
     return running;
   }
+  service.registerCleanupWaiter?.(() => running);
   const changed = () => {
     void pump();
   };

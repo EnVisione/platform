@@ -1,3 +1,4 @@
+import { LegalNotice } from "./legal-notice.jsx";
 import React, { useEffect, useRef, useState } from "react";
 import {
   applicationRoles,
@@ -418,6 +419,7 @@ export function PublicApplication() {
           className={`apply-card${receipt ? " apply-receipt" : ""}`}
           aria-labelledby="apply-title"
         >
+          <LegalNotice application />
           {!draft ? (
             <>
               <h1 id="apply-title">Staff applications</h1>
@@ -1160,14 +1162,14 @@ export function PublicApplication() {
                     <p className="apply-muted">
                       Updates use your selected contact method. Discord updates
                       use DMs, with a private channel in Drakora when DMs are
-                      blocked. Email sending is awaiting setup; staff can use
-                      your address manually. If denied, you must wait at least 7
-                      days before applying for the same role again. The decision
-                      will include your reapplication date.
+                      blocked. Email updates use our configured mail service. If
+                      denied, you must wait at least 7 days before applying for
+                      the same role again. The decision will include your
+                      reapplication date.
                     </p>
                     {check(
                       "privacyConsent",
-                      "I agree that Drakora may store these details and let authorized staff read and contact me about my application.",
+                      "I have read the Privacy Policy and agree to the Terms of Service.",
                     )}
                     {check(
                       "accuracyConfirmed",
@@ -1218,7 +1220,8 @@ export function PublicApplication() {
           )}
         </section>
         <footer className="apply-footer">
-          Drakora Network · Staff applications
+          Drakora Network · Staff applications ·{" "}
+          <a href="/privacy-settings">Privacy information</a>
         </footer>
       </div>
     </main>

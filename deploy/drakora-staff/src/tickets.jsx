@@ -1,3 +1,4 @@
+import { LegalNotice } from "./legal-notice.jsx";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ticketTypes,
@@ -1413,6 +1414,7 @@ export function PublicTickets() {
               </p>
             )}
             <form className="ticket-new-form" onSubmit={open}>
+              <LegalNotice application />
               {(!session.identity || session.identity.guest) && (
                 <label>
                   Email for ticket updates

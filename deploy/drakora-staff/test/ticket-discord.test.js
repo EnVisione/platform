@@ -1363,3 +1363,57 @@ test("temporary DM delivery errors retry privately without a fallback ping", asy
   assert.equal(service.store.entries("ticket-feedback-send")[0][1].route, "dm");
   assert.equal(service.store.entries("ticket-feedback-delivery").length, 0);
 });
+
+test("retention erasure deletes only its owned channel and tracked bot notices", async (t) => {
+  const app = setupDiscord(t, true);
+  const saved = app.service.create(
+    { id: app.user.id, name: "Player" },
+    {
+      requestId: randomUUID(),
+      ign: "Jojo",
+      type: "general",
+      location: "Void",
+      description: "An issue with enough detail for the support team.",
+    },
+  );
+  await app.transport.create(saved);
+  await app.service.pump();
+  const current = app.service.get(saved.id),
+    target = app.channels.get(current.channelId);
+  const notice = await app.staffChannel.send({
+    content: "A saved ticket notice",
+  });
+  notice.delete = () => app.staffChannel.messages.delete(notice.id);
+  app.client.channels = {
+    fetch: async (id) =>
+      app.channels.get(id) ||
+      (id === app.staffChannel.id ? app.staffChannel : null),
+  };
+  app.service.store.set(
+    "ticket-notice-delivery",
+    saved.id + ":opened",
+    {
+      ticketId: saved.id,
+      channelId: app.staffChannel.id,
+      messageId: notice.id,
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const pending = await app.staffChannel.send({ content: "A pending notice" });
+  pending.delete = () => app.staffChannel.messages.delete(pending.id);
+  app.service.store.set(
+    "ticket-notice-send",
+    saved.id + ":reminder",
+    { channelId: app.staffChannel.id, acknowledgedId: pending.id },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const topic = target.topic;
+  target.topic = "Unrelated channel";
+  await assert.rejects(app.transport.eraseTicket(current), /ownership/);
+  assert.ok(app.channels.has(current.channelId));
+  target.topic = topic;
+  await app.transport.eraseTicket(current);
+  assert.equal(app.channels.has(current.channelId), false);
+  assert.equal(app.staffChannel.savedMessages.has(notice.id), false);
+  assert.equal(app.staffChannel.savedMessages.has(pending.id), false);
+});

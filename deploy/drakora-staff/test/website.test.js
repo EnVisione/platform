@@ -455,7 +455,8 @@ test("Discord counts share requests, respect rate limits and expire stale readin
         });
       if (mode === "failure") throw new Error("private detail");
       return Response.json({
-        approximate_presence_count: mode === "zero" ? 0 : 121,
+        approximate_member_count: mode === "zero" ? 0 : 500,
+        approximate_presence_count: 121,
         name: "private guild metadata",
       });
     },
@@ -463,7 +464,7 @@ test("Discord counts share requests, respect rate limits and expire stale readin
   );
   const first = await Promise.all([status(), status(), status()]);
   assert.equal(calls, 1);
-  assert.equal(first[0].discord.active, 121);
+  assert.equal(first[0].discord.total, 500);
   assert.equal(first[0].players, 0);
   assert.equal("name" in first[0].discord, false);
   time = 59999;
@@ -478,17 +479,17 @@ test("Discord counts share requests, respect rate limits and expire stale readin
   assert.equal(calls, 2);
   mode = "zero";
   time = 180000;
-  assert.equal((await status()).discord.active, 0);
+  assert.equal((await status()).discord.total, 0);
   assert.equal(calls, 3);
   mode = "failure";
   time += 15 * 60000;
-  assert.equal((await status()).discord.active, null);
+  assert.equal((await status()).discord.total, null);
   const empty = communityStatus(
     config,
-    async () => Response.json({ approximate_presence_count: -1 }),
+    async () => Response.json({ approximate_member_count: -1 }),
     () => time,
   );
-  assert.equal((await empty()).discord.active, null);
+  assert.equal((await empty()).discord.total, null);
 });
 
 test("Help guidance migrates without replacing pages, persists and survives older editors", (t) => {

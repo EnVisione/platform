@@ -11,7 +11,9 @@ export const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 export function openStore(path, encryptionKey) {
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+  db.exec(
+    "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA secure_delete=ON;",
+  );
   db.exec(`CREATE TABLE IF NOT EXISTS records (
     kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL,
     expires INTEGER NOT NULL, PRIMARY KEY (kind,id)
@@ -46,6 +48,12 @@ export function openStore(path, encryptionKey) {
   );
   const remove = db.prepare("DELETE FROM records WHERE kind=? AND id=?");
   const store = {
+    kinds() {
+      return db
+        .prepare("SELECT DISTINCT kind FROM records")
+        .all()
+        .map((row) => row.kind);
+    },
     get(kind, id) {
       const row = select.get(kind, id, Date.now());
       return row ? open(row.value) : undefined;

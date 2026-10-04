@@ -40,7 +40,7 @@ export function ticketService(
   config,
   store,
   rolePolicy,
-  { now = Date.now } = {},
+  { now = Date.now, onActivity = () => {} } = {},
 ) {
   const events = new EventEmitter();
   events.setMaxListeners(200);
@@ -51,11 +51,13 @@ export function ticketService(
     expiring,
     stopped = false;
   const viewers = new Map();
+  const cleanupWaiters = [];
   const put = (kind, id, value) => store.set(kind, id, value, forever);
   const get = (id) => {
     if (!idPattern.test(id || "")) throw new AuthError("ticket_not_found", 404);
     const ticket = store.get("ticket", id);
-    if (!ticket) throw new AuthError("ticket_not_found", 404);
+    if (!ticket || ticket.erasingAt)
+      throw new AuthError("ticket_not_found", 404);
     return ticket;
   };
   function staff(user, ticket, capability = "tickets.view") {
@@ -98,6 +100,10 @@ export function ticketService(
     );
   }
   function audit(ticket, user, action, detail, internal = false) {
+    if (ticket.owner.id === user.id) {
+      ticket.lastActiveAt = now();
+      if (!ticket.owner.guest) onActivity(user.id, ticket.lastActiveAt);
+    }
     ticket.revision++;
     ticket.updatedAt = now();
     const entry = {
@@ -303,6 +309,7 @@ export function ticketService(
       .map(([, ticket]) => ticket)
       .filter(
         (ticket) =>
+          !ticket.erasingAt &&
           (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
           current.capabilities[ticketCapability(ticket)] &&
           (!status || ticket.status === status) &&
@@ -1070,6 +1077,7 @@ export function ticketService(
             if (job.kind === "message") blocked.add(job.ticketId);
             continue;
           }
+          if (store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = get(job.ticketId);
           if (job.kind === "feedback") {
             const intent = store.get("ticket-feedback-send", key);
@@ -1201,6 +1209,7 @@ export function ticketService(
           }
         }
         for (const [, ticket] of store.entries("ticket")) {
+          if (ticket.erasingAt) continue;
           if (
             ["closed", "awaiting_resolution"].includes(ticket.status) &&
             ticket.channelId &&
@@ -1217,6 +1226,53 @@ export function ticketService(
     return expiring;
   }
   return {
+    async eraseInactive(id, lastActiveAt) {
+      const ticket = store.get("ticket", id);
+      if (!ticket || (ticket.lastActiveAt || ticket.createdAt) > lastActiveAt)
+        return false;
+      if (store.get("privacy-hold", id)) return false;
+      if (transport && !transport.eraseTicket)
+        throw new Error("Ticket erasure transport unavailable");
+      ticket.erasingAt ||= now();
+      put("ticket", id, ticket);
+      await running;
+      await expiring;
+      await Promise.all(cleanupWaiters.map((wait) => wait()));
+      if (transport) {
+        for (const [, file] of store.entries("ticket-media"))
+          if (file.ticketId === id && !file.purged)
+            await transport.removeMedia(file);
+        await transport.eraseTicket(ticket);
+      } else if (ticket.channelId)
+        throw new Error("Discord cleanup unavailable");
+      store.transaction(() => {
+        const messageIds = new Set(
+          store.entries(`ticket-messages:${id}`).map(([, value]) => value.id),
+        );
+        for (const kind of store.kinds()) {
+          if (!kind.startsWith("ticket") && !kind.startsWith("partnership"))
+            continue;
+          for (const [key, value] of store.entries(kind))
+            if (
+              kind.endsWith(`:${id}`) ||
+              key === id ||
+              key.startsWith(`${id}:`) ||
+              value?.ticketId === id ||
+              value?.id === id ||
+              (kind === "ticket-send" && messageIds.has(key)) ||
+              (kind === "ticket-channel" && value === id)
+            )
+              store.delete(kind, key);
+        }
+        store.delete("privacy-hold", id);
+      });
+      viewers.delete(id);
+      events.emit("changed", { id });
+      return true;
+    },
+    registerCleanupWaiter(wait) {
+      cleanupWaiters.push(wait);
+    },
     get,
     list,
     view,
@@ -1257,7 +1313,10 @@ export function ticketService(
       transport = value;
     },
     all() {
-      return store.entries("ticket").map(([, ticket]) => ticket);
+      return store
+        .entries("ticket")
+        .map(([, ticket]) => ticket)
+        .filter((ticket) => !ticket.erasingAt);
     },
     attention(user) {
       staff(user);

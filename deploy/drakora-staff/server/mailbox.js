@@ -1,3 +1,4 @@
+import { monthsAfter, inactivityMonths } from "../shared/privacy.js";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import sanitizeHtml from "sanitize-html";
@@ -935,7 +936,7 @@ export function mailboxService(config, store, dependencies = {}) {
             "mail-response",
             hash(repliedMessageId),
             { sentAt: Date.now() },
-            Number.MAX_SAFE_INTEGER,
+            monthsAfter(Date.now(), inactivityMonths),
           );
         return result;
       } finally {

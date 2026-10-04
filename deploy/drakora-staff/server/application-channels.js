@@ -121,5 +121,24 @@ export function applicationChannels(config, store, request) {
       url: `https://discord.com/channels/${settings.guildId}/${value.id}`,
     };
   }
-  return { channel };
+  async function erase(userId) {
+    const saved = store.get("application-private-channel", userId);
+    if (!saved) return;
+    if (!settings || saved.guildId !== settings.guildId)
+      throw unavailable("fallback_channel_changed");
+    try {
+      const value = await request(`/channels/${saved.channelId}`);
+      if (
+        value.guild_id !== settings.guildId ||
+        value.type !== 0 ||
+        value.topic !== `Drakora application updates · ${userId}`
+      )
+        throw unavailable("fallback_channel_changed");
+      await request(`/channels/${saved.channelId}`, "DELETE");
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+    store.delete("application-private-channel", userId);
+  }
+  return { channel, erase };
 }

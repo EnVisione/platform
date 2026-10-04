@@ -1,3 +1,4 @@
+import { LegalNotice } from "./legal-notice.jsx";
 import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 
@@ -136,6 +137,7 @@ export function PartnershipForm() {
         </section>
       ) : (
         <form className="public-panel public-partner-form" onSubmit={submit}>
+          <LegalNotice application />
           {error && (
             <p className="ticket-error" role="alert">
               {error}

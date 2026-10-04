@@ -418,9 +418,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       let intent = service.store.get("ticket-notice-send", key);
       function acknowledge(sent) {
         put({ ...intent, acknowledgedId: sent.id });
-        return { id: sent.id };
+        return { id: sent.id, channelId: target.id };
       }
-      if (intent?.acknowledgedId) return { id: intent.acknowledgedId };
+      if (intent?.acknowledgedId)
+        return { id: intent.acknowledgedId, channelId: target.id };
       if (intent) {
         // Recover a send whose response was lost, including after a restart.
         for (let page = 0; page < 5; page++) {
@@ -719,6 +720,71 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async deleteChannel(ticket) {
       await ready();
       return await closeChannel(ticket, true);
+    },
+    async eraseTicket(ticket) {
+      await ready();
+      let target;
+      try {
+        if (ticket.channelId)
+          target = await (await guild()).channels.fetch(ticket.channelId);
+      } catch (error) {
+        if (error.code !== 10003) throw error;
+      }
+      if (
+        target &&
+        (target.guildId !== settings.guildId ||
+          target.type !== ChannelType.GuildText ||
+          target.topic !== marker(ticket.id))
+      )
+        throw new Error("Ticket erasure channel ownership does not match");
+      const copies = [];
+      for (const kind of [
+        "ticket-notice-delivery",
+        "ticket-notice-send",
+        "ticket-feedback-delivery",
+        "ticket-feedback-send",
+        "partnership-dm-send",
+      ])
+        for (const [key, value] of service.store.entries(kind))
+          if (
+            (value.ticketId === ticket.id ||
+              key === ticket.id ||
+              key.startsWith(`${ticket.id}:`)) &&
+            (value.messageId || value.acknowledgedId)
+          )
+            copies.push({
+              ...value,
+              messageId: value.messageId || value.acknowledgedId,
+            });
+      const deleted = new Set();
+      for (const copy of copies) {
+        let channelId = copy.channelId;
+        if (!channelId && ticket.type === "partnership")
+          channelId = (
+            await (
+              await client.users.fetch(ticket.partnership.discordId)
+            ).createDM()
+          ).id;
+        if (!channelId)
+          throw new Error("Ticket notification destination unavailable");
+        const copyId = `${channelId}:${copy.messageId}`;
+        if (deleted.has(copyId)) continue;
+        try {
+          const destination = await client.channels.fetch(channelId);
+          if (!destination) continue;
+          const message = await destination.messages.fetch(copy.messageId);
+          if (message.author.id !== client.user.id)
+            throw new Error("Ticket notification ownership does not match");
+          await message.delete();
+        } catch (error) {
+          if (![10003, 10008].includes(error.code)) throw error;
+        }
+        deleted.add(copyId);
+      }
+
+      if (!target) return;
+      await target.delete("Ticket data retention expired.");
+      webhooks.delete(ticket.channelId);
     },
     async message(ticket, message, attachments, { retry = false } = {}) {
       await ready();
@@ -1300,7 +1366,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           .map((type) => ({ label: type.name, value: type.id })),
       );
     return interaction.reply({
-      content: "Choose the kind of help you need. Your ticket stays private.",
+      content: `Choose the kind of help you need. Your ticket stays private. By submitting, you agree to the [Terms of Service](${config.applications.publicOrigin}/terms). Read the [Privacy Policy](${config.applications.publicOrigin}/privacy) for data use, retention and your rights.`,
       components: [
         new ActionRowBuilder().addComponents(select),
         myTicketsButton(),
@@ -1685,6 +1751,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     setup = null;
     void recover();
   };
+  service.registerCleanupWaiter?.(() =>
+    Promise.allSettled([recovering, refreshing]),
+  );
   client.on("messageCreate", handleMessage);
   client.on("raw", handleRaw);
   client.on("interactionCreate", handleInteraction);

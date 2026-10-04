@@ -1,3 +1,4 @@
+import { monthsAfter, inactivityMonths } from "../shared/privacy.js";
 import { randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
 import { listFilters, matchesText } from "./list-filters.js";
@@ -275,7 +276,7 @@ export function rolePermissions(config, store) {
         action,
         ...detail,
       },
-      Number.MAX_SAFE_INTEGER,
+      monthsAfter(Date.now(), inactivityMonths),
     );
   }
   return {
