@@ -230,32 +230,40 @@ export const inboxPermission = (address, action = "view") =>
 export function staffPermissionCatalog(identities = []) {
   const categoryPermissions = ticketCategories.flatMap(
     ({ id: category, name }) =>
-      ["view", "reply", "claim", "takeover", "close", "delete"].map(
-        (action) => ({
-          key: `tickets.category.${category}.${action}`,
-          group: `${name} tickets`,
-          label: `${{ view: "View", reply: "Reply to", claim: "Claim", takeover: "Take over", close: "Resolve", delete: "Delete channels for" }[action]} ${name.toLowerCase()} tickets`,
-          description:
-            category === "billing"
-              ? "Billing access is limited to Founders. Only a Founder can change these grants."
-              : ["partnership", "staff"].includes(category)
-                ? "Access is limited to Managers and Founders, including messages, files, history and transcripts."
-                : "All dashboard staff have view access by default. Replying, claiming and resolving use separate permissions.",
-          requires: [
-            "dashboard.view",
-            "tickets.view",
-            ...(action === "view"
-              ? []
-              : [
-                  `tickets.${action}`,
-                  `tickets.category.${category}.view`,
-                  ...(action === "takeover"
-                    ? [`tickets.category.${category}.claim`]
-                    : []),
-                ]),
-          ],
-        }),
-      ),
+      (category === "partnership"
+        ? ["view", "decide"]
+        : ["view", "reply", "claim", "takeover", "close", "delete"]
+      ).map((action) => ({
+        key: `tickets.category.${category}.${action}`,
+        group: `${name} tickets`,
+        label:
+          category === "partnership"
+            ? action === "view"
+              ? "View partnership requests"
+              : "Accept or deny partnership requests"
+            : `${{ view: "View", reply: "Reply to", claim: "Claim", takeover: "Take over", close: "Resolve", delete: "Delete channels for", decide: "Accept or deny" }[action]} ${name.toLowerCase()} tickets`,
+        description:
+          category === "billing"
+            ? "Billing access is limited to Founders. Only a Founder can change these grants."
+            : ["partnership", "staff"].includes(category)
+              ? "Access is limited to Managers and Founders, including messages, files, history and transcripts."
+              : "All dashboard staff have view access by default. Replying, claiming and resolving use separate permissions.",
+        requires: [
+          "dashboard.view",
+          "tickets.view",
+          ...(action === "view" || action === "decide"
+            ? action === "decide"
+              ? [`tickets.category.${category}.view`]
+              : []
+            : [
+                `tickets.${action}`,
+                `tickets.category.${category}.view`,
+                ...(action === "takeover"
+                  ? [`tickets.category.${category}.claim`]
+                  : []),
+              ]),
+        ],
+      })),
   );
   const inboxPermissions = identities.flatMap(({ address }) =>
     ["view", "send", "reply"].map((action) => ({

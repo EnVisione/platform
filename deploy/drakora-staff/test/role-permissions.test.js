@@ -460,7 +460,15 @@ test("category and inbox defaults preserve billing and partnership privacy acros
   for (const user of [manager, admin, helper])
     assert.equal(user.capabilities["tickets.category.billing.view"], false);
   for (const user of [founder, manager]) {
-    assert.equal(user.capabilities["tickets.category.partnership.reply"], true);
+    assert.equal(
+      user.capabilities["tickets.category.partnership.decide"],
+      true,
+    );
+    for (const action of ["reply", "claim", "close", "takeover", "delete"])
+      assert.equal(
+        user.capabilities[`tickets.category.partnership.${action}`],
+        undefined,
+      );
     assert.equal(
       user.capabilities["mail.inbox.partners@drakora.org.view"],
       true,

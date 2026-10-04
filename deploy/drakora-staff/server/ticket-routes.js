@@ -432,6 +432,15 @@ export function ticketRouter(
     );
   });
   if (staffView) {
+    router.post(
+      `${prefix}/:id/decision`,
+      express.json({ limit: "4kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        service.decidePartnership(await identity(req), req.params.id, req.body);
+        res.json({ ok: true });
+      },
+    );
     router.get(`${prefix}/:id/notes`, async (req, res) => {
       if (
         req.query.before !== undefined &&

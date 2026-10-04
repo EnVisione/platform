@@ -280,6 +280,23 @@ export function ticketService(
       }
       safe.contactEmail = ticket.contactEmail || null;
       safe.partnership = ticket.partnership || null;
+      if (ticket.type === "partnership" && ticket.partnership.decision) {
+        const decision = ticket.partnership.decision;
+        const jobKey = `${id}:decision:${decision.id}`;
+        const job = store.get("partnership-outbox", jobKey);
+        const delivery = store.get(
+          "partnership-delivery",
+          jobKey + decision.id,
+        );
+        safe.partnership = {
+          ...ticket.partnership,
+          notification: {
+            status: delivery ? "sent" : job?.failed ? "failed" : "pending",
+            via: delivery?.via || null,
+            at: delivery?.at || null,
+          },
+        };
+      }
       const current = rolePolicy.apply(user);
       safe.actions = Object.fromEntries(
         ["view", "reply", "claim", "takeover", "close", "delete"].map(
@@ -297,6 +314,14 @@ export function ticketService(
           ],
         ),
       );
+      if (ticket.type === "partnership") {
+        safe.actions = {
+          view: true,
+          decide: Boolean(
+            current.capabilities[ticketCapability(ticket, "decide")],
+          ),
+        };
+      }
       safe.takeoverRequest = takeoverRequestView(ticket);
       safe.actions.approveTakeover = Boolean(
         rolePolicy.isManager(current) &&
@@ -426,6 +451,7 @@ export function ticketService(
         ticket.helpedBy,
         ticket.ratingStaff,
         ticket.resolution?.actor,
+        ticket.partnership?.decision?.actor,
       ];
       if (
         matchesText(
@@ -696,6 +722,66 @@ export function ticketService(
     announce(ticket);
     return ticket;
   }
+  function decidePartnership(user, id, input) {
+    const ticket = get(id);
+    if (ticket.type !== "partnership")
+      throw new AuthError("invalid_partnership_decision", 400);
+    staff(user, ticket, ticketCapability(ticket, "decide"));
+    if (!rolePolicy.isManager(user))
+      throw new AuthError("ticket_access_denied");
+    if (
+      !input ||
+      !idPattern.test(input.requestId || "") ||
+      !["accepted", "denied"].includes(input.outcome) ||
+      !Number.isSafeInteger(input.revision)
+    )
+      throw new AuthError("invalid_partnership_decision", 400);
+    const reason = text(
+      input.reason ?? "",
+      0,
+      1000,
+      "invalid_partnership_decision",
+    );
+    const existing = ticket.partnership.decision;
+    if (existing) {
+      if (
+        existing.id === input.requestId &&
+        existing.outcome === input.outcome &&
+        existing.reason === reason
+      )
+        return ticket;
+      throw new AuthError("partnership_already_decided", 409);
+    }
+    if (ticket.revision !== input.revision)
+      throw new AuthError("partnership_changed", 409);
+    store.transaction(() => {
+      ticket.partnership.decision = {
+        id: input.requestId,
+        outcome: input.outcome,
+        reason,
+        actor: publicActor(user),
+        at: now(),
+      };
+      ticket.status = "closed";
+      ticket.closedAt = now();
+      audit(
+        ticket,
+        user,
+        input.outcome,
+        `Partnership request ${input.outcome}`,
+      );
+      const ref = ticket.partnership.decision.id;
+      store.delete("partnership-outbox", `${id}:opened:${id}`);
+      queue(ticket, "decision", ref);
+      const jobKey = `${id}:decision:${ref}`;
+      put("partnership-outbox", jobKey, {
+        ...store.get("partnership-outbox", jobKey),
+        generation: ref,
+      });
+    });
+    announce(ticket);
+    return ticket;
+  }
   function files(ticket, user, ids, internal = false) {
     if (
       !Array.isArray(ids) ||
@@ -820,6 +906,8 @@ export function ticketService(
   function notes(user, id, before) {
     const ticket = get(id);
     const current = staff(user, ticket);
+    if (ticket.type === "partnership")
+      throw new AuthError("partnership_application_only", 409);
     const page = store.page(
       `ticket-messages:${id}`,
       50,
@@ -1413,6 +1501,8 @@ export function ticketService(
     return true;
   }
   function ingest(id, incoming, closing = false) {
+    if (get(id).type === "partnership")
+      throw new AuthError("partnership_application_only", 409);
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
     const internal = Boolean(
@@ -1861,6 +1951,7 @@ export function ticketService(
     view,
     create,
     createPartnership,
+    decidePartnership,
     visible,
     staffStats,
     reply,

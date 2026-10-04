@@ -129,7 +129,7 @@ test("internal notes stay private, do not claim or extend owner inactivity, and 
   );
 });
 
-test("partnership notes use the internal Discord outbox instead of the applicant contact method", (t) => {
+test("partnership applications reject internal notes without queuing staff or applicant messages", (t) => {
   const { service, store } = setup(t);
   const ticket = service.createPartnership(
     owner,
@@ -147,18 +147,21 @@ test("partnership notes use the internal Discord outbox instead of the applicant
     "a".repeat(64),
   );
   const existing = store.entries("partnership-outbox").length;
-  service.addNote(manager, ticket.id, message("Private partnership review"));
+  assert.throws(
+    () =>
+      service.addNote(
+        manager,
+        ticket.id,
+        message("Private partnership review"),
+      ),
+    { code: "ticket_access_denied" },
+  );
+  assert.throws(() => service.notes(manager, ticket.id), {
+    code: "partnership_application_only",
+  });
   assert.equal(store.entries("partnership-outbox").length, existing);
-  assert.equal(
-    store.entries("ticket-outbox").filter(([, job]) => job.kind === "note")
-      .length,
-    1,
-  );
+  assert.equal(store.entries("ticket-outbox").length, 0);
   assert.equal(service.view(manager, ticket.id, true).messages.length, 0);
-  assert.equal(
-    service.notes(manager, ticket.id).messages[0].content,
-    "Private partnership review",
-  );
 });
 
 test("ticket filters combine assignment, text, dates, type and category before pagination and counts", (t) => {

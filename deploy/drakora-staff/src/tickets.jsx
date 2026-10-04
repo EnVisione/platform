@@ -68,8 +68,15 @@ const errors = {
     "The transcript is still being saved. Try reopening again shortly.",
   ticket_feedback_expired:
     "This ticket changed. Reload it to see current feedback and reopen options.",
+  partnership_already_decided:
+    "This request already has a final decision. Reload to see it.",
+  partnership_changed: "This request changed. Reload it before deciding.",
+  invalid_partnership_decision:
+    "Choose accept or deny. An optional message can contain up to 1,000 characters.",
+  partnership_application_only:
+    "Partnership requests use accept or deny. Follow up through Email.",
   partnership_limit:
-    "There is already an open partnership request for this contact. Continue in that request.",
+    "There is already a partnership request awaiting a decision for this contact.",
   invalid_request:
     "Your session changed. Reload this page before trying again.",
 };
@@ -763,6 +770,240 @@ function InternalNotes({ base, csrf, active, canReply }) {
   );
 }
 
+function PartnershipReview({
+  ticket,
+  busy,
+  error,
+  connected,
+  backHref,
+  capabilities,
+  onDecision,
+}) {
+  const [outcome, setOutcome] = useState(""),
+    [reason, setReason] = useState("");
+  const requestId = useRef(crypto.randomUUID());
+  const decision = ticket.partnership.decision;
+  const notification = ticket.partnership.notification;
+  return (
+    <div className="ticket-chat-layout ticket-details-open partnership-review">
+      <header className="ticket-chat-header">
+        <div className="ticket-heading">
+          <a
+            className="ticket-back"
+            href={backHref || "/tickets?category=partnership"}
+          >
+            ← Back to partnership requests
+          </a>
+          <h2>
+            Modpack partnership{" "}
+            <span className="ticket-heading-owner">{ticket.ign}</span>
+          </h2>
+          <div className="ticket-heading-meta">
+            <span className={`ticket-state ${ticket.status}`}>
+              {ticketStatusLabel(ticket)}
+            </span>
+            <small className="ticket-connection">
+              {connected ? "Live" : "Reconnecting…"}
+            </small>
+          </div>
+        </div>
+        {capabilities["mail.view"] &&
+          capabilities["mail.inbox.partners@drakora.org.view"] && (
+            <a className="ticket-primary" href="/email">
+              Open partnership email
+            </a>
+          )}
+      </header>
+      <section
+        className="partnership-review-main"
+        aria-label="Partnership application"
+      >
+        {error && (
+          <p className="ticket-error" role="alert">
+            {error}
+          </p>
+        )}
+        <article className="ticket-intake partnership-proposal">
+          <h3>Partnership proposal</h3>
+          <p className="ticket-muted">
+            Submitted {stamp(ticket.createdAt)} ·{" "}
+            {ticket.partnership.relationship === "owner"
+              ? "Pack owner"
+              : "Pack developer"}
+          </p>
+          <p className="partnership-proposal-text">{ticket.description}</p>
+          <a
+            href={ticket.partnership.packUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View modpack ↗
+          </a>
+        </article>
+        <section
+          className="ticket-intake partnership-decision"
+          aria-label="Partnership decision"
+        >
+          <h3>{decision ? "Decision recorded" : "Review this request"}</h3>
+          {decision ? (
+            <>
+              <p>
+                <strong>
+                  {decision.outcome === "accepted" ? "Accepted" : "Denied"}
+                </strong>{" "}
+                by {decision.actor.name} · {stamp(decision.at)}
+              </p>
+              {decision.reason && (
+                <p className="partnership-proposal-text">{decision.reason}</p>
+              )}
+              <p role="status">
+                {notification?.status === "sent"
+                  ? `${notification.via === "email" ? "Email accepted by the mail service" : "Discord DM sent"} · ${stamp(notification.at)}`
+                  : notification?.status === "failed"
+                    ? "Notification needs attention. Check the partnership inbox or Discord DM before sending a manual update. The decision is saved."
+                    : "Decision saved. The applicant notification is queued."}
+              </p>
+            </>
+          ) : ticket.actions?.decide ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void onDecision({
+                  requestId: requestId.current,
+                  revision: ticket.revision,
+                  outcome,
+                  reason,
+                });
+              }}
+            >
+              <p>
+                Choose whether to accept this partnership proposal. The
+                applicant receives the decision through their chosen contact
+                method.
+              </p>
+              <div className="partnership-decision-actions">
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={outcome === "accepted"}
+                  onClick={() => {
+                    requestId.current = crypto.randomUUID();
+                    setOutcome("accepted");
+                  }}
+                >
+                  Accept request
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={outcome === "denied"}
+                  onClick={() => {
+                    requestId.current = crypto.randomUUID();
+                    setOutcome("denied");
+                  }}
+                >
+                  Deny request
+                </button>
+              </div>
+              {outcome && (
+                <>
+                  <label>
+                    Optional message to the applicant
+                    <textarea
+                      maxLength={1000}
+                      rows={4}
+                      value={reason}
+                      disabled={busy}
+                      onChange={(event) => setReason(event.target.value)}
+                    />
+                  </label>
+                  <p className="ticket-muted">
+                    {outcome === "accepted"
+                      ? "The notification confirms acceptance and says our team will be in touch with more information and next steps. Acceptance does not automatically provision a server."
+                      : "The notification thanks them for applying and explains that we cannot accept the request at this time."}
+                  </p>
+                  <button className="ticket-primary" disabled={busy}>
+                    {busy
+                      ? "Saving decision…"
+                      : outcome === "accepted"
+                        ? "Confirm acceptance"
+                        : "Confirm denial"}
+                  </button>
+                </>
+              )}
+            </form>
+          ) : (
+            <p>
+              You can read this request. Your role does not have permission to
+              accept or deny it.
+            </p>
+          )}
+          <p className="ticket-muted">
+            Further correspondence is handled through the partnership email
+            inbox. This application has no ticket chat or internal notes.
+          </p>
+        </section>
+        {ticket.messages.length > 0 && (
+          <details className="ticket-intake partnership-correspondence">
+            <summary>Previous correspondence</summary>
+            {ticket.messages.map((message) => (
+              <article className="ticket-message" key={message.id}>
+                <Avatar actor={message.actor} />
+                <div>
+                  <strong>{message.actor.name}</strong> · {stamp(message.at)}
+                  <p>{message.content}</p>
+                  {message.attachments.map((file) => (
+                    <FileView key={file.id} file={file} />
+                  ))}
+                  {message.delivery === "cancelled" && (
+                    <small>Not sent. Follow up through Email if needed.</small>
+                  )}
+                </div>
+              </article>
+            ))}
+          </details>
+        )}
+      </section>
+      <aside className="ticket-player" aria-label="Partnership details">
+        <div className="ticket-panel-heading">
+          <h3>Applicant details</h3>
+        </div>
+        <div className="ticket-panel-content">
+          <strong>{ticket.ign}</strong>
+          <dl className="ticket-facts">
+            <dt>Email</dt>
+            <dd>{ticket.contactEmail}</dd>
+            <dt>Discord</dt>
+            <dd>{ticket.partnership.discord}</dd>
+            <dt>Contact preference</dt>
+            <dd>
+              {ticket.partnership.emailFallback
+                ? "Email · Discord DMs were blocked"
+                : ticket.partnership.preference === "discord"
+                  ? "Discord direct message"
+                  : "Email"}
+            </dd>
+            <dt>Reference</dt>
+            <dd className="ticket-reference">{ticket.id}</dd>
+          </dl>
+          <section className="ticket-detail-section">
+            <h3>Activity</h3>
+            {ticket.history.map((entry) => (
+              <p key={entry.id}>
+                <strong>{entry.actor.name}</strong>
+                <br />
+                {entry.detail}
+                <br />
+                <small>{stamp(entry.at)}</small>
+              </p>
+            ))}
+          </section>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function TicketChat({
   id,
   csrf,
@@ -861,7 +1102,18 @@ function TicketChat({
         <button onClick={refresh}>Retry</button>
       </div>
     );
-  const partner = ticket.type === "partnership";
+  if (ticket.type === "partnership")
+    return (
+      <PartnershipReview
+        ticket={ticket}
+        busy={busy}
+        error={error}
+        connected={connected}
+        backHref={backHref}
+        capabilities={capabilities}
+        onDecision={(data) => action("decision", data)}
+      />
+    );
   const active = ["pending", "claimed"].includes(ticket.status);
   const combined = [...older, ...ticket.messages].filter(
     (message, index, values) =>
@@ -890,7 +1142,7 @@ function TicketChat({
             <small className="ticket-connection" role="status">
               {connected ? "Live" : "Reconnecting…"}
               {ticket.deliveryPending
-                ? ` · ${ticket.deliveryPending} ${partner ? "contact" : "Discord"} updates pending`
+                ? ` · ${ticket.deliveryPending} Discord updates pending`
                 : ticket.sync === "pending"
                   ? " · Creating Discord channel…"
                   : ""}
@@ -1108,27 +1360,11 @@ function TicketChat({
                   </p>
                 ))}
                 <p>{ticket.description}</p>
-                {partner && (
-                  <p>
-                    <a
-                      href={ticket.partnership.packUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View modpack ↗
-                    </a>{" "}
-                    ·{" "}
-                    {ticket.partnership.relationship === "owner"
-                      ? "Pack owner"
-                      : "Pack developer"}
-                  </p>
-                )}
               </div>
             </details>
             {ticket.deliveryIssues?.length > 0 && (
               <p className="ticket-error" role="alert">
-                A contact update could not be confirmed. Check the partnership
-                inbox or Discord DM before sending again. The saved request and
+                A Discord update could not be confirmed. The saved request and
                 messages are safe.
               </p>
             )}
@@ -1157,29 +1393,20 @@ function TicketChat({
                   ))}
                   {message.delivery === "failed" && (
                     <small className="ticket-error">
-                      Delivery needs attention. Check the contact inbox before
-                      sending again.
+                      Discord delivery needs attention. The message is saved.
                     </small>
                   )}
                   {message.delivery === "pending" && (
-                    <small>
-                      Saved · sending{" "}
-                      {partner
-                        ? `by ${ticket.partnership.emailFallback ? "email" : ticket.partnership.preference === "discord" ? "Discord DM" : "email"}`
-                        : "to Discord"}
-                      …
-                    </small>
+                    <small>Saved · sending to Discord…</small>
                   )}
                 </div>
               </article>
             ))}
             {!combined.length && (
               <p className="ticket-empty">
-                {partner
-                  ? "No messages yet. Replies sent here go to the applicant’s chosen contact method."
-                  : staffView
-                    ? "No messages yet. Reply here to help the player."
-                    : "Your ticket is ready. Add any extra details here while you wait for staff."}
+                {staffView
+                  ? "No messages yet. Reply here to help the player."
+                  : "Your ticket is ready. Add any extra details here while you wait for staff."}
               </p>
             )}
           </div>
@@ -1226,9 +1453,7 @@ function TicketChat({
               csrf={csrf}
               resolution
               internal
-              uploadLimit={
-                partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit
-              }
+              uploadLimit={ticketMessageUploadLimit}
               onSent={async () => {
                 setClosing(false);
                 await refresh();
@@ -1241,9 +1466,7 @@ function TicketChat({
               csrf={csrf}
               onSent={refresh}
               macroCategory={staffView ? ticket.category : undefined}
-              uploadLimit={
-                partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit
-              }
+              uploadLimit={ticketMessageUploadLimit}
             />
           )}
           {!active && !(staffView && closing && ticket.status !== "closed") && (
@@ -1344,17 +1567,15 @@ function TicketChat({
         </div>
         <div className="ticket-panel-content" hidden={panel !== "details"}>
           <div className="ticket-person">
-            {!partner && (
-              <img
-                className="ticket-skin"
-                src={
-                  staffView
-                    ? `/apply/api/head/${ticket.ign}`
-                    : `/help/api/head/${ticket.ign}`
-                }
-                alt={`${ticket.ign}'s Minecraft skin`}
-              />
-            )}
+            <img
+              className="ticket-skin"
+              src={
+                staffView
+                  ? `/apply/api/head/${ticket.ign}`
+                  : `/help/api/head/${ticket.ign}`
+              }
+              alt={`${ticket.ign}'s Minecraft skin`}
+            />
             <div>
               <strong>{ticket.ign}</strong>
               <span>
@@ -1432,7 +1653,7 @@ function TicketChat({
               </section>
             )}
           <section className="ticket-detail-section">
-            <h3>{partner ? "Partner contact" : "Player information"}</h3>
+            <h3>Player information</h3>
             <dl className="ticket-facts">
               {ticket.helpedBy && (
                 <>
@@ -1440,26 +1661,10 @@ function TicketChat({
                   <dd>{ticket.helpedBy.name}</dd>
                 </>
               )}
-              {staffView && !partner && ticket.contactEmail && (
+              {staffView && ticket.contactEmail && (
                 <>
                   <dt>Contact email</dt>
                   <dd>{ticket.contactEmail}</dd>
-                </>
-              )}
-              {partner && (
-                <>
-                  <dt>Email</dt>
-                  <dd>{ticket.contactEmail}</dd>
-                  <dt>Discord</dt>
-                  <dd>{ticket.partnership.discord}</dd>
-                  <dt>Contact preference</dt>
-                  <dd>
-                    {ticket.partnership.emailFallback
-                      ? "Email · Discord messages were blocked"
-                      : ticket.partnership.preference === "discord"
-                        ? "Discord direct messages"
-                        : "Email"}
-                  </dd>
                 </>
               )}
               <dt>Ticket opened from</dt>
@@ -1470,7 +1675,7 @@ function TicketChat({
               <dd className="ticket-reference">{ticket.id}</dd>
             </dl>
           </section>
-          {staffView && !partner && (
+          {staffView && (
             <p className="ticket-integration-note">
               Minecraft activity is not connected yet.
             </p>

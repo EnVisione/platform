@@ -160,7 +160,7 @@ const ticketStaffNotices = tickets
   : undefined;
 const partnerships =
   tickets && mail
-    ? partnershipContact(config, tickets, mail, office.gateway, ticketTransport)
+    ? partnershipContact(tickets, mail, office.gateway)
     : undefined;
 office?.onAccessChanged((packet) => {
   const access = discord.observe(packet);

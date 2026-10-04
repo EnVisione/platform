@@ -8,7 +8,7 @@ const errors = {
   partnership_discord_required:
     "Connect your Discord account and confirm that the Drakora bot can message you.",
   partnership_limit:
-    "You already have an open partnership request. Reply to its email or bot message to continue.",
+    "You already have a partnership request awaiting a decision. Contact partners@drakora.org if you need to update it.",
   invalid_ticket_email: "Enter a valid email address.",
   invalid_pack_link: "Enter a full HTTPS link to your modpack.",
   invalid_ticket:
@@ -126,7 +126,8 @@ export function PartnershipForm() {
             {result.preference === "discord"
               ? "the Drakora bot on Discord"
               : "email"}
-            . Reply there to keep the conversation going.
+            . You’ll receive our decision there. For additional questions,
+            contact partners@drakora.org.
           </p>
           <p>
             Reference: <strong>{result.reference}</strong>

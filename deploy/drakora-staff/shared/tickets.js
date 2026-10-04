@@ -18,6 +18,14 @@ export const ticketStatuses = {
 };
 
 export function ticketStatusLabel(ticket) {
+  if (ticket.type === "partnership")
+    return ticket.partnership?.decision
+      ? ticket.partnership.decision.outcome === "accepted"
+        ? "Accepted"
+        : "Denied"
+      : ticket.status === "closed"
+        ? "Archived request"
+        : "Awaiting decision";
   if (ticket.status === "claimed") {
     if (ticket.claimedBy) return `Claimed by ${ticket.claimedBy.name}`;
     if (ticket.helpedBy) return `Staff replied · ${ticket.helpedBy.name}`;

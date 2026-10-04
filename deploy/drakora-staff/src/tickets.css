@@ -1011,3 +1011,69 @@
   font-size: 0.9rem;
   margin: 8px 0 16px;
 }
+
+.partnership-review-main {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.partnership-proposal,
+.partnership-decision {
+  padding: 24px;
+}
+.partnership-proposal-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.partnership-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 20px 0;
+}
+.partnership-decision-actions button[aria-pressed="true"] {
+  background: var(--ticket-accent);
+  color: var(--ticket-foreground);
+}
+.partnership-decision label {
+  display: grid;
+  gap: 8px;
+}
+.partnership-decision textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+}
+.partnership-correspondence {
+  padding: 20px;
+}
+@media (max-width: 1099px) {
+  .partnership-review {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .partnership-review-main {
+    flex: none;
+    overflow: visible;
+  }
+  .partnership-review .ticket-player {
+    flex-shrink: 0;
+    overflow: visible;
+  }
+  .partnership-review .ticket-panel-content {
+    overflow: visible;
+  }
+}
+@media (max-width: 600px) {
+  .partnership-review-main {
+    padding: 12px;
+  }
+  .partnership-proposal,
+  .partnership-decision {
+    padding: 16px;
+  }
+}

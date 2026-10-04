@@ -9,6 +9,7 @@ import { rolePermissions } from "../server/role-permissions.js";
 import { ticketService } from "../server/tickets.js";
 import { ticketRouter } from "../server/ticket-routes.js";
 import { partnershipContact } from "../server/partnership-contact.js";
+import { AuthError } from "../server/discord.js";
 import { config as fixture } from "./fixture.js";
 
 const manager = { id: "manager", name: "Manager", roles: ["10", "28"] };
@@ -34,6 +35,7 @@ function harness(t) {
   const config = {
     ...fixture,
     sessionSecret: randomBytes(32).toString("hex"),
+    staffOrigin: "https://staff.example.invalid",
     applications: { publicOrigin: "https://example.invalid" },
     tickets: { guildId: "2", staffChannelId: "notices" },
     mail: {
@@ -48,9 +50,6 @@ function harness(t) {
   const state = {
     emails: [],
     dms: new Map(),
-    incoming: [],
-    headers: new Map(),
-    uploads: [],
     blocked: false,
     lost: false,
     uncertain: false,
@@ -102,39 +101,8 @@ function harness(t) {
         });
       return { messageId: options.messageId, accepted: [draft.to] };
     },
-    async incoming(cursor) {
-      return {
-        validity: "51",
-        through: state.incoming.at(-1)?.uid || 0,
-        items: cursor
-          ? state.incoming.filter((item) => item.uid > cursor.uid)
-          : [],
-      };
-    },
-    async detail({ uid }) {
-      return state.headers.get(uid);
-    },
-    async attachment() {
-      return { filename: "proof.txt", content: Buffer.from("proof") };
-    },
   };
-  const media = {
-    async bytes() {
-      return Buffer.from("proof");
-    },
-    async upload(bytes, name, type, ticket) {
-      state.uploads.push(ticket.type);
-      return {
-        channelId: "private-partner-media",
-        messageId: randomUUID(),
-        attachmentId: randomUUID(),
-        name,
-        type,
-        size: bytes.length,
-      };
-    },
-  };
-  const contact = partnershipContact(config, tickets, mail, client, media, {
+  const contact = partnershipContact(tickets, mail, client, {
     now: () => clock,
   });
   t.after(async () => {
@@ -212,70 +180,121 @@ test("partnership intake rejects non-team members and unverified DMs and stays s
   assert.equal(tickets.view(founder, ticket.id, true).path, null);
 });
 
-test("staff email replies and verified incoming email stay in one request with deduplication", async (t) => {
-  const { tickets, contact, state } = harness(t);
+const decision = (tickets, id, outcome = "accepted", reason = "") => ({
+  requestId: randomUUID(),
+  revision: tickets.get(id).revision,
+  outcome,
+  reason,
+});
+
+test("partnership acceptance is final, permission controlled and delivered once by email", async (t) => {
+  const { tickets, contact, state, policy, store } = harness(t);
   const ticket = tickets.createPartnership(guest, input(), network);
   await contact.pump();
   assert.equal(state.emails.length, 1);
-  tickets.reply(
-    manager,
+  const data = decision(
+    tickets,
     ticket.id,
-    { requestId: randomUUID(), content: "Tell us the expected player count." },
-    true,
+    "accepted",
+    "We will discuss hosting requirements.",
   );
+  assert.throws(() => tickets.decidePartnership(helper, ticket.id, data), {
+    code: "ticket_access_denied",
+  });
+  assert.throws(
+    () =>
+      tickets.decidePartnership(manager, ticket.id, { ...data, revision: 0 }),
+    { code: "partnership_changed" },
+  );
+  assert.throws(
+    () =>
+      tickets.decidePartnership(manager, ticket.id, {
+        ...data,
+        outcome: "closed",
+      }),
+    { code: "invalid_partnership_decision" },
+  );
+  for (const action of ["reply", "claim", "closeTicket"])
+    assert.throws(
+      () =>
+        tickets[action](
+          manager,
+          ticket.id,
+          { requestId: randomUUID(), content: "Old chat reply" },
+          true,
+        ),
+      { code: "ticket_access_denied" },
+    );
+  assert.throws(
+    () =>
+      tickets.addNote(manager, ticket.id, {
+        requestId: randomUUID(),
+        content: "Internal note",
+      }),
+    { code: "ticket_access_denied" },
+  );
+  assert.throws(() => tickets.notes(manager, ticket.id), {
+    code: "partnership_application_only",
+  });
+  const lastActiveAt = tickets.get(ticket.id).lastActiveAt;
+  tickets.decidePartnership(manager, ticket.id, data);
+  tickets.decidePartnership(manager, ticket.id, data);
+  assert.equal(tickets.get(ticket.id).lastActiveAt, lastActiveAt);
+  assert.throws(
+    () =>
+      tickets.decidePartnership(
+        founder,
+        ticket.id,
+        decision(tickets, ticket.id, "denied"),
+      ),
+    { code: "partnership_already_decided" },
+  );
+  assert.equal(
+    tickets.view(manager, ticket.id, true).partnership.notification.status,
+    "pending",
+  );
+  assert.equal(store.entries("partnership-outbox").length, 1);
+  assert.equal(
+    tickets.get(ticket.id).partnership.decision.actor.id,
+    manager.id,
+  );
+  assert.equal(tickets.list(manager, { category: "partnership" }).total, 0);
+  assert.equal(
+    tickets.list(founder, { closed: true, staff: "Manager" }).total,
+    1,
+  );
+  await contact.pump();
   await contact.pump();
   assert.equal(state.emails.length, 2);
-  assert.equal(tickets.get(ticket.id).status, "claimed");
-  assert.equal(tickets.get(ticket.id).helpedBy.id, manager.id);
-  assert.equal(tickets.messages(ticket.id)[0].delivery, "delivered");
-  const details = {
-    messageId: "<reply@example.invalid>",
-    inReplyTo: state.emails[1].messageId,
-    references: [],
-    from: [{ address: "author@example.invalid" }],
-    to: [{ address: "partners@drakora.org" }],
-    cc: [],
-    mailboxes: ["partners@drakora.org"],
-    replyText: "We expect twenty players.",
-    attachments: [],
-  };
-  state.incoming = [{ uid: 1, to: details.to, cc: [] }];
-  state.headers.set(1, details);
-  await contact.poll();
-  await contact.poll();
-  assert.equal(tickets.messages(ticket.id).length, 2);
-  assert.equal(tickets.messages(ticket.id)[1].origin, "email");
+  assert.match(state.emails[1].text, /accepted.*partnership/s);
+  assert.match(state.emails[1].text, /in touch with more information/);
+  assert.match(state.emails[1].text, /hosting requirements/);
+  assert.equal(state.emails[1].from, "partners@drakora.org");
   assert.equal(
-    tickets.messages(ticket.id)[1].content,
-    "We expect twenty players.",
+    tickets.view(manager, ticket.id, true).partnership.notification.status,
+    "sent",
   );
-  state.incoming.push({ uid: 2, to: details.to, cc: [] });
-  state.headers.set(2, {
-    ...details,
-    messageId: "<forged@example.invalid>",
-    from: [{ address: "intruder@example.invalid" }],
+  assert.equal(
+    tickets.view(manager, ticket.id, true).partnership.notification.via,
+    "email",
+  );
+  assert.equal(tickets.messages(ticket.id).length, 0);
+  const roles = policy.read(founder);
+  roles.roles.find((role) => role.name === "Manager").permissions[
+    "tickets.category.partnership.decide"
+  ] = false;
+  policy.save(founder, {
+    revision: roles.revision,
+    roles: roles.roles.filter((role) => role.id),
   });
-  await contact.poll();
-  assert.equal(tickets.messages(ticket.id).length, 2);
-  tickets.closeTicket(
-    manager,
-    ticket.id,
-    {
-      summary: "We agreed on the server requirements and sent the next steps.",
-      commands: "No server commands were needed.",
-    },
-    true,
-  );
-  await contact.pump();
-  assert.match(state.emails.at(-1).text, /closed/);
-  assert.equal(state.emails.at(-1).reply.uid, 1);
-  const resolution = tickets.get(ticket.id).resolution;
-  assert.equal(state.emails.at(-1).text.includes(resolution.summary), false);
-  assert.equal(state.emails.at(-1).text.includes(resolution.commands), false);
+  assert.equal(tickets.view(manager, ticket.id, true).actions.decide, false);
+  assert.throws(() => tickets.decidePartnership(manager, ticket.id, data), {
+    code: "ticket_access_denied",
+  });
 });
 
-test("DM sends recover lost acknowledgements, split long replies, ingest owner DMs and fall back when blocked", async (t) => {
-  const { tickets, contact, state, clockAdvance, channel } = harness(t);
+test("denial uses Discord DM with acknowledgement recovery and email fallback", async (t) => {
+  const { tickets, contact, state, clockAdvance } = harness(t);
   const ticket = tickets.createPartnership(
     discordOwner,
     input({ preference: "discord", allowDm: true }),
@@ -286,39 +305,95 @@ test("DM sends recover lost acknowledgements, split long replies, ingest owner D
   clockAdvance();
   await contact.pump();
   assert.equal(state.dms.size, 1);
-  assert.equal(tickets.view(manager, ticket.id, true).deliveryPending, 0);
-  tickets.reply(
+  assert.equal(state.emails.length, 0);
+  tickets.decidePartnership(
     manager,
     ticket.id,
-    { requestId: randomUUID(), content: "a".repeat(2000) },
-    true,
+    decision(tickets, ticket.id, "denied", "The pack is not a fit right now."),
   );
-  await contact.pump();
-  assert.equal(state.dms.size, 3);
-  assert.equal(tickets.messages(ticket.id)[0].delivery, "delivered");
-  const incoming = {
-    id: String(BigInt([...state.dms.keys()].at(-1)) + 1n),
-    guildId: null,
-    author: { id: discordOwner.id, bot: false },
-    channelId: channel.id,
-    createdTimestamp: Date.now(),
-    content: "Here is our answer.",
-    attachments: new Map(),
-  };
-  await Promise.all([contact.receiveDm(incoming), contact.receiveDm(incoming)]);
-  assert.equal(tickets.messages(ticket.id).length, 2);
   state.blocked = true;
-  tickets.reply(
-    manager,
-    ticket.id,
-    { requestId: randomUUID(), content: "We can continue by email." },
-    true,
-  );
+  await contact.pump();
   await contact.pump();
   assert.equal(state.emails.length, 1);
+  assert.match(state.emails[0].text, /unable to accept/);
+  assert.match(state.emails[0].text, /not a fit/);
   assert.equal(tickets.get(ticket.id).partnership.emailFallback, true);
+  assert.equal(
+    tickets.view(manager, ticket.id, true).partnership.notification.via,
+    "email",
+  );
+  assert.equal(tickets.messages(ticket.id).length, 0);
 });
 
+test("decision DM delivery succeeds without copying incoming conversations or sending legacy jobs", async (t) => {
+  const { tickets, contact, state, store } = harness(t);
+  const ticket = tickets.createPartnership(
+    discordOwner,
+    input({ preference: "discord", allowDm: true }),
+    network,
+  );
+  await contact.pump();
+  const message = {
+    id: randomUUID(),
+    content: "Previously queued reply",
+    actor: manager,
+    attachments: [],
+    delivery: "pending",
+  };
+  store.set(
+    `ticket-messages:${ticket.id}`,
+    "000000000001",
+    message,
+    Number.MAX_SAFE_INTEGER,
+  );
+  store.set(
+    "partnership-outbox",
+    `${ticket.id}:message:old`,
+    {
+      ticketId: ticket.id,
+      kind: "message",
+      ref: "000000000001",
+      failed: true,
+      after: Number.MAX_SAFE_INTEGER,
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  tickets.decidePartnership(founder, ticket.id, decision(tickets, ticket.id));
+  await contact.pump();
+  assert.equal(state.dms.size, 2);
+  assert.match(
+    [...state.dms.values()].at(-1).content,
+    /accepted.*partnership/s,
+  );
+  assert.equal(
+    tickets.view(manager, ticket.id, true).partnership.notification.via,
+    "discord",
+  );
+  assert.equal(tickets.messages(ticket.id)[0].delivery, "cancelled");
+  const denied = tickets.createPartnership(
+    discordOwner,
+    input({ preference: "discord", allowDm: true }),
+    network,
+  );
+  await contact.pump();
+  tickets.decidePartnership(
+    founder,
+    denied.id,
+    decision(tickets, denied.id, "denied"),
+  );
+  await contact.pump();
+  assert.equal(state.dms.size, 4);
+  assert.match([...state.dms.values()].at(-1).content, /unable to accept/);
+  assert.throws(
+    () =>
+      tickets.ingest(ticket.id, {
+        id: "incoming",
+        actor: discordOwner,
+        content: "Hello",
+      }),
+    { code: "partnership_application_only" },
+  );
+});
 test("uncertain email delivery stays visible and does not automatically duplicate a send", async (t) => {
   const { tickets, contact, state, clockAdvance } = harness(t);
   const ticket = tickets.createPartnership(guest, input(), network);
@@ -331,6 +406,85 @@ test("uncertain email delivery stays visible and does not automatically duplicat
     tickets.view(manager, ticket.id, true).deliveryIssues[0].failure,
     "mail_send_uncertain",
   );
+  tickets.decidePartnership(manager, ticket.id, decision(tickets, ticket.id));
+  const revisions = [];
+  const unwatch = tickets.watch(ticket.id, manager, true, (event) => {
+    if (event.revision) revisions.push(event.revision);
+  });
+  t.after(unwatch);
+  const beforeFailure = tickets.get(ticket.id).revision;
+  await contact.pump();
+  assert.ok(revisions.some((revision) => revision > beforeFailure));
+  clockAdvance();
+  await contact.pump();
+  assert.equal(state.emails.length, 2);
+  assert.equal(
+    tickets.view(manager, ticket.id, true).partnership.notification.status,
+    "failed",
+  );
+});
+
+test("staff partnership decision HTTP protects current role, origin and CSRF", async (t) => {
+  const { config, tickets, store } = harness(t);
+  let identity = manager;
+  const app = express();
+  app.use(
+    ticketRouter(
+      config,
+      tickets,
+      {},
+      {
+        staffView: true,
+        database: store,
+        dist: "/does-not-exist",
+        authorize: async () => identity,
+        mutation: (req) => {
+          if (
+            req.headers.origin !== config.staffOrigin ||
+            req.headers["x-csrf-token"] !== "fixture"
+          )
+            throw new AuthError("invalid_request");
+        },
+      },
+    ),
+  );
+  app.use((error, _req, res, _next) =>
+    res
+      .status(error.status || 503)
+      .json({ error: error.code || "unavailable" }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  await new Promise((resolve) => server.once("listening", resolve));
+  const ticket = tickets.createPartnership(guest, input(), network);
+  const url = `http://127.0.0.1:${server.address().port}/api/tickets/${ticket.id}`;
+  const data = decision(tickets, ticket.id, "denied");
+  const send = (extra = {}) =>
+    fetch(`${url}/decision`, {
+      method: "POST",
+      headers: {
+        Origin: config.staffOrigin,
+        "X-CSRF-Token": "fixture",
+        "Content-Type": "application/json",
+        ...extra,
+      },
+      body: JSON.stringify(data),
+    });
+  assert.equal((await send({ "X-CSRF-Token": "wrong" })).status, 403);
+  assert.equal((await send({ Origin: "https://other.invalid" })).status, 403);
+  identity = helper;
+  assert.equal((await send()).status, 403);
+  identity = manager;
+  assert.equal((await fetch(`${url}/notes`)).status, 409);
+  assert.equal((await send()).status, 200);
+  assert.equal((await send()).status, 200);
+  const view = await (await fetch(url)).json();
+  assert.equal(view.partnership.decision.outcome, "denied");
+  assert.equal(view.partnership.decision.actor.id, manager.id);
+  assert.equal(view.actions.reply, undefined);
 });
 
 test("public partnership HTTP intake enforces eligibility and CSRF and returns no live ticket URL", async (t) => {
