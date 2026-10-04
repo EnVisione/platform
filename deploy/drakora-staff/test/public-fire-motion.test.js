@@ -7,11 +7,15 @@ function fixture({
   reduced = false,
   available = true,
   foreground = false,
-  words = false,
+  mobile = false,
+  scenery = false,
+  scrollbar = 0,
 } = {}) {
   const environment = new EventTarget();
   const document = new EventTarget();
   const preference = new EventTarget();
+  const mobilePreference = new EventTarget();
+  mobilePreference.matches = mobile;
   document.hidden = false;
   preference.matches = reduced;
   const frames = new Map();
@@ -23,13 +27,45 @@ function fixture({
   environment.document = document;
   environment.innerWidth = 1200;
   environment.innerHeight = 800;
-  environment.matchMedia = () => preference;
+  environment.scrollY = 0;
+  environment.matchMedia = (query) =>
+    query.includes("max-width") ? mobilePreference : preference;
+  document.querySelectorAll = (selector) =>
+    selector === "[data-fire-source]"
+      ? [
+          {
+            getBoundingClientRect: () => ({
+              left: 590,
+              right: 610,
+              top: 490 - environment.scrollY,
+              bottom: 540 - environment.scrollY,
+              width: 20,
+              height: 50,
+            }),
+            closest: (selector) => {
+              assert.equal(selector, "[data-fire-container]");
+              return {
+                getBoundingClientRect: () => ({
+                  left: 400,
+                  right: 1000,
+                  top: 300 - environment.scrollY,
+                  bottom: 700 - environment.scrollY,
+                }),
+              };
+            },
+          },
+        ]
+      : [];
   environment.requestAnimationFrame = (callback) => {
     frames.set(++frameId, callback);
     return frameId;
   };
   environment.cancelAnimationFrame = (id) => frames.delete(id);
   const canvas = new EventTarget();
+  canvas.getBoundingClientRect = () => ({
+    width: environment.innerWidth - scrollbar,
+    height: environment.innerHeight,
+  });
   canvas.parentElement = {
     classList: {
       toggle(name, enabled) {
@@ -42,13 +78,18 @@ function fixture({
     },
   };
   const dragon = { style: {} };
-  function rendererFactory() {
+  function rendererFactory(canvas, options = {}) {
+    const kind = options.scenery
+      ? "scenery"
+      : options.foreground
+        ? "foreground"
+        : "background";
     created++;
     return available
       ? {
-          resize: (...size) => calls.push({ size }),
+          resize: (...size) => calls.push({ size, kind }),
           render: (delta, time, pointer, scene) =>
-            calls.push({ delta, time, pointer: { ...pointer }, scene }),
+            calls.push({ delta, time, pointer: { ...pointer }, scene, kind }),
           destroy: () => disposed++,
         }
       : null;
@@ -65,23 +106,32 @@ function fixture({
   }
   const overlay = foreground ? new EventTarget() : null;
   if (overlay) overlay.style = { setProperty() {}, removeProperty() {} };
-  const wordLayer = words ? new EventTarget() : null;
-  if (wordLayer) wordLayer.style = { setProperty() {}, removeProperty() {} };
+  const sceneryLayer = scenery ? new EventTarget() : null;
+  if (sceneryLayer) {
+    sceneryLayer.style = { setProperty() {}, removeProperty() {} };
+    sceneryLayer.getBoundingClientRect = () => ({
+      left: 0,
+      top: -environment.scrollY,
+      width: environment.innerWidth - scrollbar,
+      height: 1700,
+    });
+  }
   const motion = attachFireMotion(
     canvas,
     dragon,
     environment,
     rendererFactory,
     overlay,
-    wordLayer,
+    sceneryLayer,
   );
   return {
     environment,
     document,
     preference,
+    mobilePreference,
     canvas,
     overlay,
-    wordLayer,
+    sceneryLayer,
     dragon,
     classes,
     frames,
@@ -93,16 +143,25 @@ function fixture({
   };
 }
 
-test("dragon breath precedes ignition and both sources remain lit after the fly-in", () => {
-  assert.deepEqual(fireScene(0, 1200, 800).ignition, [0, 0]);
-  assert.ok(fireScene(1.1, 1200, 800).breath[2] > 0);
-  assert.equal(fireScene(1.1, 1200, 800).ignition[0], 0);
-  assert.deepEqual(fireScene(2, 1200, 800).ignition, [1, 0]);
-  assert.ok(fireScene(4.3, 1200, 800).breath[2] > 0);
-  assert.deepEqual(fireScene(7, 1200, 800).ignition, [1, 1]);
+test("dragon lights measured scenery sources and they stay burning after the fly-in", () => {
+  const sources = [
+    { x: 300, y: 200, width: 20, height: 70 },
+    { x: 900, y: 210, width: 12, height: 42 },
+  ];
+  assert.deepEqual(
+    fireScene(0, 1200, 800, true, sources).fires.map((source) => source.lit),
+    [0, 0],
+  );
+  assert.ok(fireScene(2, 1200, 800, true, sources).breath[2] > 0);
+  const passing = fireScene(3.6, 1200, 800, true, sources);
+  assert.equal(passing.fires[0].lit, 1);
+  assert.equal(passing.fires[1].lit, 0);
+  assert.deepEqual(
+    fireScene(24, 1200, 800, true, sources).fires.map((source) => source.lit),
+    [1, 1],
+  );
   assert.equal(fireScene(10, 1200, 800).dragon.opacity, 0);
-  assert.deepEqual(fireScene(0, 390, 800, false).ignition, [1, 1]);
-  assert.equal(fireScene(0, 390, 800, false).dragon.opacity, 0);
+  assert.equal(fireScene(0, 1200, 800, false, sources).fires[0].lit, 1);
 });
 
 test("rendering stays bounded on high resolution and narrow viewports", () => {
@@ -178,14 +237,14 @@ test("pause and hidden tabs suspend frames without jumping the intro clock", () 
     f.preference.matches = false;
     f.send(f.preference, "change");
     f.tick(20000);
-    assert.deepEqual(f.calls.at(-1).scene.ignition, [1, 1]);
+    assert.equal(f.calls.at(-1).scene.fires[0].lit, 1);
   } finally {
     f.motion.destroy();
   }
   f.send(f.environment, "resize");
   f.send(f.document, "visibilitychange");
   assert.equal(f.frames.size, 0);
-  assert.deepEqual(f.counts(), { created: 1, disposed: 1 });
+  assert.deepEqual(f.counts(), { created: 2, disposed: 2 });
 });
 
 test("reduced motion and unsupported WebGL avoid a render loop", () => {
@@ -214,7 +273,7 @@ test("context loss stops rendering and restoration recreates resources without r
     assert.equal(f.counts().disposed, 1);
     f.send(f.canvas, "webglcontextrestored");
     f.tick(40);
-    assert.deepEqual(f.calls.at(-1).scene.ignition, [1, 1]);
+    assert.equal(f.calls.at(-1).scene.fires[0].lit, 1);
   } finally {
     f.motion.destroy();
   }
@@ -238,40 +297,112 @@ test("slow foreground frames preserve flight timing while bounding the fluid ste
   assert.equal(f.counts().created, 1);
 });
 
-test("the larger dragon crosses left to right and scorched elements remain usable", () => {
-  const targets = [{ x: 350, y: 350, width: 450, height: 60 }];
-  const early = fireScene(1, 1200, 800, true, targets);
-  const middle = fireScene(4, 1200, 800, true, targets);
-  const end = fireScene(8, 1200, 800, true, targets);
-  assert.ok(early.dragon.x < middle.dragon.x && middle.dragon.x < end.dragon.x);
+test("breath points down to scenery and source geometry follows the artwork", () => {
+  const sources = [{ x: 590, y: 200, width: 12, height: 42 }];
+  const early = fireScene(1, 1200, 800, true, sources);
+  const middle = fireScene(3.3, 1200, 800, true, sources);
+  assert.ok(early.dragon.x < middle.dragon.x);
   assert.equal(middle.dragon.direction, 1);
   assert.equal(middle.dragon.size, 480);
-  assert.ok(early.breath[2] > 0);
+  assert.deepEqual(middle.breathTarget, [590, 200]);
   assert.ok(middle.breathTarget[1] < middle.breath[1]);
-  assert.ok(Math.abs(middle.breathTarget[0] - middle.breath[0]) < 100);
-  assert.equal(early.burning[0].fall, 0);
-  assert.equal(end.burning[0].fall, 1);
-  assert.ok(end.burning[0].lit > 0);
-  assert.equal(fireScene(24, 1200, 800, true, targets).burning[0].lit, 1);
-  assert.equal(fireScene(4, 1200, 800, false, targets).burning[0].fall, 0);
-  assert.equal(end.dragon.opacity, 0);
+  const f = fixture();
+  try {
+    f.tick(0);
+    assert.deepEqual(f.calls.at(-1).scene.fires[0], {
+      x: 600,
+      y: 260,
+      width: 10,
+      fixed: false,
+      height: 50,
+      bounds: [400, 100, 1000, 500],
+      lit: 0,
+    });
+    f.environment.innerHeight = 900;
+    f.send(f.environment, "resize");
+    f.tick(40);
+    assert.equal(f.calls.at(-1).scene.fires[0].y, 360);
+    assert.deepEqual(
+      f.calls.at(-1).scene.fires[0].bounds,
+      [400, 200, 1000, 600],
+    );
+  } finally {
+    f.motion.destroy();
+  }
 });
 
-test("the foreground clears after delayed frames and context loss stops all three layers", () => {
-  const f = fixture({ foreground: true, words: true });
+test("the foreground clears after delayed frames and context loss stops both layers", () => {
+  const f = fixture({ foreground: true });
   try {
     f.tick(0);
     f.tick(4000);
     f.tick(30000);
-    assert.ok(f.calls.at(-1).scene.breath[2] === 0);
+    assert.equal(f.calls.at(-1).scene.breath[2], 0);
     const calls = f.calls.length;
     f.tick(30040);
-    assert.equal(f.calls.length, calls + 2);
-    f.send(f.wordLayer, "webglcontextlost");
+    assert.equal(f.calls.length, calls + 1);
+    f.send(f.overlay, "webglcontextlost");
     assert.equal(f.frames.size, 0);
-    assert.deepEqual(f.counts(), { created: 3, disposed: 3 });
+    assert.deepEqual(f.counts(), { created: 2, disposed: 2 });
   } finally {
     f.motion.destroy();
   }
-  assert.deepEqual(f.counts(), { created: 3, disposed: 3 });
+  assert.deepEqual(f.counts(), { created: 2, disposed: 2 });
+});
+
+test("mobile never starts GPU rendering and a viewport change releases desktop resources", () => {
+  const phone = fixture({ mobile: true, foreground: true });
+  try {
+    assert.equal(phone.frames.size, 0);
+    assert.equal(phone.counts().created, 0);
+  } finally {
+    phone.motion.destroy();
+  }
+  const desktop = fixture({ foreground: true });
+  try {
+    desktop.tick(0);
+    desktop.mobilePreference.matches = true;
+    desktop.send(desktop.mobilePreference, "change");
+    assert.equal(desktop.frames.size, 0);
+    assert.deepEqual(desktop.counts(), { created: 2, disposed: 2 });
+    assert.equal(desktop.dragon.style.opacity, "0");
+    desktop.mobilePreference.matches = false;
+    desktop.send(desktop.mobilePreference, "change");
+    desktop.tick(9000);
+    assert.equal(desktop.calls.at(-1).scene.dragon.opacity, 0);
+    assert.equal(desktop.calls.at(-1).scene.fires[0].lit, 1);
+  } finally {
+    desktop.motion.destroy();
+  }
+  assert.deepEqual(desktop.counts(), { created: 4, disposed: 4 });
+});
+
+test("scenery flames keep document positions across scroll and use canvas CSS width", () => {
+  const f = fixture({ scenery: true, scrollbar: 17 });
+  try {
+    f.tick(0);
+    const first = f.calls.findLast(
+      (call) => call.kind === "scenery" && call.scene,
+    );
+    assert.equal(first.scene.fires[0].x, 600);
+    assert.equal(first.scene.fires[0].y, 1160);
+    assert.ok(
+      f.calls.some(
+        (call) => call.kind === "background" && call.size?.[0] === 1183,
+      ),
+    );
+    f.environment.scrollY = 117;
+    f.send(f.environment, "scroll");
+    f.tick(40);
+    const next = f.calls.findLast(
+      (call) => call.kind === "scenery" && call.scene,
+    );
+    assert.equal(next.scene.fires[0].y, first.scene.fires[0].y);
+    assert.deepEqual(next.scene.fires[0].bounds, first.scene.fires[0].bounds);
+    f.send(f.sceneryLayer, "webglcontextlost");
+    assert.equal(f.frames.size, 0);
+    assert.deepEqual(f.counts(), { created: 2, disposed: 2 });
+  } finally {
+    f.motion.destroy();
+  }
 });

@@ -15,7 +15,7 @@ import "./public.css";
 import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 import { PartnershipForm } from "./partnerships.jsx";
-import { AmbientFire } from "./public-fire.jsx";
+import { AmbientFire, FireScenery } from "./public-fire.jsx";
 
 const artwork = {
   castle,
@@ -242,9 +242,7 @@ function PartnershipBanner({ discordInvite }) {
       className="public-welcome public-partnership"
       aria-labelledby="partnership-title"
     >
-      <div className="public-welcome-art" aria-hidden="true">
-        <img src={forest} alt="" />
-      </div>
+      <FireScenery image={forest} forest />
       <div className="public-welcome-copy">
         <span className="public-eyebrow">A HOME FOR YOUR NEXT CHAPTER</span>
         <PublicHeading as="h2" icon="servers" id="partnership-title">
@@ -285,9 +283,7 @@ function HomePage({ home, discordInvite }) {
             View servers <PublicIcon name="arrow" />
           </a>
         </div>
-        <div className="public-welcome-art" aria-hidden="true">
-          <img src={castle} alt="" />
-        </div>
+        <FireScenery image={castle} />
       </section>
       <PartnershipBanner discordInvite={discordInvite} />
       <div className="public-home-grid">

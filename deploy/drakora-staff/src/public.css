@@ -54,6 +54,27 @@ button {
   width: 100%;
   height: 100%;
 }
+.public-scenery-fire {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+.public-campfire {
+  position: fixed;
+  left: 14px;
+  bottom: 12px;
+  width: 150px;
+  height: 188px;
+  z-index: 3;
+  pointer-events: none;
+}
+.public-campfire svg {
+  width: 100%;
+  height: 100%;
+}
 .public-fire-fallback {
   position: absolute;
   inset: 0;
@@ -75,20 +96,6 @@ button {
   overflow: hidden;
   pointer-events: none;
   user-select: none;
-}
-.public-word-fire {
-  position: fixed;
-  inset: 0;
-  z-index: 3;
-  pointer-events: none;
-}
-.public-scorched {
-  position: relative;
-  z-index: 4;
-  text-shadow: 0 0 14px #a6382b66;
-  transform: translateY(var(--scorch-fall, 0px))
-    rotate(var(--scorch-tilt, 0deg));
-  transform-origin: center top;
 }
 .public-fire-foreground {
   position: absolute;
@@ -447,12 +454,10 @@ button {
   overflow: hidden;
   background: var(--raised);
 }
-.public-welcome-art img {
+.public-welcome-art svg {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: left center;
   image-rendering: pixelated;
 }
 .public-button {
@@ -1078,7 +1083,9 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .public-fire,
   .public-dragon-flight,
-  .public-word-fire,
+  .public-scenery-fire,
+  .public-campfire,
+  .public-scene-props,
   .public-motion-toggle {
     display: none;
   }
@@ -1086,6 +1093,16 @@ button {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 900px) {
+  .public-fire,
+  .public-dragon-flight,
+  .public-scenery-fire,
+  .public-campfire,
+  .public-motion-toggle,
+  .public-scene-props {
+    display: none;
   }
 }
 

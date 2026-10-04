@@ -11,8 +11,10 @@ precision highp float;
 varying vec2 uv;
 uniform vec2 view;
 uniform float time;
-uniform vec2 ignition;
-uniform float source;
+uniform vec4 fires[12];
+uniform float fireWidths[12];
+uniform vec4 fireBounds[12];
+uniform float fireFixed[12];
 uniform vec2 breathTarget;
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -58,11 +60,16 @@ void main() {
   vec2 previous = uv - velocity * delta / view;
   float density = texture2D(smoke, clamp(previous, 0.0, 1.0)).r;
   density *= exp(-delta * 0.16);
-  float seeds = plume(p, source, 65.0) * ignition.x
-    + plume(p, view.x - source, 65.0) * ignition.y;
-  float billow = 0.35 + 0.65 * fbm(vec2(p.x * 0.021, p.y * 0.014 - time * 0.8));
-  float emission = (p.y - min(180.0, view.y * 0.22)) / 90.0;
-  density += seeds * exp(-emission * emission) * billow * delta * 1.5;
+  for (int i = 0; i < 12; i++) {
+    vec4 fire = fires[i];
+    vec4 bounds = fireBounds[i];
+    if (fire.x < bounds.x || fire.x > bounds.z || fire.y < bounds.y || fire.y > bounds.w || fire.y < 0.0 || fire.y > view.y) continue;
+    vec2 local = p - fire.xy;
+    float seeds = plume(local, 0.0, fireWidths[i] * 2.0 + 12.0) * fire.w;
+    float billow = 0.35 + 0.65 * fbm(vec2(p.x * 0.021, p.y * 0.014 - time * 0.8));
+    float emission = (local.y - fire.z * 0.75) / max(20.0, fire.z * 0.65);
+    density += seeds * exp(-emission * emission) * billow * delta * 0.8;
+  }
   density *= smoothstep(0.0, 0.035, uv.y) * (1.0 - smoothstep(0.9, 1.0, uv.y));
   gl_FragColor = vec4(clamp(density, 0.0, 1.0), 0.0, 0.0, 1.0);
 }`;
@@ -80,71 +87,59 @@ float flame(vec2 p, float anchor, float seed, float height, float width) {
 }
 `;
 
+const sceneryField = `${flameField}
+vec4 sceneryFire(vec2 p, float fixedOnly) {
+  vec3 color = vec3(0.0);
+  float alpha = 0.0;
+  for (int i = 0; i < 12; i++) {
+    if (abs(fireFixed[i] - fixedOnly) > 0.5) continue;
+    vec4 source = fires[i];
+    vec4 bounds = fireBounds[i];
+    if (source.x < bounds.x || source.x > bounds.z || source.y < bounds.y || source.y > bounds.w) continue;
+    vec2 local = p - source.xy;
+    if (p.x < bounds.x || p.x > bounds.z || p.y < bounds.y || p.y > bounds.w || local.y < -3.0) continue;
+    float height = max(1.0, source.z);
+    float fire = flame(local, 0.0, float(i) * 5.0, height, fireWidths[i]) * source.w;
+    fire *= smoothstep(-3.0, 3.0, local.y);
+    float heat = clamp(1.0 - local.y / height, 0.0, 1.0);
+    vec3 fireColor = mix(vec3(0.85, 0.17, 0.035), vec3(1.0, 0.8, 0.3), heat);
+    float glow = exp(-length(local / vec2(fireWidths[i] * 2.8, height * 0.7))) * source.w * 0.12;
+    color = color * (1.0 - fire * 0.9) + fireColor * fire * 0.9 + vec3(0.65, 0.16, 0.04) * glow;
+    alpha = min(0.95, alpha * (1.0 - fire * 0.9) + fire * 0.9 + glow);
+    float age = mod(time * (0.18 + float(i) * 0.006) + float(i) * 0.137, 1.0);
+    vec2 ember = source.xy + vec2(sin(age * 8.0 + float(i)) * (8.0 + age * 20.0), age * height * 2.5);
+    float spark = exp(-dot(p - ember, p - ember) / 2.8) * (1.0 - age) * source.w;
+    color += vec3(1.0, 0.46, 0.1) * spark * 0.6;
+    alpha = max(alpha, spark * 0.6);
+  }
+  return vec4(color, alpha);
+}`;
+
 const display = `${field}
 uniform sampler2D smoke;
-${flameField}
+${sceneryField}
 void main() {
   vec2 p = uv * view;
-  float height = min(330.0, view.y * 0.4);
-  float fireLeft = 0.0, fireRight = 0.0, core = 0.0;
-  if (p.y < height * 1.15) {
-    fireLeft = flame(p, source, 2.0, height, 34.0) * ignition.x;
-    fireRight = flame(p, view.x - source, 11.0, height * 0.82, 38.0) * ignition.y;
-    core = max(flame(p, source, 2.0, height * 0.65, 14.0) * ignition.x,
-      flame(p, view.x - source, 11.0, height * 0.55, 13.0) * ignition.y);
-  }
-  float fire = max(fireLeft, fireRight);
-  float glow = (exp(-length((p - vec2(source, 0.0)) / vec2(95.0, 140.0))) * ignition.x
-    + exp(-length((p - vec2(view.x - source, 0.0)) / vec2(95.0, 140.0))) * ignition.y) * 0.15;
   float density = texture2D(smoke, uv).r;
   float detail = 0.6 + fbm(p * 0.012 + vec2(time * 0.08, -time * 0.25)) * 0.65;
   float smokeAlpha = min(density * detail * 0.68, 0.36);
   vec3 smokeColor = mix(vec3(0.23, 0.23, 0.24), vec3(0.36, 0.32, 0.3), exp(-p.y / 200.0));
-  vec3 color = smokeColor * smokeAlpha;
-  float alpha = smokeAlpha;
-  float heat = clamp((1.0 - p.y / height) * core, 0.0, 1.0);
-  vec3 fireColor = mix(vec3(0.72, 0.13, 0.035), vec3(1.0, 0.52, 0.13), smoothstep(0.05, 0.55, heat));
-  fireColor = mix(fireColor, vec3(1.0, 0.87, 0.47), smoothstep(0.62, 1.0, heat));
-  color = color * (1.0 - fire * 0.84) + fireColor * fire * 0.84 + vec3(0.7, 0.16, 0.04) * glow;
-  alpha = min(0.95, alpha * (1.0 - fire * 0.84) + fire * 0.84 + glow);
-  for (int i = 0; i < 8; i++) {
-    float seed = float(i);
-    float age = mod(time * (0.09 + seed * 0.004) + seed * 0.137, 1.0);
-    float side = mod(seed, 2.0);
-    float anchor = mix(source, view.x - source, side);
-    float lit = mix(ignition.x, ignition.y, side);
-    vec2 ember = vec2(anchor + sin(age * 8.0 + seed) * (12.0 + age * 45.0), age * min(view.y, 540.0));
-    float spark = exp(-dot(p - ember, p - ember) / 2.8) * (1.0 - age) * lit;
-    color += vec3(1.0, 0.46, 0.1) * spark * 0.7;
-    alpha = max(alpha, spark * 0.7);
-  }
-  gl_FragColor = vec4(color, alpha);
+  vec4 fire = sceneryFire(p, 1.0);
+  gl_FragColor = vec4(smokeColor * smokeAlpha * (1.0 - fire.a) + fire.rgb, smokeAlpha * (1.0 - fire.a) + fire.a);
+}`;
+
+const sceneryDisplay = `${field}
+${sceneryField}
+void main() {
+  gl_FragColor = sceneryFire(uv * view, 0.0);
 }`;
 
 const foregroundDisplay = `${field}
-${flameField}
 uniform vec3 breath;
-uniform vec4 burns[12];
-uniform float wordLayer;
-uniform float breathLayer;
 void main() {
   vec2 p = uv * view;
   vec3 color = vec3(0.0);
   float alpha = 0.0;
-  if (wordLayer > 0.5) for (int i = 0; i < 12; i++) {
-    vec4 spot = burns[i];
-    float seed = float(i);
-    float height = 24.0 + hash(vec2(seed, 3.0)) * 26.0;
-    vec2 local = vec2(p.x, p.y - spot.y);
-    float fire = local.y >= 0.0 ? flame(local, spot.x, seed * 5.0, height,
-      8.0 + hash(vec2(seed, 7.0)) * 5.0) * spot.w : 0.0;
-    fire *= smoothstep(0.0, 8.0, local.y);
-    float hot = clamp(1.0 - local.y / height, 0.0, 1.0);
-    vec3 fireColor = mix(vec3(0.9, 0.2, 0.03), vec3(1.0, 0.78, 0.25), hot);
-    color += fireColor * fire * 0.8;
-    alpha = max(alpha, fire * 0.8);
-  }
-  if (breathLayer > 0.5) {
   vec2 path = breathTarget - breath.xy;
   float progress = clamp(dot(p - breath.xy, path) / max(dot(path, path), 1.0), 0.0, 1.0);
   vec2 center = breath.xy + progress * path;
@@ -156,7 +151,6 @@ void main() {
   jet *= breath.z * (0.55 + 0.45 * turbulence);
   color = color * (1.0 - jet) + mix(vec3(1.0, 0.28, 0.04), vec3(1.0, 0.82, 0.3), 1.0 - progress) * jet;
   alpha = max(alpha, jet);
-  }
   gl_FragColor = vec4(color, alpha);
 }`;
 
@@ -173,8 +167,9 @@ export function fireResolution(width, height) {
 
 export function createFireRenderer(
   canvas,
-  { foreground = false, words = false } = {},
+  { foreground = false, scenery = false } = {},
 ) {
+  const overlay = foreground || scenery;
   const gl = canvas.getContext("webgl", {
     alpha: true,
     premultipliedAlpha: true,
@@ -229,22 +224,23 @@ export function createFireRenderer(
         "view",
         "time",
         "delta",
-        "source",
-        "ignition",
         "pointer",
         "smoke",
         "breath",
         "breathTarget",
-        "wordLayer",
-        "breathLayer",
-        ...Array.from({ length: 12 }, (_, index) => `burns[${index}]`),
+        ...Array.from({ length: 12 }, (_, index) => `fires[${index}]`),
+        ...Array.from({ length: 12 }, (_, index) => `fireWidths[${index}]`),
+        ...Array.from({ length: 12 }, (_, index) => `fireBounds[${index}]`),
+        ...Array.from({ length: 12 }, (_, index) => `fireFixed[${index}]`),
       ].map((name) => [name, gl.getUniformLocation(item, name)]),
     );
     return { item, uniforms, position: gl.getAttribLocation(item, "position") };
   }
   try {
-    const simulationProgram = foreground ? null : program(simulation);
-    const displayProgram = program(foreground ? foregroundDisplay : display);
+    const simulationProgram = overlay ? null : program(simulation);
+    const displayProgram = program(
+      foreground ? foregroundDisplay : scenery ? sceneryDisplay : display,
+    );
     const quad = gl.createBuffer();
     buffers.push(quad);
     gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -263,7 +259,7 @@ export function createFireRenderer(
       for (const item of framebuffers) gl.deleteFramebuffer(item);
       textures.length = framebuffers.length = 0;
       read = 0;
-      targets = foreground
+      targets = overlay
         ? []
         : [0, 1].map(() => {
             const texture = gl.createTexture();
@@ -336,40 +332,31 @@ export function createFireRenderer(
       gl.uniform2f(u.view, width, height);
       gl.uniform1f(u.time, time);
       gl.uniform1f(u.delta, delta);
-      gl.uniform1f(u.source, scene.source);
-      gl.uniform2f(u.ignition, ...scene.ignition);
       gl.uniform4f(u.pointer, pointer.x, pointer.y, pointer.dx, pointer.dy);
       gl.uniform3f(u.breath, ...scene.breath);
       gl.uniform2f(u.breathTarget, ...scene.breathTarget);
-      gl.uniform1f(u.wordLayer, words ? 1 : 0);
-      gl.uniform1f(u.breathLayer, words ? 0 : 1);
-      const spots = (scene.burning ?? []).flatMap((target) => {
-        const angle = (target.tilt * target.fall * Math.PI) / 180;
-        return (target.spots ?? []).map((spot) => {
-          const dx = spot.x - target.x,
-            dy = target.y - spot.y;
-          return [
-            target.x + Math.cos(angle) * dx - Math.sin(angle) * dy,
-            target.y -
-              Math.sin(angle) * dx -
-              Math.cos(angle) * dy -
-              target.fall * 9,
-            0,
-            target.lit,
-          ];
-        });
-      });
-      for (let index = 0; index < 12; index++)
+      for (let index = 0; index < 12; index++) {
+        const source = scene.fires[index];
+        gl.uniform1f(u[`fireFixed[${index}]`], source?.fixed ? 1 : 0);
         gl.uniform4f(
-          u[`burns[${index}]`],
-          ...(spots[index] ?? [-1000, -1000, 0, 0]),
+          u[`fires[${index}]`],
+          source?.x ?? -1000,
+          source?.y ?? -1000,
+          source?.height ?? 1,
+          source?.lit ?? 0,
         );
+        gl.uniform1f(u[`fireWidths[${index}]`], source?.width ?? 1);
+        gl.uniform4f(
+          u[`fireBounds[${index}]`],
+          ...(source?.bounds ?? [0, 0, 0, 0]),
+        );
+      }
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     return {
       resize,
       render(delta, time, pointer, scene) {
-        if (!foreground && delta > 0) {
+        if (!overlay && delta > 0) {
           draw(
             simulationProgram,
             targets[1 - read].framebuffer,
