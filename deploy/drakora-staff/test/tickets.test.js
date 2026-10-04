@@ -177,6 +177,7 @@ test("ticket filters combine assignment, text, dates, type and category before p
   );
   const filters = {
     query: "HELPER",
+    staff: " hElP ",
     assignment: "mine",
     from: "2026-09-30",
     to: "2026-09-30",
@@ -220,6 +221,7 @@ test("ticket filters combine assignment, text, dates, type and category before p
       ...next,
       id: randomUUID(),
       ign: "Paged",
+      claimedBy: helper,
       createdAt: at + i,
       updatedAt: at + i,
     };
@@ -227,6 +229,7 @@ test("ticket filters combine assignment, text, dates, type and category before p
   }
   const page = service.list(helper, {
     query: "Paged",
+    staff: helper.id,
     offset: 50,
     sort: "oldest",
   });
@@ -238,8 +241,68 @@ test("ticket filters combine assignment, text, dates, type and category before p
     { assignment: "other" },
     { status: "unknown" },
     { sort: "random" },
+    { staff: [] },
+    { staff: "x".repeat(101) },
+    { staff: "x\0" },
   ])
     fails(() => service.list(helper, extra), "invalid_list_filters");
+});
+
+test("staff search finds first helpers, resolvers and previous closures without leaking restricted tickets", async (t) => {
+  const { service } = setup(t);
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async message() {
+      return { id: randomUUID() };
+    },
+    async status() {
+      return { closed: true };
+    },
+    async feedback() {
+      return { id: randomUUID() };
+    },
+  });
+  const ticket = service.create(owner, input());
+  service.reply(helper, ticket.id, message(), true);
+  assert.equal(service.get(ticket.id).claimedBy, null);
+  assert.equal(service.list(manager, { staff: helper.id }).total, 1);
+  service.closeTicket(
+    manager,
+    ticket.id,
+    { summary: "Fixed", commands: "None" },
+    true,
+  );
+  assert.equal(
+    service.list(helper, { staff: manager.name, closed: true }).total,
+    1,
+  );
+  service.rate(owner, ticket.id, 4);
+  await service.reopen(owner, ticket.id);
+  service.claim(otherStaff, ticket.id);
+  for (const staff of [helper.id, manager.name, "OTHER HELPER"]) {
+    const result = service.list(helper, { staff, category: "support" });
+    assert.deepEqual(
+      result.items.map((entry) => entry.id),
+      [ticket.id],
+    );
+    assert.equal(
+      result.categories.find((entry) => entry.id === "support").count,
+      1,
+    );
+  }
+  assert.equal(service.list(helper, { staff: "unrelated" }).total, 0);
+  const billing = service.create(
+    { id: "101", name: "Hidden" },
+    input({ type: "billing" }),
+  );
+  const founder = { id: "203", name: "Private Founder", roles: ["10", "20"] };
+  service.claim(founder, billing.id);
+  const hidden = service.list(helper, { staff: founder.name });
+  assert.equal(hidden.total, 0);
+  assert.ok(hidden.categories.every((entry) => entry.count === 0));
+  assert.ok(!hidden.categories.some((entry) => entry.id === "billing"));
 });
 
 test("ticket intake verifies fields, prevents duplicate creation and enforces the open limit", (t) => {
@@ -846,7 +909,8 @@ test("Discord attachment edits preserve unchanged media and remove deleted files
 });
 
 test("owner close requires a later staff resolution, optional rating accepts only one valid score", (t) => {
-  const { service } = setup(t);
+  let at = Date.now();
+  const { service } = setup(t, { now: () => at });
   const ticket = service.create(owner, input());
   fails(() => service.rate(owner, ticket.id, 5), "invalid_rating");
   service.closeTicket(owner, ticket.id, {});
@@ -877,7 +941,14 @@ test("owner close requires a later staff resolution, optional rating accepts onl
   assert.equal(service.list(helper).total, 0);
   assert.equal(service.list(helper, { closed: true }).total, 1);
   fails(() => service.rate(owner, ticket.id, 6), "invalid_rating");
+  at += 60000;
   service.rate(owner, ticket.id, 5);
+  assert.equal(service.view(helper, ticket.id, true).rating, 5);
+  assert.equal(service.view(helper, ticket.id, true).ratedAt, at);
+  assert.equal(
+    service.view(helper, ticket.id, true).feedbackDelivery.status,
+    "rated",
+  );
   fails(() => service.rate(owner, ticket.id, 1), "ticket_already_rated");
 });
 
@@ -1337,6 +1408,7 @@ test("reopening preserves private resolutions and ratings and reapplies quotas a
   );
   const cycle = service.get(ticket.id).closureId;
   service.rate(owner, ticket.id, 4, cycle);
+  const ratedAt = service.get(ticket.id).ratedAt;
   await assert.rejects(service.reopen({ id: "999" }, ticket.id), {
     code: "ticket_not_found",
   });
@@ -1348,10 +1420,12 @@ test("reopening preserves private resolutions and ratings and reapplies quotas a
   assert.equal(current.status, "pending");
   assert.equal(current.claimedBy, null);
   assert.equal(current.rating, null);
+  assert.equal(current.ratedAt, null);
   assert.equal(current.reopenedCount, 1);
   assert.equal(service.messages(ticket.id)[0].content, "Original conversation");
   const staffView = service.view(helper, ticket.id, true);
   assert.equal(staffView.previousResolutions[0].rating, 4);
+  assert.equal(staffView.previousResolutions[0].ratedAt, ratedAt);
   assert.equal(staffView.previousResolutions[0].claimedBy.id, helper.id);
   assert.match(staffView.previousResolutions[0].resolution.summary, /PRIVATE/);
   assert.equal(service.view(owner, ticket.id).previousResolutions, undefined);

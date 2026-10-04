@@ -114,6 +114,14 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   assert.equal((await call("/api/tickets?from=2026-02-30")).status, 400);
   assert.equal((await call("/api/tickets?assignment=other")).status, 400);
   assert.equal((await call("/api/tickets?offset=1.5")).status, 400);
+  assert.equal(
+    (await call("/api/tickets?staff=Helper&staff=Manager")).status,
+    400,
+  );
+  assert.equal(
+    (await call(`/api/tickets?staff=${"x".repeat(101)}`)).status,
+    400,
+  );
   const data = {
     requestId: randomUUID(),
     type: "general",
@@ -131,6 +139,15 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   response = await call("/help/api/tickets", data);
   assert.equal(response.status, 201);
   const id = (await response.json()).path.split("/").at(-1);
+  service.claim(helper, id);
+  assert.equal(
+    (await (await call("/api/tickets?staff=HELPER")).json()).total,
+    1,
+  );
+  assert.equal(
+    (await (await call("/api/tickets?staff=nobody")).json()).total,
+    0,
+  );
   const noteHeaders = { Origin: config.staffOrigin };
   assert.equal(
     (

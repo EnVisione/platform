@@ -220,6 +220,7 @@ export function ticketService(
       updatedAt: ticket.updatedAt,
       revision: ticket.revision,
       rating: ticket.rating,
+      ratedAt: ticket.ratedAt || null,
       ratingStaff: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
       closureId: ticket.closureId || null,
       channelRetained: Boolean(ticket.channelId),
@@ -417,6 +418,33 @@ export function ticketService(
     } = input;
     const sort = input.sort || "updated";
     const { offset, term, withinDate } = listFilters(input);
+    const staffTerm = listFilters({ query: input.staff }).term;
+    const matchesStaff = (ticket) => {
+      if (!staffTerm) return true;
+      const actors = [
+        ticket.claimedBy,
+        ticket.helpedBy,
+        ticket.ratingStaff,
+        ticket.resolution?.actor,
+      ];
+      if (
+        matchesText(
+          staffTerm,
+          actors.flatMap((actor) => [actor?.id, actor?.name]),
+        )
+      )
+        return true;
+      return store
+        .entries(`ticket-closures:${ticket.id}`)
+        .some(([, closure]) =>
+          matchesText(staffTerm, [
+            closure.claimedBy?.id,
+            closure.claimedBy?.name,
+            closure.resolution?.actor?.id,
+            closure.resolution?.actor?.name,
+          ]),
+        );
+    };
     if (category && !ticketCategories.some((entry) => entry.id === category))
       throw new AuthError("invalid_ticket_category", 400);
     if (
@@ -443,6 +471,7 @@ export function ticketService(
           (assignment !== "unclaimed" || !ticket.claimedBy) &&
           (assignment !== "claimed" || Boolean(ticket.claimedBy)) &&
           withinDate(ticket.createdAt) &&
+          matchesStaff(ticket) &&
           matchesText(term, [
             ticket.id,
             ticket.ign,
@@ -1129,6 +1158,7 @@ export function ticketService(
           at: ticket.closedAt,
           claimedBy: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
           rating: ticket.rating,
+          ratedAt: ticket.ratedAt || null,
           resolution: ticket.resolution,
         },
       );
@@ -1140,6 +1170,7 @@ export function ticketService(
       ticket.helpedBy = null;
       ticket.resolution = null;
       ticket.rating = null;
+      ticket.ratedAt = null;
       ticket.ratingStaff = null;
       ticket.reopenedCount = (ticket.reopenedCount || 0) + 1;
       if (!ticket.channelId) {
@@ -1232,6 +1263,7 @@ export function ticketService(
       throw new AuthError("ticket_already_rated", 409);
     store.transaction(() => {
       ticket.rating = rating;
+      ticket.ratedAt = now();
       audit(ticket, user, "rated", `Player rated the help ${rating}/5`);
       queueActivity(ticket, "rated", user);
       autoDeleteRated(ticket);

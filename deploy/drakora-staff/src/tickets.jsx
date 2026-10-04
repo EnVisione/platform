@@ -105,6 +105,22 @@ function Avatar({ actor }) {
     </span>
   );
 }
+function FeedbackRating({ rating, staff, at, previous = false }) {
+  return (
+    <div className="ticket-feedback-rating">
+      {previous && <p className="ticket-muted">Previous closure</p>}
+      <p className="ticket-feedback-score">
+        <span className="ticket-feedback-stars" aria-hidden="true">
+          {"★".repeat(rating)}
+          <span>{"★".repeat(5 - rating)}</span>
+        </span>
+        <strong>{rating} / 5</strong>
+      </p>
+      {staff && <p>Feedback for {staff.name}</p>}
+      {at && <p className="ticket-muted">Rated {stamp(at)}</p>}
+    </div>
+  );
+}
 function FileView({ file }) {
   if (file.expired)
     return (
@@ -1359,29 +1375,59 @@ function TicketChat({
               </div>
             </div>
           </section>
-          {staffView && ticket.feedbackDelivery && (
-            <section className="ticket-detail-section">
-              <h3>Player feedback</h3>
-              <p>
-                {
-                  {
-                    rated: `Rated ${ticket.rating} / 5`,
-                    dm: "Rating request sent by Discord DM",
-                    channel: "DMs blocked · private rating fallback sent",
-                    pending: "Rating request queued",
-                    failed: "Rating delivery needs attention",
-                    website: "Rating available in the private web ticket",
-                  }[ticket.feedbackDelivery.status]
-                }
-              </p>
-              {ticket.feedbackDelivery.at && (
-                <p className="muted">{stamp(ticket.feedbackDelivery.at)}</p>
-              )}
-              {ticket.ratingStaff && (
-                <p>Feedback for {ticket.ratingStaff.name}</p>
-              )}
-            </section>
-          )}
+          {staffView &&
+            (ticket.feedbackDelivery ||
+              ticket.rating ||
+              ticket.previousResolutions?.some(
+                (closure) => closure.rating,
+              )) && (
+              <section className="ticket-detail-section">
+                <h3>Player feedback</h3>
+                {ticket.rating ? (
+                  <FeedbackRating
+                    rating={ticket.rating}
+                    staff={ticket.ratingStaff}
+                    at={ticket.ratedAt}
+                  />
+                ) : (
+                  <>
+                    <p>No rating submitted for the current ticket.</p>
+                    {ticket.feedbackDelivery && (
+                      <p className="ticket-muted">
+                        {
+                          {
+                            dm: "Rating request sent by Discord DM",
+                            channel:
+                              "DMs blocked · private rating fallback sent",
+                            pending: "Rating request queued",
+                            failed: "Rating delivery needs attention",
+                            website:
+                              "Rating available in the private web ticket",
+                          }[ticket.feedbackDelivery.status]
+                        }
+                        {ticket.feedbackDelivery.at &&
+                          ` · ${stamp(ticket.feedbackDelivery.at)}`}
+                      </p>
+                    )}
+                    {ticket.ratingStaff && (
+                      <p>Feedback requested for {ticket.ratingStaff.name}</p>
+                    )}
+                  </>
+                )}
+                {ticket.previousResolutions
+                  ?.filter((closure) => closure.rating)
+                  .reverse()
+                  .map((closure) => (
+                    <FeedbackRating
+                      key={closure.at}
+                      rating={closure.rating}
+                      staff={closure.claimedBy}
+                      at={closure.ratedAt}
+                      previous
+                    />
+                  ))}
+              </section>
+            )}
           <section className="ticket-detail-section">
             <h3>{partner ? "Partner contact" : "Player information"}</h3>
             <dl className="ticket-facts">
@@ -1511,12 +1557,20 @@ export function Tickets({ csrf, capabilities, logs = false }) {
   const [filters, setFilters] = useState(() => {
     const params = new URLSearchParams(location.search);
     return Object.fromEntries(
-      ["query", "status", "type", "assignment", "sort", "from", "to"].map(
-        (key) => [key, params.get(key) || ""],
-      ),
+      [
+        "query",
+        "staff",
+        "status",
+        "type",
+        "assignment",
+        "sort",
+        "from",
+        "to",
+      ].map((key) => [key, params.get(key) || ""]),
     );
   });
   const [term, setTerm] = useState(filters.query);
+  const [staffTerm, setStaffTerm] = useState(filters.staff);
   const listSearch = new URLSearchParams({
     ...filters,
     category,
@@ -1537,7 +1591,12 @@ export function Tickets({ csrf, capabilities, logs = false }) {
     );
   }
   function changeFilter(key, value) {
-    updateList({ ...filters, query: term.trim(), [key]: value });
+    updateList({
+      ...filters,
+      query: term.trim(),
+      staff: staffTerm.trim(),
+      [key]: value,
+    });
   }
   const latestRequest = useRef(0);
   const selection = `${logs}:${listSearch}`;
@@ -1637,7 +1696,11 @@ export function Tickets({ csrf, capabilities, logs = false }) {
         aria-label="Filter tickets"
         onSubmit={(event) => {
           event.preventDefault();
-          updateList({ ...filters, query: term.trim() });
+          updateList({
+            ...filters,
+            query: term.trim(),
+            staff: staffTerm.trim(),
+          });
         }}
       >
         <label>
@@ -1683,7 +1746,17 @@ export function Tickets({ csrf, capabilities, logs = false }) {
           </select>
         </label>
         <label>
-          Assigned staff
+          Staff name or ID
+          <input
+            type="search"
+            maxLength={100}
+            placeholder="Search staff who helped"
+            value={staffTerm}
+            onChange={(event) => setStaffTerm(event.target.value)}
+          />
+        </label>
+        <label>
+          Assignment status
           <select
             value={filters.assignment}
             onChange={(event) => changeFilter("assignment", event.target.value)}
@@ -1716,6 +1789,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
             type="button"
             onClick={() => {
               setTerm("");
+              setStaffTerm("");
               updateList(
                 Object.fromEntries(
                   Object.keys(filters).map((key) => [key, ""]),
@@ -1729,8 +1803,9 @@ export function Tickets({ csrf, capabilities, logs = false }) {
         </div>
       </form>
       <p className="ticket-filter-note">
-        Dates filter when tickets were opened. Category counts match the other
-        filters.
+        Staff search includes assigned staff, first replies and resolutions,
+        including previous closures. Dates filter when tickets were opened.
+        Category counts match the other filters.
       </p>
       <div className="ticket-list">
         {!ready && !error && <p>Loading tickets…</p>}

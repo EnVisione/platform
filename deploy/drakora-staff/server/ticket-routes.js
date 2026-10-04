@@ -317,6 +317,7 @@ export function ticketRouter(
           status: req.query.status,
           type: req.query.type,
           assignment: req.query.assignment,
+          staff: req.query.staff,
           sort: req.query.sort,
           from: req.query.from,
           to: req.query.to,

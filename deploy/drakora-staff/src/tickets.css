@@ -697,6 +697,24 @@
   font-weight: 700;
   margin-bottom: 12px;
 }
+.ticket-feedback-rating + .ticket-feedback-rating {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #3b3d44;
+}
+.ticket-feedback-score {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ticket-feedback-stars {
+  color: #d6bf8d;
+  letter-spacing: 2px;
+  font-size: 20px;
+}
+.ticket-feedback-stars span {
+  color: #6d7078;
+}
 .ticket-reference,
 .ticket-integration-note {
   color: #949ba4;
