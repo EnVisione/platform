@@ -297,15 +297,40 @@ test("slow foreground frames preserve flight timing while bounding the fluid ste
   assert.equal(f.counts().created, 1);
 });
 
-test("breath points down to scenery and source geometry follows the artwork", () => {
+test("breath keeps the dragon's angle and source geometry follows the artwork", () => {
   const sources = [{ x: 590, y: 200, width: 12, height: 42 }];
   const early = fireScene(1, 1200, 800, true, sources);
   const middle = fireScene(3.3, 1200, 800, true, sources);
   assert.ok(early.dragon.x < middle.dragon.x);
   assert.equal(middle.dragon.direction, 1);
   assert.equal(middle.dragon.size, 480);
-  assert.deepEqual(middle.breathTarget, [590, 200]);
   assert.ok(middle.breathTarget[1] < middle.breath[1]);
+  for (const time of [0.8, 3.3, 5, 7]) {
+    const scene = fireScene(time, 1200, 800, true, sources);
+    const withoutProps = fireScene(time, 1200, 800);
+    const direction = scene.breathTarget.map(
+      (value, index) => value - scene.breath[index],
+    );
+    const angle = (scene.dragon.roll * Math.PI) / 180;
+    assert.ok(
+      Math.abs(
+        direction[0] * Math.cos(angle) - direction[1] * Math.sin(angle) - 76.8,
+      ) < 1e-9,
+    );
+    assert.ok(
+      Math.abs(
+        -direction[0] * Math.sin(angle) - direction[1] * Math.cos(angle) - 480,
+      ) < 1e-9,
+    );
+    for (let index = 0; index < 2; index++) {
+      assert.ok(
+        Math.abs(
+          direction[index] -
+            (withoutProps.breathTarget[index] - withoutProps.breath[index]),
+        ) < 1e-9,
+      );
+    }
+  }
   const f = fixture();
   try {
     f.tick(0);
@@ -313,7 +338,6 @@ test("breath points down to scenery and source geometry follows the artwork", ()
       x: 600,
       y: 260,
       width: 10,
-      fixed: false,
       height: 50,
       bounds: [400, 100, 1000, 500],
       lit: 0,

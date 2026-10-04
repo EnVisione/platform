@@ -14,7 +14,6 @@ uniform float time;
 uniform vec4 fires[12];
 uniform float fireWidths[12];
 uniform vec4 fireBounds[12];
-uniform float fireFixed[12];
 uniform vec2 breathTarget;
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -88,11 +87,10 @@ float flame(vec2 p, float anchor, float seed, float height, float width) {
 `;
 
 const sceneryField = `${flameField}
-vec4 sceneryFire(vec2 p, float fixedOnly) {
+vec4 sceneryFire(vec2 p) {
   vec3 color = vec3(0.0);
   float alpha = 0.0;
   for (int i = 0; i < 12; i++) {
-    if (abs(fireFixed[i] - fixedOnly) > 0.5) continue;
     vec4 source = fires[i];
     vec4 bounds = fireBounds[i];
     if (source.x < bounds.x || source.x > bounds.z || source.y < bounds.y || source.y > bounds.w) continue;
@@ -117,21 +115,19 @@ vec4 sceneryFire(vec2 p, float fixedOnly) {
 
 const display = `${field}
 uniform sampler2D smoke;
-${sceneryField}
 void main() {
   vec2 p = uv * view;
   float density = texture2D(smoke, uv).r;
   float detail = 0.6 + fbm(p * 0.012 + vec2(time * 0.08, -time * 0.25)) * 0.65;
   float smokeAlpha = min(density * detail * 0.68, 0.36);
   vec3 smokeColor = mix(vec3(0.23, 0.23, 0.24), vec3(0.36, 0.32, 0.3), exp(-p.y / 200.0));
-  vec4 fire = sceneryFire(p, 1.0);
-  gl_FragColor = vec4(smokeColor * smokeAlpha * (1.0 - fire.a) + fire.rgb, smokeAlpha * (1.0 - fire.a) + fire.a);
+  gl_FragColor = vec4(smokeColor * smokeAlpha, smokeAlpha);
 }`;
 
 const sceneryDisplay = `${field}
 ${sceneryField}
 void main() {
-  gl_FragColor = sceneryFire(uv * view, 0.0);
+  gl_FragColor = sceneryFire(uv * view);
 }`;
 
 const foregroundDisplay = `${field}
@@ -231,7 +227,6 @@ export function createFireRenderer(
         ...Array.from({ length: 12 }, (_, index) => `fires[${index}]`),
         ...Array.from({ length: 12 }, (_, index) => `fireWidths[${index}]`),
         ...Array.from({ length: 12 }, (_, index) => `fireBounds[${index}]`),
-        ...Array.from({ length: 12 }, (_, index) => `fireFixed[${index}]`),
       ].map((name) => [name, gl.getUniformLocation(item, name)]),
     );
     return { item, uniforms, position: gl.getAttribLocation(item, "position") };
@@ -337,7 +332,6 @@ export function createFireRenderer(
       gl.uniform2f(u.breathTarget, ...scene.breathTarget);
       for (let index = 0; index < 12; index++) {
         const source = scene.fires[index];
-        gl.uniform1f(u[`fireFixed[${index}]`], source?.fixed ? 1 : 0);
         gl.uniform4f(
           u[`fires[${index}]`],
           source?.x ?? -1000,

@@ -15,7 +15,7 @@ import "./public.css";
 import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 import { PartnershipForm } from "./partnerships.jsx";
-import { AmbientFire, FireScenery } from "./public-fire.jsx";
+import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
 
 const artwork = {
   castle,
@@ -285,6 +285,7 @@ function HomePage({ home, discordInvite }) {
         </div>
         <FireScenery image={castle} />
       </section>
+      <BannerTorches />
       <PartnershipBanner discordInvite={discordInvite} />
       <div className="public-home-grid">
         <section

@@ -33,11 +33,8 @@ export function fireScene(time, width, height, intro = true, sources = []) {
     const hit = ((source.x + size - mouthX) / (width + size * 2)) * 7.8;
     return { ...source, lit: intro ? smooth(hit, hit + 0.3, time) : 1 };
   });
-  const aim = visible
-    .filter(
-      (source) => source.y < breathY && Math.abs(source.x - breathX) < 160,
-    )
-    .sort((a, b) => Math.abs(a.x - breathX) - Math.abs(b.x - breathX))[0];
+  const breathLength = Math.min(height * 0.65, 480);
+  const breathForward = breathLength * 0.16;
   const intensity = intro
     ? smooth(0.4, 0.8, time) * (1 - smooth(6.8, 7.5, time))
     : 0;
@@ -52,12 +49,14 @@ export function fireScene(time, width, height, intro = true, sources = []) {
       opacity: intro ? smooth(0, 0.3, time) * (1 - smooth(7.4, 8, time)) : 0,
     },
     breath: [breathX, breathY, intensity],
-    breathTarget: aim
-      ? [aim.x, aim.y]
-      : [
-          breathX + size * 0.16,
-          Math.max(0, breathY - Math.min(height * 0.65, 480)),
-        ],
+    breathTarget: [
+      breathX +
+        Math.cos(angle) * breathForward -
+        Math.sin(angle) * breathLength,
+      breathY -
+        Math.sin(angle) * breathForward -
+        Math.cos(angle) * breathLength,
+    ],
     fires,
   };
 }
@@ -97,7 +96,6 @@ export function attachFireMotion(
         x: rect.left + rect.width / 2,
         y: viewHeight - rect.bottom,
         width: rect.width / 2,
-        fixed: element.dataset?.fireFixed === "true",
         height: rect.height,
         bounds: [
           art.left,
