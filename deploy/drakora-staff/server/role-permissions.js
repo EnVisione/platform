@@ -81,7 +81,9 @@ export function rolePermissions(config, store) {
               ? role.name === "Founder"
               : category === "support"
                 ? [...reviewers, "Helper"].includes(role.name)
-                : managers.includes(role.name);
+                : category === "reports"
+                  ? reviewers.includes(role.name)
+                  : managers.includes(role.name);
         }
         if (key.startsWith("mail.inbox.partners@drakora.org."))
           enabled = managers.includes(role.name);

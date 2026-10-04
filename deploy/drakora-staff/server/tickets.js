@@ -4,6 +4,8 @@ import { AuthError } from "./discord.js";
 import { validMailAddress } from "./mail-address.js";
 import {
   ticketTypes,
+  ticketIntake,
+  ticketDetails,
   ticketCategories,
   ticketCategory,
   ticketCapability,
@@ -162,6 +164,8 @@ export function ticketService(
       type: ticket.type,
       location: ticket.location,
       description: ticket.description,
+      reportTarget: ticket.reportTarget || null,
+      intakeDetails: ticketDetails(ticket),
       owner: ticket.owner,
       origin: ticket.origin,
       status: ticket.status,
@@ -310,12 +314,23 @@ export function ticketService(
         ).length >= 3
     )
       throw new AuthError("ticket_limit", 409);
+    const intake = Object.fromEntries(
+      ticketIntake(input.type).fields.map((field) => [
+        field.id,
+        text(
+          field.required === false ? (input[field.id] ?? "") : input[field.id],
+          field.min,
+          field.max,
+          field.id === "reportTarget"
+            ? "invalid_report_target"
+            : "invalid_ticket",
+        ),
+      ]),
+    );
     const ticket = {
       id: randomUUID(),
-      ign: input.ign,
       type: input.type,
-      location: text(input.location, 2, 100),
-      description: text(input.description, 30, 4000),
+      ...intake,
       owner: publicActor(user),
       ...(user.guest ? { guestNetwork, contactEmail } : {}),
       origin,

@@ -263,6 +263,10 @@ test("category and inbox defaults preserve billing and partnership privacy acros
     helper = policy.apply(actor("23"));
   for (const user of [founder, manager, admin, helper])
     assert.equal(user.capabilities["tickets.category.support.view"], true);
+  for (const user of [founder, manager, admin, policy.apply(actor("29"))])
+    assert.equal(user.capabilities["tickets.category.reports.view"], true);
+  assert.equal(helper.capabilities["tickets.category.reports.view"], false);
+  assert.equal(admin.capabilities["tickets.category.staff.view"], false);
   assert.equal(founder.capabilities["tickets.category.billing.view"], true);
   for (const user of [manager, admin, helper])
     assert.equal(user.capabilities["tickets.category.billing.view"], false);

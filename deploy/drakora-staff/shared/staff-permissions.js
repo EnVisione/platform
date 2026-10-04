@@ -1,3 +1,5 @@
+import { ticketCategories } from "./tickets.js";
+
 export const staffPermissions = [
   [
     "moderation.view",
@@ -205,28 +207,24 @@ export const inboxPermission = (address, action = "view") =>
   `mail.inbox.${address.toLowerCase()}.${action}`;
 
 export function staffPermissionCatalog(identities = []) {
-  const categoryPermissions = [
-    ["support", "Support"],
-    ["billing", "Billing"],
-    ["partnership", "Partnerships"],
-    ["staff", "Staff reports"],
-  ].flatMap(([category, name]) =>
-    ["view", "reply", "claim", "close"].map((action) => ({
-      key: `tickets.category.${category}.${action}`,
-      group: `${name} tickets`,
-      label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve" }[action]} ${name.toLowerCase()} tickets`,
-      description:
-        category === "billing"
-          ? "Billing access defaults to Founders. Only a Founder can change these grants."
-          : "Applies to the queue, messages, files, history and transcripts in this category.",
-      requires: [
-        "dashboard.view",
-        "tickets.view",
-        ...(action === "view"
-          ? []
-          : [`tickets.${action}`, `tickets.category.${category}.view`]),
-      ],
-    })),
+  const categoryPermissions = ticketCategories.flatMap(
+    ({ id: category, name }) =>
+      ["view", "reply", "claim", "close"].map((action) => ({
+        key: `tickets.category.${category}.${action}`,
+        group: `${name} tickets`,
+        label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve" }[action]} ${name.toLowerCase()} tickets`,
+        description:
+          category === "billing"
+            ? "Billing access defaults to Founders. Only a Founder can change these grants."
+            : "Applies to the queue, messages, files, history and transcripts in this category.",
+        requires: [
+          "dashboard.view",
+          "tickets.view",
+          ...(action === "view"
+            ? []
+            : [`tickets.${action}`, `tickets.category.${category}.view`]),
+        ],
+      })),
   );
   const inboxPermissions = identities.flatMap(({ address }) =>
     ["view", "send", "reply"].map((action) => ({

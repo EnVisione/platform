@@ -81,7 +81,10 @@ test("ticket intake verifies fields, prevents duplicate creation and enforces th
 
 test("private ownership and staff report rank boundaries apply to reads, replies and logs", (t) => {
   const { service } = setup(t);
-  const ticket = service.create(owner, input({ type: "staff" }));
+  const ticket = service.create(
+    owner,
+    input({ type: "staff", reportTarget: "ReportedStaff" }),
+  );
   fails(() => service.view({ id: "999" }, ticket.id), "ticket_not_found");
   fails(() => service.view(helper, ticket.id, true), "ticket_access_denied");
   fails(
@@ -94,6 +97,128 @@ test("private ownership and staff report rank boundaries apply to reads, replies
   fails(
     () => service.claim({ ...helper, roles: ["23"] }, ticket.id),
     "ticket_access_denied",
+  );
+});
+
+test("player reports require a target and have an independent authorized reports queue", async (t) => {
+  const { service, store, policy } = setup(t);
+  const moderator = { id: "203", name: "Moderator", roles: ["10", "29"] };
+  const founder = { id: "204", name: "Founder", roles: ["10", "20"] };
+  for (const type of ["player", "staff"])
+    for (const reportTarget of [
+      undefined,
+      "",
+      "x",
+      "a".repeat(101),
+      "bad\0name",
+    ])
+      fails(
+        () => service.create(owner, input({ type, reportTarget })),
+        "invalid_report_target",
+      );
+  const report = service.create(
+    owner,
+    input({ type: "player", reportTarget: "  ReportedPlayer  " }),
+  );
+  const staffReport = service.create(
+    owner,
+    input({ type: "staff", reportTarget: "ReportedStaff" }),
+  );
+  service.create(owner, input());
+  assert.equal(service.list(helper).total, 1);
+  assert.equal(
+    service
+      .list(helper)
+      .categories.some((category) => category.id === "reports"),
+    false,
+  );
+  assert.deepEqual(
+    service
+      .list(moderator, { category: "reports" })
+      .items.map((ticket) => ticket.id),
+    [report.id],
+  );
+  assert.equal(service.list(moderator, { category: "support" }).total, 1);
+  assert.equal(
+    service
+      .list(moderator)
+      .categories.find((category) => category.id === "reports").count,
+    1,
+  );
+  fails(
+    () => service.view(moderator, staffReport.id, true),
+    "ticket_access_denied",
+  );
+  assert.equal(service.view(owner, report.id).reportTarget, "ReportedPlayer");
+  assert.equal(service.view(moderator, report.id, true).category, "reports");
+  const transcript = await ticketTranscript(
+    service,
+    moderator,
+    report.id,
+    true,
+  );
+  assert.ok(transcript.includes("Player you are reporting: ReportedPlayer"));
+  const edit = policy.read(founder);
+  const roles = edit.roles
+    .filter((role) => role.id)
+    .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
+  for (const action of ["view", "reply", "claim", "close"])
+    roles.find((role) => role.id === "29").permissions[
+      `tickets.category.reports.${action}`
+    ] = false;
+  policy.save(founder, { revision: edit.revision, roles });
+  assert.equal(service.list(moderator, { category: "reports" }).total, 0);
+  fails(() => service.view(moderator, report.id, true), "ticket_access_denied");
+  fails(
+    () => service.reply(moderator, report.id, message(), true),
+    "ticket_access_denied",
+  );
+  await assert.rejects(ticketTranscript(service, moderator, report.id, true), {
+    code: "ticket_access_denied",
+  });
+  const legacy = { ...report };
+  delete legacy.reportTarget;
+  store.set("ticket", legacy.id, legacy, Number.MAX_SAFE_INTEGER);
+  assert.equal(service.view(manager, legacy.id, true).reportTarget, null);
+  assert.equal(service.list(manager, { category: "reports" }).total, 1);
+});
+
+test("type-specific details are validated, saved and included in views and safe transcripts", async (t) => {
+  const { service } = setup(t);
+  const founder = { id: "204", name: "Founder", roles: ["10", "20"] };
+  const bill = service.create(
+    owner,
+    input({
+      type: "billing",
+      orderReference: " <order-123> ",
+      reportTarget: "not a report",
+    }),
+  );
+  assert.equal(bill.orderReference, "<order-123>");
+  assert.equal(bill.reportTarget, undefined);
+  assert.deepEqual(service.view(founder, bill.id, true).intakeDetails, [
+    { label: "Order reference (if available)", value: "<order-123>" },
+  ]);
+  const transcript = await ticketTranscript(service, founder, bill.id, true);
+  assert.ok(transcript.includes("&lt;order-123&gt;"));
+  assert.ok(!transcript.includes("<order-123>"));
+  const bug = service.create(
+    owner,
+    input({
+      type: "bug",
+      packVersion: "Prominence 3.0",
+      errorMessage: "Exact error text",
+    }),
+  );
+  assert.equal(service.view(owner, bug.id).intakeDetails.length, 2);
+  assert.equal(service.create(owner, input({ type: "bug" })).packVersion, "");
+  fails(
+    () =>
+      service.create(
+        { id: "101", name: "Another player" },
+        input({ type: "bug", errorMessage: "x".repeat(1001) }),
+      ),
+    "invalid_ticket",
   );
 });
 

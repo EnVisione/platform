@@ -339,6 +339,7 @@ test("restricted notices stay generic and a claim during delivery cancels the re
       requestId: randomUUID(),
       ign: "SecretIgn",
       type: "staff",
+      reportTarget: "ReportedStaff",
       location: "PrivateLocation",
       description:
         "PRIVATE detailed issue with enough information for staff to help.",
@@ -466,6 +467,7 @@ test("Discord transport creates private tickets, preserves webhook identity and 
     requestId: randomUUID(),
     ign: "Jojo",
     type: "staff",
+    reportTarget: "ReportedStaff",
     location: "Discord",
     description: "A detailed report about a member of the staff team.",
   });
@@ -486,7 +488,139 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(modal.custom_id, "ticket:intake:bug");
-  assert.equal(modal.components.length, 3);
+  assert.equal(modal.components.length, 5);
+});
+
+test("Discord reports have dedicated forms, persist the reported person and isolate report access", async (t) => {
+  const { client, service, channels, user, transport, staffChannel } =
+    setupDiscord(t, true);
+  await transport.recover();
+  for (const type of [
+    "player",
+    "staff",
+    "bug",
+    "general",
+    "billing",
+    "game",
+    "discord",
+    "exploit",
+  ]) {
+    const modal = await new Promise((resolve) =>
+      client.emit("interactionCreate", {
+        guildId: "2",
+        customId: "ticket:type",
+        values: [type],
+        isChatInputCommand: () => false,
+        async showModal(value) {
+          resolve(value.toJSON());
+        },
+      }),
+    );
+    const fields = modal.components.map((row) => row.components[0]);
+    assert.equal(modal.custom_id, `ticket:intake:${type}`);
+    if (["player", "staff"].includes(type)) {
+      assert.equal(
+        modal.title,
+        type === "player" ? "Report a player" : "Report a staff member",
+      );
+      assert.equal(
+        fields.find((field) => field.custom_id === "reportTarget").required,
+        true,
+      );
+      assert.match(
+        fields.find((field) => field.custom_id === "description").label,
+        /when.*evidence/,
+      );
+      assert.ok(!JSON.stringify(modal).includes("reproduce"));
+    } else {
+      assert.ok(!fields.some((field) => field.custom_id === "reportTarget"));
+      assert.equal(JSON.stringify(modal).includes("reproduce"), type === "bug");
+    }
+  }
+  const values = {
+    ign: "Reporter",
+    reportTarget: "ReportedPlayer",
+    location: "Discord",
+    description:
+      "The player harassed someone in chat at 11:00 UTC. Evidence follows.",
+  };
+  await new Promise((resolve) =>
+    client.emit("interactionCreate", {
+      guildId: "2",
+      customId: "ticket:intake:player",
+      user,
+      fields: { getTextInputValue: (id) => values[id] },
+      isChatInputCommand: () => false,
+      async deferReply() {
+        this.deferred = true;
+      },
+      async editReply(value) {
+        resolve(value);
+      },
+    }),
+  );
+  const report = service.all()[0];
+  assert.equal(report.type, "player");
+  assert.equal(report.ign, "Reporter");
+  assert.equal(report.reportTarget, "ReportedPlayer");
+  const target = channels.get(report.channelId);
+  assert.ok(target.overwrites.some((entry) => entry.id === "200"));
+  assert.ok(!target.overwrites.some((entry) => entry.id === "201"));
+  const header = [...target.savedMessages.values()].find(
+    (message) => message.data.embeds?.[0]?.title,
+  )?.data.embeds[0];
+  assert.ok(
+    header.fields.some(
+      (field) =>
+        field.name === "Player you are reporting" &&
+        field.value === "ReportedPlayer",
+    ),
+  );
+  await transport.notice(
+    report,
+    { event: "opened", channelId: staffChannel.id },
+    `${report.id}:opened`,
+  );
+  const notices = [...channels.values()].find(
+    (channel) => channel.name === "reports-tickets",
+  );
+  assert.ok(notices.overwrites.some((entry) => entry.id === "200"));
+  assert.ok(!notices.overwrites.some((entry) => entry.id === "201"));
+  assert.ok(
+    ![...notices.savedMessages.values()].some((message) =>
+      JSON.stringify(message.data).includes("ReportedPlayer"),
+    ),
+  );
+});
+
+test("historical report files in shared support storage require both category grants", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  await transport.recover();
+  const report = service.create(user, {
+    requestId: randomUUID(),
+    ign: "Reporter",
+    type: "player",
+    reportTarget: "ReportedPlayer",
+    location: "Discord",
+    description:
+      "This is a historical report with a file previously stored beside support attachments.",
+  });
+  const archived = await transport.upload(
+    Buffer.from("proof"),
+    "proof.txt",
+    "text/plain",
+    { ...report, type: "general" },
+  );
+  service.store.set(
+    "ticket-media",
+    randomUUID(),
+    { ...archived, ticketId: report.id, expiresAt: Date.now() - 1 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await transport.refreshPermissions();
+  const storage = channels.get(archived.channelId);
+  assert.ok(storage.overwrites.some((entry) => entry.id === "200"));
+  assert.ok(!storage.overwrites.some((entry) => entry.id === "201"));
 });
 
 test("Discord reconnect backfills multiple pages and reconciles edits and deletions without duplicates", async (t) => {

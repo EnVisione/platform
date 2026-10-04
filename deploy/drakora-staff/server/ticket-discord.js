@@ -12,10 +12,11 @@ import {
 import { AuthError } from "./discord.js";
 import {
   ticketTypes,
+  ticketIntake,
+  ticketDetails,
   ticketPath,
   ticketStatuses,
   ticketCategory,
-  ticketCapability,
 } from "../shared/tickets.js";
 import { ticketTranscript } from "./ticket-transcript.js";
 
@@ -68,18 +69,22 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         }),
       );
   }
-  function overwrites(members, owner, restricted = false) {
+  function overwrites(members, owner, category = "support") {
+    const categories = Array.isArray(category) ? category : [category];
+    const canReply = (user) =>
+      user.capabilities["tickets.reply"] &&
+      categories.every(
+        (entry) => user.capabilities[`tickets.category.${entry}.reply`],
+      );
     const staff = members
       .filter(
         (user) =>
           user.id !== owner &&
           user.id !== client.user.id &&
           user.capabilities["tickets.view"] &&
-          user.capabilities[
-            ticketCapability({
-              type: restricted === true ? "staff" : restricted || "general",
-            })
-          ],
+          categories.every(
+            (entry) => user.capabilities[`tickets.category.${entry}.view`],
+          ),
       )
       .map((user) => ({
         id: user.id,
@@ -87,24 +92,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         allow: [
           P.ViewChannel,
           P.ReadMessageHistory,
-          ...(user.capabilities[
-            ticketCapability(
-              { type: restricted === true ? "staff" : restricted || "general" },
-              "reply",
-            )
-          ] && user.capabilities["tickets.reply"]
+          ...(canReply(user)
             ? [P.SendMessages, P.AttachFiles, P.EmbedLinks]
             : []),
         ],
-        deny:
-          user.capabilities[
-            ticketCapability(
-              { type: restricted === true ? "staff" : restricted || "general" },
-              "reply",
-            )
-          ] && user.capabilities["tickets.reply"]
-            ? []
-            : [P.SendMessages, P.AttachFiles],
+        deny: canReply(user) ? [] : [P.SendMessages, P.AttachFiles],
       }));
     if (staff.length > (owner ? 97 : 98))
       throw new Error("Ticket access capacity exceeded");
@@ -146,7 +138,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const permissions = overwrites(
       members,
       ticket.owner.guest ? null : ticket.owner.id,
-      ticket.type,
+      ticketCategory(ticket),
     );
     if (["closed", "awaiting_resolution"].includes(ticket.status))
       for (const permission of permissions)
@@ -300,6 +292,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           value: ticket.location,
           inline: true,
         },
+        ...ticketDetails(ticket).map((detail) => ({
+          name: detail.label,
+          value: detail.value,
+        })),
         { name: "Status", value: ticketStatuses[ticket.status], inline: true },
         {
           name: "Helping you",
@@ -925,7 +921,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           },
           ...Object.entries(saved.categoryMedia || {}).map(([type, id]) => ({
             id,
-            permissions: overwrites(members, null, type),
+            permissions: overwrites(members, null, [
+              type,
+              ...new Set(
+                service.store
+                  .entries("ticket-media")
+                  .filter(([, file]) => file.channelId === id && !file.purged)
+                  .map(([, file]) =>
+                    ticketCategory(service.get(file.ticketId)),
+                  ),
+              ),
+            ]),
           })),
           ...service
             .all()
@@ -1092,12 +1098,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       flags: 64,
     });
   }
-  function input(id, label, style, min, max, value) {
+  function input(id, label, style, min, max, value, required = true) {
     const field = new TextInputBuilder()
       .setCustomId(id)
       .setLabel(label)
       .setStyle(style)
-      .setRequired(true)
+      .setRequired(required)
       .setMinLength(min)
       .setMaxLength(max);
     if (value) field.setValue(value);
@@ -1119,49 +1125,43 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     try {
       if (action === "type") {
         const type = interaction.values[0];
-        if (
-          type === "partnership" ||
-          !ticketTypes.some((item) => item.id === type)
-        )
-          throw new AuthError("invalid_ticket", 400);
+        const form = ticketIntake(type);
+        if (!form) throw new AuthError("invalid_ticket", 400);
         return await interaction.showModal(
           new ModalBuilder()
             .setCustomId(`ticket:intake:${type}`)
-            .setTitle("Tell us what happened")
+            .setTitle(form.title)
             .addComponents(
-              input(
-                "ign",
-                "Minecraft Java username",
-                TextInputStyle.Short,
-                3,
-                16,
-              ),
-              input(
-                "location",
-                "Server, world or Discord area affected",
-                TextInputStyle.Short,
-                2,
-                100,
-              ),
-              input(
-                "description",
-                "Describe the issue and steps to reproduce",
-                TextInputStyle.Paragraph,
-                30,
-                4000,
+              ...form.fields.map((field) =>
+                input(
+                  field.id,
+                  field.label,
+                  field.multiline
+                    ? TextInputStyle.Paragraph
+                    : TextInputStyle.Short,
+                  field.min,
+                  field.max,
+                  undefined,
+                  field.required !== false,
+                ),
               ),
             ),
         );
       }
       if (action === "intake") {
+        const form = ticketIntake(id);
+        if (!form) throw new AuthError("invalid_ticket", 400);
         await interaction.deferReply({ flags: 64 });
         const ticket = service.create(
           actor(interaction.user, interaction.member),
           {
             type: id,
-            ign: interaction.fields.getTextInputValue("ign"),
-            location: interaction.fields.getTextInputValue("location"),
-            description: interaction.fields.getTextInputValue("description"),
+            ...Object.fromEntries(
+              form.fields.map((field) => [
+                field.id,
+                interaction.fields.getTextInputValue(field.id),
+              ]),
+            ),
             requestId: randomUUID(),
           },
           "discord",
@@ -1287,6 +1287,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             "You already have three open tickets. Continue in an existing ticket.",
           invalid_ticket:
             "Check your Minecraft username and provide detailed information.",
+          invalid_report_target:
+            "Enter the username or Discord user ID of the person you are reporting.",
           ticket_already_rated: "You have already rated this ticket.",
         }[error.code] ||
         "This action could not be completed. Your existing ticket is safe; please try again.";

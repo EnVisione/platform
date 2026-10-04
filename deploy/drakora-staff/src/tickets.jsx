@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ticketTypes,
+  ticketIntake,
   ticketStatuses,
   ticketUploadLimit,
   ticketMessageUploadLimit,
@@ -26,6 +27,8 @@ const errors = {
     "This private link expired or was already used. Open the newest ticket update email, or use the browser where your ticket is already open.",
   invalid_ticket:
     "Check your Minecraft username and provide at least 30 characters describing the issue.",
+  invalid_report_target:
+    "Enter the username or Discord user ID of the person you are reporting.",
   invalid_message:
     "Write a message or attach a file. Messages can contain up to 2,000 characters.",
   ticket_closed:
@@ -489,6 +492,11 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
               </strong>{" "}
               · {ticket.location}
             </p>
+            {ticket.intakeDetails?.map((detail) => (
+              <p key={detail.label}>
+                <strong>{detail.label}:</strong> {detail.value}
+              </p>
+            ))}
             <p>{ticket.description}</p>
             {partner && (
               <p>
@@ -749,19 +757,24 @@ export function Tickets({ csrf, capabilities, logs = false }) {
     [error, setError] = useState(""),
     [offset, setOffset] = useState(0),
     [category, setCategory] = useState("");
+  const latestRequest = useRef(0);
+  const selection = `${logs}:${category}:${offset}`;
+  const ready = data?.selection === selection;
   const id = location.pathname.match(/^\/tickets\/([a-f0-9-]{36})$/)?.[1];
   const refresh = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     try {
-      setData(
-        await request(
-          `/api/tickets?closed=${logs ? 1 : 0}&offset=${offset}&category=${category}`,
-        ),
+      const result = await request(
+        `/api/tickets?closed=${logs ? 1 : 0}&offset=${offset}&category=${category}`,
       );
+      if (requestId !== latestRequest.current) return;
+      setData({ ...result, selection });
       setError("");
     } catch (error) {
+      if (requestId !== latestRequest.current) return;
       setError(error.message);
     }
-  }, [logs, offset, category]);
+  }, [logs, offset, category, selection]);
   useLive(!id ? "/api/tickets/events" : null, refresh);
   useEffect(() => {
     if (id) return;
@@ -769,7 +782,10 @@ export function Tickets({ csrf, capabilities, logs = false }) {
     const interval = setInterval(() => {
       if (!document.hidden) void refresh();
     }, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      latestRequest.current++;
+    };
   }, [id, refresh]);
   if (id)
     return (
@@ -842,30 +858,35 @@ export function Tickets({ csrf, capabilities, logs = false }) {
             ))}
           </div>
           <div className="ticket-list">
-            {data.items.map((ticket) => (
-              <a
-                className="ticket-list-row"
-                key={ticket.id}
-                href={`/tickets/${ticket.id}`}
-              >
-                <Avatar actor={ticket.owner} />
-                <div>
-                  <strong>
-                    {ticket.ign} ·{" "}
-                    {ticketTypes.find((type) => type.id === ticket.type)?.name}
-                  </strong>
-                  <p>{ticket.location}</p>
-                  <small>
-                    {ticket.owner.name} · {stamp(ticket.createdAt)}
-                  </small>
-                </div>
-                <span className={`ticket-state ${ticket.status}`}>
-                  {ticketStatuses[ticket.status]}
-                </span>
-                <span>{ticket.claimedBy?.name || "Unclaimed"}</span>
-              </a>
-            ))}
-            {!data.items.length && (
+            {!ready && !error && <p>Loading tickets…</p>}
+            {ready &&
+              data.items.map((ticket) => (
+                <a
+                  className="ticket-list-row"
+                  key={ticket.id}
+                  href={`/tickets/${ticket.id}`}
+                >
+                  <Avatar actor={ticket.owner} />
+                  <div>
+                    <strong>
+                      {ticket.ign} ·{" "}
+                      {
+                        ticketTypes.find((type) => type.id === ticket.type)
+                          ?.name
+                      }
+                    </strong>
+                    <p>{ticket.location}</p>
+                    <small>
+                      {ticket.owner.name} · {stamp(ticket.createdAt)}
+                    </small>
+                  </div>
+                  <span className={`ticket-state ${ticket.status}`}>
+                    {ticketStatuses[ticket.status]}
+                  </span>
+                  <span>{ticket.claimedBy?.name || "Unclaimed"}</span>
+                </a>
+              ))}
+            {ready && !data.items.length && (
               <p className="ticket-empty">
                 {logs
                   ? "No closed ticket transcripts yet."
@@ -875,14 +896,18 @@ export function Tickets({ csrf, capabilities, logs = false }) {
           </div>
           <div className="ticket-pagination">
             <button
-              disabled={!offset}
+              disabled={!ready || !offset}
               onClick={() => setOffset((value) => Math.max(0, value - 50))}
             >
               Previous
             </button>
-            <span>{data.total} tickets</span>
+            <span>
+              {ready
+                ? `${data.total} ${data.total === 1 ? "ticket" : "tickets"}`
+                : "Loading…"}
+            </span>
             <button
-              disabled={offset + 50 >= data.total}
+              disabled={!ready || offset + 50 >= data.total}
               onClick={() => setOffset((value) => value + 50)}
             >
               Next
@@ -904,9 +929,11 @@ export function PublicTickets() {
     ign: "",
     location: "",
     description: "",
+    reportTarget: "",
     email: "",
   });
   const requestId = useRef(crypto.randomUUID());
+  const intake = ticketIntake(form.type);
   const id = location.pathname.match(
     /^\/help\/[A-Za-z0-9_]{3,16}\/([a-f0-9-]{36})$/,
   )?.[1];
@@ -1059,7 +1086,7 @@ export function PublicTickets() {
       ) : (
         <div className="ticket-new-layout">
           <section>
-            <h1>How can we help?</h1>
+            <h1>{intake.title}</h1>
             <p>
               Tell us enough to understand the issue. A staff member will claim
               your ticket and help you here or in Discord.
@@ -1121,56 +1148,38 @@ export function PublicTickets() {
                   Staff reports are visible only to Managers and Founders.
                 </p>
               )}
-              <label>
-                Minecraft Java username
-                <input
-                  required
-                  value={form.ign}
-                  pattern="[A-Za-z0-9_]{3,16}"
-                  maxLength={16}
-                  autoComplete="off"
-                  placeholder="Your in-game name"
-                  onChange={(event) =>
-                    setForm((value) => ({ ...value, ign: event.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                Where is this happening?
-                <input
-                  required
-                  minLength={2}
-                  maxLength={100}
-                  value={form.location}
-                  placeholder="For example: Prominence II — Terra, Void, or Discord"
-                  onChange={(event) =>
-                    setForm((value) => ({
-                      ...value,
-                      location: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Describe the issue
-                <textarea
-                  required
-                  minLength={30}
-                  maxLength={4000}
-                  rows={7}
-                  value={form.description}
-                  placeholder="What happened, when did it happen, and what did you expect? Include steps to reproduce, relevant usernames, coordinates or purchase reference if useful. Never share passwords or payment details."
-                  onChange={(event) =>
-                    setForm((value) => ({
-                      ...value,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+              {intake.fields.map((field) => {
+                const Control = field.multiline ? "textarea" : "input";
+                return (
+                  <label key={field.id}>
+                    {field.label}
+                    <Control
+                      required={field.required !== false}
+                      minLength={field.min}
+                      maxLength={field.max}
+                      {...(field.multiline
+                        ? { rows: 7 }
+                        : {
+                            autoComplete: "off",
+                            ...(field.id === "ign"
+                              ? { pattern: "[A-Za-z0-9_]{3,16}" }
+                              : {}),
+                          })}
+                      value={form[field.id] || ""}
+                      placeholder={field.placeholder}
+                      onChange={(event) =>
+                        setForm((value) => ({
+                          ...value,
+                          [field.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                );
+              })}
               <p>
                 You can send screenshots and files once your private ticket is
-                open.
+                open. Never share passwords or payment details.
               </p>
               <button className="ticket-primary" disabled={busy}>
                 {busy ? "Opening ticket…" : "Open private ticket"}
