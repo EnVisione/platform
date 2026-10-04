@@ -56,6 +56,111 @@ const fails = (action, code) =>
   assert.throws(action, (error) => error.code === code);
 const message = (content = "Hello") => ({ requestId: randomUUID(), content });
 
+test("internal notes stay private, do not claim or extend owner inactivity, and remain usable after closure", async (t) => {
+  let at = Date.now();
+  const { service, store } = setup(t, { now: () => at });
+  const guest = { ...owner, guest: true };
+  const ticket = service.create(
+    guest,
+    input({ email: "player@example.invalid" }),
+    "web",
+    "a".repeat(64),
+  );
+  const baseline = service.get(ticket.id).lastActiveAt;
+  const emailBaseline = store.entries("ticket-email-outbox").length;
+  at += 5000;
+  const request = message(
+    "Internal handling details, never send to the player.",
+  );
+  const note = service.addNote(helper, ticket.id, request);
+  assert.equal(service.addNote(helper, ticket.id, request).id, note.id);
+  assert.equal(service.get(ticket.id).status, "pending");
+  assert.equal(service.get(ticket.id).helpedBy, undefined);
+  assert.equal(service.get(ticket.id).lastActiveAt, baseline);
+  assert.equal(service.view(helper, ticket.id, true).messages.length, 0);
+  assert.equal(service.view(guest, ticket.id).messages.length, 0);
+  assert.equal(
+    service
+      .view(guest, ticket.id)
+      .history.some((entry) => entry.action === "note"),
+    false,
+  );
+  assert.equal(store.entries("ticket-email-outbox").length, emailBaseline);
+  fails(() => service.notes(guest, ticket.id), "ticket_access_denied");
+  fails(
+    () => service.addNote(guest, ticket.id, message()),
+    "ticket_access_denied",
+  );
+  service.closeTicket(guest, ticket.id, {});
+  service.addNote(helper, ticket.id, message("Discuss this closed ticket."));
+  service.ingest(ticket.id, {
+    id: "9000",
+    internal: true,
+    staff: true,
+    actor: helper,
+    content: "Native Discord internal note",
+  });
+  const publicCopy = await ticketTranscript(
+    service,
+    guest,
+    ticket.id,
+    false,
+    async () => Buffer.alloc(0),
+  );
+  const staffCopy = await ticketTranscript(
+    service,
+    helper,
+    ticket.id,
+    true,
+    async () => Buffer.alloc(0),
+  );
+  assert.equal(publicCopy.includes(request.content), false);
+  assert.equal(publicCopy.includes("Native Discord internal note"), false);
+  assert.ok(staffCopy.includes(request.content));
+  assert.equal(service.notes(helper, ticket.id).messages.length, 3);
+  const billing = service.create(
+    { id: "101", name: "Billing player" },
+    input({ type: "billing" }),
+  );
+  fails(() => service.notes(manager, billing.id), "ticket_access_denied");
+  fails(
+    () => service.addNote(manager, billing.id, message()),
+    "ticket_access_denied",
+  );
+});
+
+test("partnership notes use the internal Discord outbox instead of the applicant contact method", (t) => {
+  const { service, store } = setup(t);
+  const ticket = service.createPartnership(
+    owner,
+    {
+      requestId: randomUUID(),
+      relationship: "owner",
+      discord: "PackOwner",
+      email: "owner@example.invalid",
+      name: "Pack owner",
+      packUrl: "https://modrinth.com/modpack/pack",
+      description:
+        "Please host our modpack for the community and offer official support to its players.",
+      preference: "email",
+    },
+    "a".repeat(64),
+  );
+  const existing = store.entries("partnership-outbox").length;
+  service.addNote(manager, ticket.id, message("Private partnership review"));
+  assert.equal(store.entries("partnership-outbox").length, existing);
+  assert.equal(
+    store.entries("ticket-outbox").filter(([, job]) => job.kind === "note")
+      .length,
+    1,
+  );
+  assert.equal(service.view(manager, ticket.id, true).messages.length, 0);
+  assert.equal(
+    service.notes(manager, ticket.id).messages[0].content,
+    "Private partnership review",
+  );
+});
+
 test("ticket filters combine assignment, text, dates, type and category before pagination and counts", (t) => {
   let at = Date.parse("2026-09-30T23:59:59.999Z");
   const { service, store } = setup(t, { now: () => at });

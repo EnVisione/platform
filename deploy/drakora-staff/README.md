@@ -22,6 +22,8 @@ Last active combines observed presence with message timestamps, including messag
 
 Huly Contacts shows the configured Discord staff ranks for linked employees. The rank badges refresh while Contacts is open. The generic Huly Worker badge is hidden in this deployment; its underlying HR data remains intact.
 
+Internal staff notes are separate from player replies. Staff can discuss each ticket in the panel and its private Discord thread, including after closure or customer-channel deletion. Notes follow the same category access and inactivity retention rules and never reach player transcripts or contact notifications. See [internal ticket discussions](documentation.md#support-tickets).
+
 ## Requirements
 
 - A working [Huly self-hosted installation](https://github.com/hcengineering/huly-selfhost), matching this checkout's Huly version.

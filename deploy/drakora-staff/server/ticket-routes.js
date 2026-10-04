@@ -430,6 +430,27 @@ export function ticketRouter(
       ),
     );
   });
+  if (staffView) {
+    router.get(`${prefix}/:id/notes`, async (req, res) => {
+      if (
+        req.query.before !== undefined &&
+        !/^\d{1,12}$/.test(req.query.before)
+      )
+        throw new AuthError("invalid_request", 400);
+      res.json(
+        service.notes(await identity(req), req.params.id, req.query.before),
+      );
+    });
+    router.post(
+      `${prefix}/:id/notes`,
+      express.json({ limit: "8kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        service.addNote(await identity(req), req.params.id, req.body);
+        res.status(201).json({ ok: true });
+      },
+    );
+  }
   router.post(
     `${prefix}/:id/messages`,
     express.json({ limit: "8kb" }),
@@ -531,7 +552,9 @@ export function ticketRouter(
           req.ticketUser,
           service.get(req.params.id),
           staffView,
-          req.query.internal === "1" ? "tickets.close" : "tickets.reply",
+          req.query.internal === "1" && req.query.notes !== "1"
+            ? "tickets.close"
+            : "tickets.reply",
         );
         next();
       } catch (error) {
@@ -567,6 +590,7 @@ export function ticketRouter(
             type,
             staffView,
             staffView && req.query.internal === "1",
+            staffView && req.query.notes === "1",
           ),
         );
     },

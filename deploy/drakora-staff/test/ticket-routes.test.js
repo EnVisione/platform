@@ -39,6 +39,9 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     async message() {
       return { id: randomUUID() };
     },
+    async note() {
+      return { id: randomUUID() };
+    },
     async upload(bytes, name, type) {
       uploads++;
       return {
@@ -128,6 +131,73 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   response = await call("/help/api/tickets", data);
   assert.equal(response.status, 201);
   const id = (await response.json()).path.split("/").at(-1);
+  const noteHeaders = { Origin: config.staffOrigin };
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/notes`,
+        {
+          requestId: randomUUID(),
+          content: "Private staff-only handling note",
+        },
+        { ...noteHeaders, "X-CSRF-Token": "wrong" },
+      )
+    ).status,
+    403,
+  );
+  const noteRequest = {
+    requestId: randomUUID(),
+    content: "Private staff-only handling note",
+  };
+  assert.equal(
+    (await call(`/api/tickets/${id}/notes`, noteRequest, noteHeaders)).status,
+    201,
+  );
+  assert.equal(
+    (await call(`/api/tickets/${id}/notes`, noteRequest, noteHeaders)).status,
+    201,
+  );
+  assert.equal(
+    (await (await call(`/api/tickets/${id}/notes`)).json()).messages.length,
+    1,
+  );
+  assert.equal(
+    (await (await call(`/help/api/tickets/${id}`)).json()).messages.length,
+    0,
+  );
+  assert.equal((await call(`/help/api/tickets/${id}/notes`)).status, 404);
+  assert.equal(
+    (await call(`/help/api/tickets/${id}/notes`, noteRequest)).status,
+    404,
+  );
+  const noteFile = await service.upload(
+    helper,
+    id,
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    "private.png",
+    "image/png",
+    true,
+    true,
+    true,
+  );
+  assert.equal(
+    (await call(`/help/api/tickets/${id}/attachments/${noteFile.id}`)).status,
+    404,
+  );
+  staffIdentity = { id: "other", roles: [] };
+  assert.equal((await call(`/api/tickets/${id}/notes`)).status, 403);
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/notes`,
+        { requestId: randomUUID(), content: "No access" },
+        noteHeaders,
+      )
+    ).status,
+    403,
+  );
+  staffIdentity = helper;
+  uploads = 0;
   signedIn = false;
   response = await call(`/help/api/tickets/${id}`);
   assert.equal(response.status, 401);

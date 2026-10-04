@@ -341,6 +341,47 @@
   min-height: 0;
   scrollbar-width: thin;
 }
+.ticket-conversation-content,
+.ticket-internal-notes {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.ticket-conversation-content[hidden],
+.ticket-internal-notes[hidden] {
+  display: none;
+}
+.ticket-conversation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #404249;
+}
+.ticket-conversation-tabs button[aria-pressed="true"] {
+  background: #cfb98d;
+  color: #211d18;
+}
+.ticket-notes-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+  background: #38352e;
+}
+.ticket-notes-heading strong {
+  color: #dfcaa5;
+}
+.ticket-notes-heading p {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+.ticket-notes-heading a {
+  font-size: 13px;
+}
 .ticket-intake {
   background: #2b2d31;
   border: 1px solid #3b3d44;

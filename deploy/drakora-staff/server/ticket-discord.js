@@ -19,6 +19,7 @@ import {
   ticketCategory,
 } from "../shared/tickets.js";
 import { ticketTranscript } from "./ticket-transcript.js";
+import { ticketNotesDiscord } from "./ticket-notes-discord.js";
 
 const actor = (user, member) => ({
   id: user.id,
@@ -264,6 +265,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
               label: "Staff dashboard",
               url: `${config.staffOrigin}/tickets/${ticket.id}`,
             },
+            {
+              type: 2,
+              style: 2,
+              label: "Internal staff notes",
+              custom_id: `ticket:notes:${ticket.id}`,
+            },
           ],
         },
       ];
@@ -332,6 +339,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             style: 5,
             label: "View ticket",
             url: `${config.applications.publicOrigin}${ticketPath(ticket)}`,
+          },
+          {
+            type: 2,
+            style: 2,
+            label: "Internal staff notes",
+            custom_id: `ticket:notes:${ticket.id}`,
           },
         ],
       },
@@ -969,6 +982,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async eraseTicket(ticket) {
       await ready();
+      await notes.erase(ticket);
       let target;
       try {
         if (ticket.channelId)
@@ -1033,6 +1047,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       webhooks.delete(ticket.channelId);
     },
     async message(ticket, message, attachments, { retry = false } = {}) {
+      if (message.internal)
+        throw new Error("Internal notes cannot use the player channel");
       await ready();
       const target = await ticketChannel(ticket);
       if (!target) return { pending: true };
@@ -1196,7 +1212,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       if (file.expiresAt <= Date.now() || file.purged || file.removed)
         throw new AuthError("attachment_expired", 410);
       const source = await (
-        file.directMessage
+        file.directMessage || file.staffGuildId === config.guildId
           ? await client.channels.fetch(file.channelId)
           : await channel(file.channelId)
       ).messages.fetch(file.messageId);
@@ -1251,13 +1267,23 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             Number.MAX_SAFE_INTEGER,
           );
         try {
-          await (await channel(channelId)).messages.delete(messageId);
+          await (
+            await client.channels.fetch(channelId)
+          ).messages.delete(messageId);
         } catch (error) {
           if (!absent(error)) throw error;
         }
       }
     },
   };
+  const notes = ticketNotesDiscord(config, service, client, {
+    staffUser,
+    staffMembers,
+    overwrites,
+    ready,
+    bytes: (file) => transport.bytes(file),
+  });
+  transport.note = notes.send;
   async function observe(message, edited = false, closing = false) {
     const ticket = service.linked(message.channelId);
     if (
@@ -1489,6 +1515,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             if (error.code !== 10003) failed = true;
           }
         }
+        await notes.refreshPermissions();
         if (failed) throw new Error("Ticket permission refresh is incomplete");
         if (
           service.store.get("ticket-discord", "permissions-pending")
@@ -1511,6 +1538,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       } catch {
         console.error("Ticket permission refresh is pending.");
       }
+      await notes.recover();
       for (const ticket of service
         .all()
         .filter((ticket) => ticket.channelId)
@@ -1581,6 +1609,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       .filter(
         (message) =>
           message.origin === "discord" &&
+          !message.internal &&
           !message.deleted &&
           message.sequence > (ticket.reopenedSequence || 0),
       );
@@ -1749,6 +1778,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         [
           "mine-choice",
           "claim",
+          "notes",
           "takeover",
           "rate",
           "rating",
@@ -1762,6 +1792,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         !owner ||
         [
           "claim",
+          "notes",
           "close",
           "resolve",
           "takeover",
@@ -1772,6 +1803,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           : null;
       const user = staffIdentity || actor(interaction.user, interaction.member);
       if (!owner) service.staff(user || { roles: [] }, ticket);
+      if (action === "notes") {
+        service.staff(user, ticket);
+        const url = service.notes(user, id).discordUrl;
+        return await interaction.editReply({
+          content: url
+            ? `Private staff discussion: ${url}\nStaff panel: ${config.staffOrigin}/tickets/${id}#notes`
+            : `Open Internal staff notes in the staff panel. The first note creates a private Discord thread: ${config.staffOrigin}/tickets/${id}#notes`,
+          allowedMentions: { parse: [] },
+        });
+      }
       if (
         ["rate", "rating", "reopen", "delete", "delete-confirm"].includes(
           action,
@@ -2039,6 +2080,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return refreshPermissions();
     },
     async close() {
+      await notes.close();
       stopped = true;
       clearInterval(timer);
       client.off("messageCreate", handleMessage);

@@ -87,7 +87,9 @@ export function ticketService(
   function queue(ticket, kind, ref = ticket.id, notice) {
     const id = `${ticket.id}:${kind}:${ref}`;
     const outbox =
-      ticket.type === "partnership" ? "partnership-outbox" : "ticket-outbox";
+      ticket.type === "partnership" && kind !== "note"
+        ? "partnership-outbox"
+        : "ticket-outbox";
     const pendingNotice = notice || store.get(outbox, id)?.notice;
     put(outbox, id, {
       id,
@@ -124,8 +126,15 @@ export function ticketService(
       silent,
     });
   }
-  function audit(ticket, user, action, detail, internal = false) {
-    if (ticket.owner.id === user.id) {
+  function audit(
+    ticket,
+    user,
+    action,
+    detail,
+    internal = false,
+    ownerActivity = true,
+  ) {
+    if (ownerActivity && ticket.owner.id === user.id) {
       ticket.lastActiveAt = now();
       if (!ticket.owner.guest) onActivity(user.id, ticket.lastActiveAt);
     }
@@ -185,8 +194,7 @@ export function ticketService(
       50,
       0,
       (message) =>
-        (!before || message.sequence < Number(before)) &&
-        (!message.internal || staffView),
+        (!before || message.sequence < Number(before)) && !message.internal,
     );
     const messages = page.items.reverse().map((message) => ({
       ...message,
@@ -309,7 +317,7 @@ export function ticketService(
             ? "partnership-outbox"
             : "ticket-outbox",
         )
-        .filter(([, job]) => job.ticketId === id).length;
+        .filter(([, job]) => job.ticketId === id && job.kind !== "note").length;
     }
     return safe;
   }
@@ -625,16 +633,17 @@ export function ticketService(
         revision: ticket.revision + 1,
       });
   }
-  function reply(user, id, input, staffView = false) {
+  function reply(user, id, input, staffView = false, note = false) {
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.reply");
-    if (!["pending", "claimed"].includes(ticket.status))
+    if (note && !staffView) throw new AuthError("ticket_access_denied");
+    if (!note && !["pending", "claimed"].includes(ticket.status))
       throw new AuthError("ticket_closed", 409);
     if (!idPattern.test(input.requestId || ""))
       throw new AuthError("invalid_request", 400);
     const old = store.get(
       "ticket-message-request",
-      `${id}:${user.id}:${input.requestId}`,
+      `${id}:${user.id}:${note ? "note:" : ""}${input.requestId}`,
     );
     if (old) return old;
     const content = text(
@@ -651,7 +660,8 @@ export function ticketService(
         actor: publicActor(user),
         staff: staffView,
         content,
-        attachments: files(ticket, user, input.attachments || []),
+        attachments: files(ticket, user, input.attachments || [], note),
+        internal: note,
         at: now(),
         origin: staffView ? "dashboard" : "web",
         delivery: "pending",
@@ -664,15 +674,52 @@ export function ticketService(
       );
       put(
         "ticket-message-request",
-        `${id}:${user.id}:${input.requestId}`,
+        `${id}:${user.id}:${note ? "note:" : ""}${input.requestId}`,
         message,
       );
-      queue(ticket, "message", String(message.sequence).padStart(12, "0"));
-      if (staffView) markHelped(ticket, user);
-      audit(ticket, user, "message", "Message sent");
+      queue(
+        ticket,
+        note ? "note" : "message",
+        String(message.sequence).padStart(12, "0"),
+      );
+      if (staffView && !note) markHelped(ticket, user);
+      audit(
+        ticket,
+        user,
+        note ? "note" : "message",
+        note ? "Internal staff note added" : "Message sent",
+        note,
+        !note,
+      );
     });
     announce(ticket);
     return message;
+  }
+  function notes(user, id, before) {
+    const ticket = get(id);
+    staff(user, ticket);
+    const page = store.page(
+      `ticket-messages:${id}`,
+      50,
+      0,
+      (message) =>
+        message.internal && (!before || message.sequence < Number(before)),
+    );
+    const link = store.get("ticket-notes-discord", id);
+    return {
+      messages: page.items.reverse().map((message) => ({
+        ...message,
+        attachments: message.attachments
+          .map((fileId) =>
+            mediaView(store.get("ticket-media", fileId), true, id),
+          )
+          .filter(Boolean),
+      })),
+      hasOlder: page.total > page.items.length,
+      discordUrl: link?.threadId
+        ? `https://discord.com/channels/${config.guildId}/${link.threadId}`
+        : null,
+    };
   }
   function claim(user, id) {
     const ticket = get(id);
@@ -940,11 +987,14 @@ export function ticketService(
     type,
     staffView = false,
     internal = false,
+    note = false,
   ) {
     const ticket = get(id);
+    if (note && !staffView) throw new AuthError("ticket_access_denied");
+    if (note) internal = true;
     if (
       stopped ||
-      ticket.status === "closed" ||
+      (ticket.status === "closed" && !note) ||
       (!internal && ticket.status === "awaiting_resolution")
     )
       throw new AuthError("ticket_closed", 409);
@@ -952,7 +1002,7 @@ export function ticketService(
       user,
       get(id),
       staffView,
-      internal ? "tickets.close" : "tickets.reply",
+      internal && !note ? "tickets.close" : "tickets.reply",
     );
     if (!transport) throw new AuthError("ticket_sync_unavailable", 503);
     const metadata = await transport.upload(bytes, name, type, ticket);
@@ -972,10 +1022,10 @@ export function ticketService(
       user,
       get(id),
       staffView,
-      internal ? "tickets.close" : "tickets.reply",
+      internal && !note ? "tickets.close" : "tickets.reply",
     );
     if (
-      get(id).status === "closed" ||
+      (get(id).status === "closed" && !note) ||
       (!internal && get(id).status === "awaiting_resolution")
     )
       throw new AuthError("ticket_closed", 409);
@@ -1057,6 +1107,10 @@ export function ticketService(
   function ingest(id, incoming, closing = false) {
     const ticket = get(id),
       ref = store.get("ticket-discord-message", incoming.id);
+    const internal = Boolean(
+      incoming.internal ||
+      (ref && store.get(`ticket-messages:${id}`, ref.key)?.internal),
+    );
     const saveAttachment = (metadata) => {
       if (metadata.savedId) {
         const saved = store.get("ticket-media", metadata.savedId);
@@ -1077,7 +1131,8 @@ export function ticketService(
         id: randomUUID(),
         ticketId: id,
         uploader: incoming.actor.id,
-        internal: false,
+        internal,
+        ...(internal ? { staffGuildId: config.guildId } : {}),
         used: true,
         createdAt,
         expiresAt: createdAt + ticketMediaDays * 86400000,
@@ -1144,6 +1199,8 @@ export function ticketService(
           incoming.actor || message.actor,
           incoming.deleted ? "message_deleted" : "message_edited",
           "Discord message updated",
+          internal,
+          !internal,
         );
       });
       announce(ticket);
@@ -1151,7 +1208,8 @@ export function ticketService(
     }
     if (
       incoming.deleted ||
-      (!["pending", "claimed"].includes(ticket.status) &&
+      (!internal &&
+        !["pending", "claimed"].includes(ticket.status) &&
         !(closing && incoming.at <= ticket.closedAt))
     )
       return;
@@ -1162,6 +1220,8 @@ export function ticketService(
         sequence: ++ticket.sequence,
         actor: publicActor(incoming.actor),
         staff: Boolean(incoming.staff),
+        internal,
+        ...(internal ? { notesThreadId: incoming.channelId || null } : {}),
         content: (incoming.content || "").slice(0, 2000),
         attachments,
         at: incoming.at || now(),
@@ -1174,15 +1234,19 @@ export function ticketService(
       const key = String(message.sequence).padStart(12, "0");
       put(`ticket-messages:${id}`, key, message);
       put("ticket-discord-message", incoming.id, { ticketId: id, key });
-      ticket.lastDiscordId = incoming.id;
-      if (message.staff) markHelped(ticket, incoming.actor);
+      if (!internal) ticket.lastDiscordId = incoming.id;
+      if (message.staff && !internal) markHelped(ticket, incoming.actor);
       audit(
         ticket,
         incoming.actor,
         "message",
         incoming.origin === "email"
           ? "Email reply received"
-          : "Discord message received",
+          : internal
+            ? "Internal Discord staff note received"
+            : "Discord message received",
+        internal,
+        !internal,
       );
     });
     announce(ticket);
@@ -1191,10 +1255,12 @@ export function ticketService(
     if (!transport || stopped || running) return running;
     running = Promise.resolve()
       .then(async () => {
-        const blocked = new Set();
+        const blocked = new Set(),
+          notesBlocked = new Set();
         const priority = {
           create: 0,
           message: 1,
+          note: 1,
           status: 2,
           activity: 3,
           delete: 4,
@@ -1212,9 +1278,14 @@ export function ticketService(
                 : 0) ||
               a.ref.localeCompare(b.ref),
           )) {
-          if (job.kind !== "create" && blocked.has(job.ticketId)) continue;
+          if (
+            job.kind !== "create" &&
+            (job.kind === "note" ? notesBlocked : blocked).has(job.ticketId)
+          )
+            continue;
           if (job.after > now()) {
             if (job.kind === "message") blocked.add(job.ticketId);
+            if (job.kind === "note") notesBlocked.add(job.ticketId);
             continue;
           }
           if (store.get("ticket", job.ticketId)?.erasingAt) continue;
@@ -1241,6 +1312,7 @@ export function ticketService(
               continue;
           } else if (
             job.kind !== "create" &&
+            job.kind !== "note" &&
             !ticket.channelId &&
             !(
               job.kind === "activity" &&
@@ -1301,7 +1373,9 @@ export function ticketService(
                 `ticket-messages:${ticket.id}`,
                 job.ref,
               );
-              const delivered = await transport.message(
+              const delivered = await transport[
+                job.kind === "note" ? "note" : "message"
+              ](
                 ticket,
                 message,
                 message.attachments.map((id) => store.get("ticket-media", id)),
@@ -1316,7 +1390,10 @@ export function ticketService(
                   ticketId: ticket.id,
                   key: job.ref,
                 });
-                store.delete("ticket-send", message.id);
+                store.delete(
+                  "ticket-send",
+                  job.kind === "note" ? `note:${message.id}` : message.id,
+                );
                 const current = get(ticket.id);
                 current.revision++;
                 put("ticket", ticket.id, current);
@@ -1331,6 +1408,7 @@ export function ticketService(
             });
           } catch (error) {
             if (job.kind === "message") blocked.add(job.ticketId);
+            if (job.kind === "note") notesBlocked.add(job.ticketId);
             job.attempts++;
             job.after =
               now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));
@@ -1460,6 +1538,10 @@ export function ticketService(
     createPartnership,
     visible,
     reply,
+    notes,
+    addNote(user, id, input) {
+      return reply(user, id, input, true, true);
+    },
     claim,
     takeover,
     closeTicket,

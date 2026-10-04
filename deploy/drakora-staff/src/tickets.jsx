@@ -140,6 +140,7 @@ function Composer({
   base,
   csrf,
   internal = false,
+  notes = false,
   onSent,
   resolution = false,
   macroCategory,
@@ -198,7 +199,7 @@ function Composer({
       ) {
         const file = files[index];
         const uploaded = await request(
-          `${base}/attachments${internal ? "?internal=1" : ""}`,
+          `${base}/attachments${internal ? `?internal=1${notes ? "&notes=1" : ""}` : ""}`,
           {
             method: "POST",
             headers: {
@@ -214,19 +215,22 @@ function Composer({
         );
         pending.current.ids.push(uploaded.id);
       }
-      await request(`${base}/${resolution ? "close" : "messages"}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify(
-          resolution
-            ? { summary: content, commands, attachments: pending.current.ids }
-            : {
-                content,
-                attachments: pending.current.ids,
-                requestId: pending.current.requestId,
-              },
-        ),
-      });
+      await request(
+        `${base}/${resolution ? "close" : notes ? "notes" : "messages"}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+          body: JSON.stringify(
+            resolution
+              ? { summary: content, commands, attachments: pending.current.ids }
+              : {
+                  content,
+                  attachments: pending.current.ids,
+                  requestId: pending.current.requestId,
+                },
+          ),
+        },
+      );
       pending.current = null;
       setContent("");
       setFiles([]);
@@ -258,14 +262,36 @@ function Composer({
       )}
       <label
         className="ticket-sr-only"
-        htmlFor={resolution ? "ticket-resolution" : "ticket-message"}
+        htmlFor={
+          resolution
+            ? "ticket-resolution"
+            : notes
+              ? "ticket-note"
+              : "ticket-message"
+        }
       >
-        {resolution ? "Work done and outcome" : "Message"}
+        {resolution
+          ? "Work done and outcome"
+          : notes
+            ? "Internal staff note"
+            : "Message"}
       </label>
       <textarea
         ref={message}
-        id={resolution ? "ticket-resolution" : "ticket-message"}
-        aria-describedby={resolution ? undefined : "ticket-message-hint"}
+        id={
+          resolution
+            ? "ticket-resolution"
+            : notes
+              ? "ticket-note"
+              : "ticket-message"
+        }
+        aria-describedby={
+          resolution
+            ? undefined
+            : notes
+              ? "ticket-note-hint"
+              : "ticket-message-hint"
+        }
         value={content}
         onChange={(event) => {
           setContent(event.target.value);
@@ -289,7 +315,9 @@ function Composer({
         placeholder={
           resolution
             ? "What did you do, and how was the player's issue resolved?"
-            : "Message the ticket…"
+            : notes
+              ? "Discuss this ticket with staff…"
+              : "Message the ticket…"
         }
         maxLength={resolution ? 4000 : 2000}
         required={resolution || !files.length}
@@ -297,7 +325,10 @@ function Composer({
         disabled={busy}
       />
       {!resolution && (
-        <small id="ticket-message-hint" className="ticket-composer-hint">
+        <small
+          id={notes ? "ticket-note-hint" : "ticket-message-hint"}
+          className="ticket-composer-hint"
+        >
           Enter to send · Shift+Enter for a new line
         </small>
       )}
@@ -364,7 +395,13 @@ function Composer({
           multiple
           accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.zip,.txt,.log"
           className="ticket-sr-only"
-          aria-label={resolution ? "Attach resolution proof" : "Attach files"}
+          aria-label={
+            resolution
+              ? "Attach resolution proof"
+              : notes
+                ? "Attach internal note files"
+                : "Attach files"
+          }
           onChange={(event) => {
             addFiles(event.target.files);
             event.target.value = "";
@@ -389,7 +426,9 @@ function Composer({
             ? "Sending…"
             : resolution
               ? "Save resolution and close"
-              : "Send"}
+              : notes
+                ? "Add staff note"
+                : "Send"}
         </button>
       </div>
     </form>
@@ -494,6 +533,140 @@ function TicketHistory({ entries }) {
   );
 }
 
+function InternalNotes({ base, csrf, active, canReply }) {
+  const [data, setData] = useState(null),
+    [older, setOlder] = useState([]),
+    [hasOlder, setHasOlder] = useState(null),
+    [error, setError] = useState("");
+  const revision = useRef(0),
+    scroll = useRef(null),
+    nearBottom = useRef(true);
+  const refresh = useCallback(async () => {
+    const current = ++revision.current;
+    try {
+      const next = await request(`${base}/notes`);
+      if (current !== revision.current) return;
+      setData(next);
+      setError("");
+    } catch (error) {
+      if (current === revision.current) {
+        setError(error.message);
+        setData(null);
+        setOlder([]);
+      }
+    }
+  }, [base]);
+  useEffect(() => {
+    if (active) void refresh();
+    return () => {
+      revision.current++;
+    };
+  }, [active, refresh]);
+  useLive(active ? `${base}/events` : null, refresh);
+  useEffect(() => {
+    if (active && nearBottom.current && scroll.current)
+      scroll.current.scrollTop = scroll.current.scrollHeight;
+  }, [active, data?.messages?.length]);
+  const messages = [...older, ...(data?.messages || [])].filter(
+    (message, index, values) =>
+      values.findIndex((value) => value.id === message.id) === index,
+  );
+  return (
+    <div className="ticket-internal-notes" hidden={!active}>
+      <div className="ticket-notes-heading">
+        <div>
+          <strong>Staff only</strong>
+          <p>
+            Discuss how to handle this ticket. Notes do not send player replies
+            or claim the ticket.
+          </p>
+        </div>
+        {data?.discordUrl && (
+          <a href={data.discordUrl} target="_blank" rel="noreferrer">
+            Open Discord notes ↗
+          </a>
+        )}
+      </div>
+      {error && (
+        <p className="ticket-error" role="alert">
+          {error} <button onClick={refresh}>Retry notes</button>
+        </p>
+      )}
+      <div
+        className="ticket-messages"
+        ref={scroll}
+        aria-label="Internal notes conversation"
+        onScroll={() => {
+          nearBottom.current =
+            scroll.current.scrollHeight -
+              scroll.current.scrollTop -
+              scroll.current.clientHeight <
+            100;
+        }}
+      >
+        {!data && !error && <p role="status">Loading staff notes…</p>}
+        {data && (hasOlder ?? data.hasOlder) && (
+          <button
+            onClick={async () => {
+              try {
+                const next = await request(
+                  `${base}/notes?before=${messages[0]?.sequence}`,
+                );
+                setOlder((previous) => [...next.messages, ...previous]);
+                setHasOlder(next.hasOlder);
+              } catch (error) {
+                setError(error.message);
+              }
+            }}
+          >
+            Load earlier notes
+          </button>
+        )}
+        {data && !messages.length && (
+          <p className="ticket-empty">
+            No internal notes yet. The first note creates a private Discord
+            thread for this ticket.
+          </p>
+        )}
+        {messages.map((message) => (
+          <article
+            className={`ticket-message${message.deleted ? " deleted" : ""}`}
+            key={message.id}
+          >
+            <Avatar actor={message.actor} />
+            <div>
+              <header>
+                <strong>{message.actor.name}</strong>
+                <span className="ticket-staff-badge">INTERNAL</span>
+                <time dateTime={new Date(message.at).toISOString()}>
+                  {stamp(message.at)}
+                </time>
+              </header>
+              <p>{message.content}</p>
+              {message.editedAt && !message.deleted && <small>Edited</small>}
+              {message.attachments.map((file) => (
+                <FileView key={file.id} file={file} />
+              ))}
+              {message.delivery === "pending" && (
+                <small>Saved · syncing to the staff Discord thread…</small>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+      {data && canReply && (
+        <Composer base={base} csrf={csrf} internal notes onSent={refresh} />
+      )}
+      {data && !canReply && (
+        <p className="ticket-finished">
+          You can read notes. Adding notes requires reply permission for this
+          ticket category.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TicketChat({
   id,
   csrf,
@@ -510,6 +683,9 @@ function TicketChat({
     [older, setOlder] = useState([]),
     [hasEarlier, setHasEarlier] = useState(null),
     [panel, setPanel] = useState("details"),
+    [conversation, setConversation] = useState(() =>
+      staffView && location.hash === "#notes" ? "notes" : "messages",
+    ),
     [detailsOpen, setDetailsOpen] = useState(
       () => window.matchMedia("(min-width: 1100px)").matches,
     );
@@ -692,244 +868,285 @@ function TicketChat({
         </div>
       </header>
       <section className="ticket-chat" aria-label="Ticket conversation">
-        {error && (
-          <p className="ticket-error" role="alert">
-            {error}
-          </p>
+        {staffView && (
+          <div
+            className="ticket-conversation-tabs"
+            role="group"
+            aria-label="Ticket discussions"
+          >
+            <button
+              aria-pressed={conversation === "messages"}
+              onClick={() => setConversation("messages")}
+            >
+              Player conversation
+            </button>
+            <button
+              aria-pressed={conversation === "notes"}
+              onClick={() => setConversation("notes")}
+            >
+              Internal staff notes
+            </button>
+          </div>
+        )}
+        {staffView && (
+          <InternalNotes
+            base={base}
+            csrf={csrf}
+            active={conversation === "notes"}
+            canReply={ticket.actions?.reply}
+          />
         )}
         <div
-          ref={scroll}
-          className="ticket-messages"
-          onScroll={() => {
-            nearBottom.current =
-              scroll.current.scrollHeight -
-                scroll.current.scrollTop -
-                scroll.current.clientHeight <
-              100;
-          }}
+          className="ticket-conversation-content"
+          hidden={conversation !== "messages"}
         >
-          {(hasEarlier ?? ticket.hasOlder) && (
-            <button
-              onClick={async () => {
-                try {
-                  const data = await request(
-                    `${base}?before=${combined[0]?.sequence}`,
-                  );
-                  setOlder((previous) => [...data.messages, ...previous]);
-                  setHasEarlier(data.hasOlder);
-                } catch (error) {
-                  setError(error.message);
-                }
-              }}
-            >
-              Load earlier messages
-            </button>
+          {error && (
+            <p className="ticket-error" role="alert">
+              {error}
+            </p>
           )}
-          <details className="ticket-intake" open>
-            <summary>
-              <span>
-                <strong>Original request</strong>
-                <small>Opened {stamp(ticket.createdAt)}</small>
-              </span>
-              <span className="ticket-intake-hint">View details</span>
-            </summary>
-            <div className="ticket-intake-content">
-              <p>
-                <strong>
-                  {ticketTypes.find((type) => type.id === ticket.type)?.name}
-                </strong>{" "}
-                · {ticket.location}
-              </p>
-              {ticket.intakeDetails?.map((detail) => (
-                <p key={detail.label}>
-                  <strong>{detail.label}:</strong> {detail.value}
-                </p>
-              ))}
-              <p>{ticket.description}</p>
-              {partner && (
+          <div
+            ref={scroll}
+            className="ticket-messages"
+            onScroll={() => {
+              nearBottom.current =
+                scroll.current.scrollHeight -
+                  scroll.current.scrollTop -
+                  scroll.current.clientHeight <
+                100;
+            }}
+          >
+            {(hasEarlier ?? ticket.hasOlder) && (
+              <button
+                onClick={async () => {
+                  try {
+                    const data = await request(
+                      `${base}?before=${combined[0]?.sequence}`,
+                    );
+                    setOlder((previous) => [...data.messages, ...previous]);
+                    setHasEarlier(data.hasOlder);
+                  } catch (error) {
+                    setError(error.message);
+                  }
+                }}
+              >
+                Load earlier messages
+              </button>
+            )}
+            <details className="ticket-intake" open>
+              <summary>
+                <span>
+                  <strong>Original request</strong>
+                  <small>Opened {stamp(ticket.createdAt)}</small>
+                </span>
+                <span className="ticket-intake-hint">View details</span>
+              </summary>
+              <div className="ticket-intake-content">
                 <p>
-                  <a
-                    href={ticket.partnership.packUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    View modpack ↗
-                  </a>{" "}
-                  ·{" "}
-                  {ticket.partnership.relationship === "owner"
-                    ? "Pack owner"
-                    : "Pack developer"}
+                  <strong>
+                    {ticketTypes.find((type) => type.id === ticket.type)?.name}
+                  </strong>{" "}
+                  · {ticket.location}
+                </p>
+                {ticket.intakeDetails?.map((detail) => (
+                  <p key={detail.label}>
+                    <strong>{detail.label}:</strong> {detail.value}
+                  </p>
+                ))}
+                <p>{ticket.description}</p>
+                {partner && (
+                  <p>
+                    <a
+                      href={ticket.partnership.packUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View modpack ↗
+                    </a>{" "}
+                    ·{" "}
+                    {ticket.partnership.relationship === "owner"
+                      ? "Pack owner"
+                      : "Pack developer"}
+                  </p>
+                )}
+              </div>
+            </details>
+            {ticket.deliveryIssues?.length > 0 && (
+              <p className="ticket-error" role="alert">
+                A contact update could not be confirmed. Check the partnership
+                inbox or Discord DM before sending again. The saved request and
+                messages are safe.
+              </p>
+            )}
+            {combined.map((message) => (
+              <article
+                className={`ticket-message${message.deleted ? " deleted" : ""}`}
+                key={message.id}
+              >
+                <Avatar actor={message.actor} />
+                <div>
+                  <header>
+                    <strong>{message.actor.name}</strong>
+                    {message.staff && (
+                      <span className="ticket-staff-badge">STAFF</span>
+                    )}
+                    <time dateTime={new Date(message.at).toISOString()}>
+                      {stamp(message.at)}
+                    </time>
+                  </header>
+                  <p>{message.content}</p>
+                  {message.editedAt && !message.deleted && (
+                    <small>Edited</small>
+                  )}
+                  {message.attachments.map((file) => (
+                    <FileView key={file.id} file={file} />
+                  ))}
+                  {message.delivery === "failed" && (
+                    <small className="ticket-error">
+                      Delivery needs attention. Check the contact inbox before
+                      sending again.
+                    </small>
+                  )}
+                  {message.delivery === "pending" && (
+                    <small>
+                      Saved · sending{" "}
+                      {partner
+                        ? `by ${ticket.partnership.emailFallback ? "email" : ticket.partnership.preference === "discord" ? "Discord DM" : "email"}`
+                        : "to Discord"}
+                      …
+                    </small>
+                  )}
+                </div>
+              </article>
+            ))}
+            {!combined.length && (
+              <p className="ticket-empty">
+                {partner
+                  ? "No messages yet. Replies sent here go to the applicant’s chosen contact method."
+                  : staffView
+                    ? "No messages yet. Reply here to help the player."
+                    : "Your ticket is ready. Add any extra details here while you wait for staff."}
+              </p>
+            )}
+          </div>
+          {staffView && deleting && !active && ticket.channelRetained && (
+            <div className="ticket-close-confirm">
+              <p>
+                Delete the closed Discord channel? Its messages and saved
+                transcript remain in the staff dashboard.
+              </p>
+              <button
+                className="ticket-primary"
+                disabled={busy || ticket.deletionPending}
+                onClick={() => {
+                  setDeleting(false);
+                  void action("delete-channel", {
+                    closureId: ticket.closureId,
+                  });
+                }}
+              >
+                Delete channel
+              </button>
+              <button onClick={() => setDeleting(false)}>Keep channel</button>
+            </div>
+          )}
+          {!staffView && closing && active && (
+            <div className="ticket-close-confirm">
+              <p>Close this ticket? Staff will still document the work done.</p>
+              <button
+                className="ticket-primary"
+                disabled={busy}
+                onClick={() => {
+                  setClosing(false);
+                  void action("close");
+                }}
+              >
+                Yes, close ticket
+              </button>
+              <button onClick={() => setClosing(false)}>Keep open</button>
+            </div>
+          )}
+          {staffView && closing && ticket.status !== "closed" && (
+            <Composer
+              base={base}
+              csrf={csrf}
+              resolution
+              internal
+              uploadLimit={
+                partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit
+              }
+              onSent={async () => {
+                setClosing(false);
+                await refresh();
+              }}
+            />
+          )}
+          {active && (!staffView || ticket.actions?.reply) && !closing && (
+            <Composer
+              base={base}
+              csrf={csrf}
+              onSent={refresh}
+              macroCategory={staffView ? ticket.category : undefined}
+              uploadLimit={
+                partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit
+              }
+            />
+          )}
+          {!active && !(staffView && closing && ticket.status !== "closed") && (
+            <div className="ticket-finished">
+              <p>
+                {ticket.status === "awaiting_resolution"
+                  ? "The conversation is closed. Staff will finish the resolution record."
+                  : "This ticket is closed."}
+              </p>
+              {!staffView && !ticket.rating && (
+                <div className="ticket-rating">
+                  <span>
+                    {ticket.ratingStaff?.name
+                      ? `How did ${ticket.ratingStaff.name} do?`
+                      : "How helpful was the support?"}{" "}
+                    Your 1–5 rating is private to you and authorized staff.
+                  </span>
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      key={value}
+                      disabled={busy}
+                      aria-label={`Rate support ${value} out of 5`}
+                      onClick={() =>
+                        action("rating", {
+                          rating: value,
+                          closureId: ticket.closureId,
+                        })
+                      }
+                    >
+                      {value} ★
+                    </button>
+                  ))}
+                </div>
+              )}
+              {ticket.rating && (
+                <p>
+                  Player rating: {ticket.rating}/5
+                  {ticket.ratingStaff?.name
+                    ? ` · ${ticket.ratingStaff.name}`
+                    : ""}
                 </p>
               )}
+              <a
+                className="ticket-primary"
+                href={`${base}/transcript${staffView ? "?copy=staff" : ""}`}
+                download
+              >
+                Download {staffView ? "staff " : ""}transcript (.html)
+              </a>
+              {staffView && capabilities["logs.view"] && (
+                <a href={`${base}/transcript?copy=player`} download>
+                  Generate player copy (.html)
+                </a>
+              )}
             </div>
-          </details>
-          {ticket.deliveryIssues?.length > 0 && (
-            <p className="ticket-error" role="alert">
-              A contact update could not be confirmed. Check the partnership
-              inbox or Discord DM before sending again. The saved request and
-              messages are safe.
-            </p>
-          )}
-          {combined.map((message) => (
-            <article
-              className={`ticket-message${message.deleted ? " deleted" : ""}`}
-              key={message.id}
-            >
-              <Avatar actor={message.actor} />
-              <div>
-                <header>
-                  <strong>{message.actor.name}</strong>
-                  {message.staff && (
-                    <span className="ticket-staff-badge">STAFF</span>
-                  )}
-                  <time dateTime={new Date(message.at).toISOString()}>
-                    {stamp(message.at)}
-                  </time>
-                </header>
-                <p>{message.content}</p>
-                {message.editedAt && !message.deleted && <small>Edited</small>}
-                {message.attachments.map((file) => (
-                  <FileView key={file.id} file={file} />
-                ))}
-                {message.delivery === "failed" && (
-                  <small className="ticket-error">
-                    Delivery needs attention. Check the contact inbox before
-                    sending again.
-                  </small>
-                )}
-                {message.delivery === "pending" && (
-                  <small>
-                    Saved · sending{" "}
-                    {partner
-                      ? `by ${ticket.partnership.emailFallback ? "email" : ticket.partnership.preference === "discord" ? "Discord DM" : "email"}`
-                      : "to Discord"}
-                    …
-                  </small>
-                )}
-              </div>
-            </article>
-          ))}
-          {!combined.length && (
-            <p className="ticket-empty">
-              {partner
-                ? "No messages yet. Replies sent here go to the applicant’s chosen contact method."
-                : staffView
-                  ? "No messages yet. Reply here to help the player."
-                  : "Your ticket is ready. Add any extra details here while you wait for staff."}
-            </p>
           )}
         </div>
-        {staffView && deleting && !active && ticket.channelRetained && (
-          <div className="ticket-close-confirm">
-            <p>
-              Delete the closed Discord channel? Its messages and saved
-              transcript remain in the staff dashboard.
-            </p>
-            <button
-              className="ticket-primary"
-              disabled={busy || ticket.deletionPending}
-              onClick={() => {
-                setDeleting(false);
-                void action("delete-channel", { closureId: ticket.closureId });
-              }}
-            >
-              Delete channel
-            </button>
-            <button onClick={() => setDeleting(false)}>Keep channel</button>
-          </div>
-        )}
-        {!staffView && closing && active && (
-          <div className="ticket-close-confirm">
-            <p>Close this ticket? Staff will still document the work done.</p>
-            <button
-              className="ticket-primary"
-              disabled={busy}
-              onClick={() => {
-                setClosing(false);
-                void action("close");
-              }}
-            >
-              Yes, close ticket
-            </button>
-            <button onClick={() => setClosing(false)}>Keep open</button>
-          </div>
-        )}
-        {staffView && closing && ticket.status !== "closed" && (
-          <Composer
-            base={base}
-            csrf={csrf}
-            resolution
-            internal
-            uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
-            onSent={async () => {
-              setClosing(false);
-              await refresh();
-            }}
-          />
-        )}
-        {active && (!staffView || ticket.actions?.reply) && !closing && (
-          <Composer
-            base={base}
-            csrf={csrf}
-            onSent={refresh}
-            macroCategory={staffView ? ticket.category : undefined}
-            uploadLimit={partner ? 10 * 1024 * 1024 : ticketMessageUploadLimit}
-          />
-        )}
-        {!active && !(staffView && closing && ticket.status !== "closed") && (
-          <div className="ticket-finished">
-            <p>
-              {ticket.status === "awaiting_resolution"
-                ? "The conversation is closed. Staff will finish the resolution record."
-                : "This ticket is closed."}
-            </p>
-            {!staffView && !ticket.rating && (
-              <div className="ticket-rating">
-                <span>
-                  {ticket.ratingStaff?.name
-                    ? `How did ${ticket.ratingStaff.name} do?`
-                    : "How helpful was the support?"}{" "}
-                  Your 1–5 rating is private to you and authorized staff.
-                </span>
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <button
-                    key={value}
-                    disabled={busy}
-                    aria-label={`Rate support ${value} out of 5`}
-                    onClick={() =>
-                      action("rating", {
-                        rating: value,
-                        closureId: ticket.closureId,
-                      })
-                    }
-                  >
-                    {value} ★
-                  </button>
-                ))}
-              </div>
-            )}
-            {ticket.rating && (
-              <p>
-                Player rating: {ticket.rating}/5
-                {ticket.ratingStaff?.name
-                  ? ` · ${ticket.ratingStaff.name}`
-                  : ""}
-              </p>
-            )}
-            <a
-              className="ticket-primary"
-              href={`${base}/transcript${staffView ? "?copy=staff" : ""}`}
-              download
-            >
-              Download {staffView ? "staff " : ""}transcript (.html)
-            </a>
-            {staffView && capabilities["logs.view"] && (
-              <a href={`${base}/transcript?copy=player`} download>
-                Generate player copy (.html)
-              </a>
-            )}
-          </div>
-        )}
       </section>
       <aside
         className="ticket-player"

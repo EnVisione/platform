@@ -69,8 +69,18 @@ function setupDiscord(t, notices = false) {
     const target = {
       id,
       ...data,
-      guildId: "2",
+      guildId: data.guildId || "2",
       parentId: data.parent,
+      ownerId:
+        data.type === ChannelType.PrivateThread ? client.user.id : undefined,
+      archived: false,
+      invitable: data.invitable,
+      async setArchived(value) {
+        target.archived = value;
+      },
+      async setInvitable(value) {
+        target.invitable = value;
+      },
       isTextBased: () => true,
       readable: true,
       permissionsFor: () => ({ has: () => target.readable }),
@@ -125,7 +135,7 @@ function setupDiscord(t, notices = false) {
           id: String(++nextId),
           createdTimestamp: nextId,
           channelId: id,
-          guildId: "2",
+          guildId: target.guildId,
           author: { id: "bot", bot: true },
           embeds: data.embeds || [],
           content: data.content || "",
@@ -185,6 +195,53 @@ function setupDiscord(t, notices = false) {
       },
     };
     target.savedMessages = messages;
+    const threadMembers = new Collection([
+      [client.user.id, { id: client.user.id }],
+    ]);
+    target.members = {
+      async fetch() {
+        return threadMembers;
+      },
+      async add(id) {
+        threadMembers.set(id, { id });
+      },
+      async remove(id) {
+        threadMembers.delete(id);
+      },
+    };
+    target.threads = {
+      async fetchActive() {
+        return {
+          threads: new Collection(
+            [...channels].filter(
+              ([, value]) => value.parentId === target.id && !value.archived,
+            ),
+          ),
+        };
+      },
+      async fetchArchived() {
+        return {
+          threads: new Collection(
+            [...channels].filter(
+              ([, value]) => value.parentId === target.id && value.archived,
+            ),
+          ),
+          hasMore: false,
+        };
+      },
+      async create(options) {
+        const thread = createChannel({
+          ...options,
+          parent: target.id,
+          guildId: target.guildId,
+        });
+        if (target.failThreadCreation) {
+          target.failThreadCreation = false;
+          throw new Error("Thread creation response lost");
+        }
+        return thread;
+      },
+    };
     channels.set(id, target);
     return target;
   }
@@ -270,6 +327,14 @@ function setupDiscord(t, notices = false) {
       return id === "2" ? main : staffGuild;
     },
   };
+  client.channels = {
+    async fetch(id) {
+      const target = id === staffChannel?.id ? staffChannel : channels.get(id);
+      if (!target)
+        throw Object.assign(new Error("Unknown channel"), { code: 10003 });
+      return target;
+    },
+  };
   const transport = ticketDiscord(config, service, client, policy);
   t.after(async () => {
     await transport.close();
@@ -296,6 +361,312 @@ function setupDiscord(t, notices = false) {
     },
   };
 }
+
+test("internal notes sync privately in both directions and survive customer channel deletion", async (t) => {
+  const app = setupDiscord(t),
+    { service, transport, channels, client, user, config } = app;
+  await transport.recover();
+  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description: "A detailed issue for staff to handle in this private ticket.",
+  });
+  await service.pump();
+  service.addNote(manager, ticket.id, {
+    requestId: randomUUID(),
+    content: "Private strategy, not a player reply.",
+  });
+  await service.pump();
+  await service.pump();
+  const state = service.store.get("ticket-notes-discord", ticket.id),
+    thread = channels.get(state.threadId),
+    parent = channels.get(state.parentId);
+  assert.equal(thread.type, ChannelType.PrivateThread);
+  assert.equal(thread.guildId, config.guildId);
+  assert.equal(thread.invitable, false);
+  assert.deepEqual([...(await thread.members.fetch()).keys()].sort(), [
+    "200",
+    "201",
+    "bot",
+  ]);
+  assert.equal(
+    parent.overwrites
+      .find((entry) => entry.id === config.guildId)
+      .deny.includes(P.ViewChannel),
+    true,
+  );
+  assert.equal(
+    parent.overwrites
+      .find((entry) => entry.id === "200")
+      .deny.includes(P.ManageThreads),
+    true,
+  );
+  assert.equal(
+    channels
+      .get(service.get(ticket.id).channelId)
+      .savedMessages.some((value) =>
+        value.embeds?.some((embed) =>
+          embed.description?.includes("Private strategy"),
+        ),
+      ),
+    false,
+  );
+  assert.equal(service.get(ticket.id).status, "pending");
+  assert.equal(service.view(user, ticket.id).messages.length, 0);
+  assert.ok(service.notes(manager, ticket.id).discordUrl.includes(thread.id));
+  const staffLink = await click(
+    client,
+    { ...user, id: manager.id },
+    `ticket:notes:${ticket.id}`,
+  );
+  assert.equal(staffLink.flags, 64);
+  assert.ok(
+    staffLink.data.content.includes(
+      service.notes(manager, ticket.id).discordUrl,
+    ),
+  );
+  assert.deepEqual(staffLink.data.allowedMentions, { parse: [] });
+  const deniedLink = await click(client, user, `ticket:notes:${ticket.id}`);
+  assert.equal(deniedLink.flags, 64);
+  assert.equal(deniedLink.data, "You do not have permission to do that.");
+  const native = {
+    id: "9900",
+    channelId: thread.id,
+    guildId: config.guildId,
+    author: { ...user, id: "200" },
+    content: "Native private discussion",
+    createdTimestamp: Date.now(),
+    attachments: new Collection(),
+  };
+  thread.savedMessages.set(native.id, native);
+  await transport.recover();
+  assert.equal(service.notes(manager, ticket.id).messages.length, 2);
+  native.content = "Edited handling instructions";
+  native.editedTimestamp = Date.now() + 1;
+  await transport.recover();
+  assert.equal(
+    service.notes(manager, ticket.id).messages.at(-1).content,
+    native.content,
+  );
+  thread.savedMessages.delete(native.id);
+  await transport.recover();
+  assert.equal(service.notes(manager, ticket.id).messages.at(-1).deleted, true);
+  service.closeTicket(
+    manager,
+    ticket.id,
+    { summary: "Done", commands: "None" },
+    true,
+  );
+  await service.pump();
+  await service.deleteChannel(
+    manager,
+    ticket.id,
+    service.get(ticket.id).closureId,
+  );
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.ok(channels.has(thread.id));
+  service.addNote(manager, ticket.id, {
+    requestId: randomUUID(),
+    content: "Follow-up after channel deletion.",
+  });
+  await service.pump();
+  await service.pump();
+  assert.equal(
+    service.notes(manager, ticket.id).messages.at(-1).delivery,
+    "delivered",
+  );
+  assert.equal(service.view(user, ticket.id).messages.length, 0);
+  const before = service.notes(manager, ticket.id).messages.length;
+  const unauthorized = {
+    ...native,
+    id: "9901",
+    author: user,
+    content: "Player must not write notes",
+  };
+  thread.savedMessages.set(unauthorized.id, unauthorized);
+  client.emit("messageCreate", unauthorized);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.notes(manager, ticket.id).messages.length, before);
+  await service.eraseInactive(ticket.id, Date.now());
+  assert.equal(channels.has(thread.id), false);
+  assert.equal(service.store.entries("ticket-notes-discord").length, 0);
+});
+
+test("notes threads enforce category access and revoke old thread membership", async (t) => {
+  const { service, transport, channels, staffMembers, policy, user } =
+    setupDiscord(t);
+  await transport.recover();
+  staffMembers.set("202", {
+    id: "202",
+    user: { ...user, id: "202" },
+    displayName: "Founder",
+    roles: {
+      cache: new Collection([
+        ["10", {}],
+        ["20", {}],
+      ]),
+    },
+  });
+  const founder = { id: "202", name: "Founder", roles: ["10", "20"] };
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "billing",
+    ign: "Jojo",
+    location: "Store",
+    description: "A purchase needs to be reviewed and resolved by the Founder.",
+  });
+  await service.pump();
+  service.addNote(founder, ticket.id, {
+    requestId: randomUUID(),
+    content: "Private billing review",
+  });
+  await service.pump();
+  await service.pump();
+  const state = service.store.get("ticket-notes-discord", ticket.id),
+    thread = channels.get(state.threadId),
+    parent = channels.get(state.parentId);
+  assert.deepEqual([...(await thread.members.fetch()).keys()].sort(), [
+    "202",
+    "bot",
+  ]);
+  assert.equal(
+    parent.overwrites.some((entry) => entry.id === "200"),
+    false,
+  );
+  assert.throws(
+    () => service.notes({ id: "200", roles: ["10", "28"] }, ticket.id),
+    { code: "ticket_access_denied" },
+  );
+  const support = service.create(
+    { ...user, id: "101" },
+    {
+      requestId: randomUUID(),
+      type: "general",
+      ign: "Jojo",
+      location: "Void",
+      description:
+        "A support issue with an internal conversation for authorized staff.",
+    },
+  );
+  await service.pump();
+  service.addNote(founder, support.id, {
+    requestId: randomUUID(),
+    content: "Support notes",
+  });
+  await service.pump();
+  await service.pump();
+  const supportThread = channels.get(
+    service.store.get("ticket-notes-discord", support.id).threadId,
+  );
+  const model = policy.read(founder),
+    roles = model.roles
+      .filter((role) => role.id)
+      .map((role) => ({ id: role.id, permissions: { ...role.permissions } }));
+  for (const action of [
+    "view",
+    "reply",
+    "claim",
+    "takeover",
+    "close",
+    "delete",
+  ])
+    roles.find((role) => role.id === "23").permissions[
+      `tickets.category.support.${action}`
+    ] = false;
+  policy.save(founder, { revision: model.revision, roles });
+  await transport.refreshPermissions();
+  assert.equal((await supportThread.members.fetch()).has("201"), false);
+  assert.equal(
+    channels
+      .get(supportThread.parentId)
+      .overwrites.some((entry) => entry.id === "201"),
+    false,
+  );
+});
+
+test("internal notes recover lost sends and thread creation without duplicates", async (t) => {
+  const { service, transport, channels, user } = setupDiscord(t);
+  await transport.recover();
+  const staff = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    type: "general",
+    ign: "Jojo",
+    location: "Void",
+    description: "An issue used to verify durable internal notes delivery.",
+  });
+  await service.pump();
+  const first = service.addNote(staff, ticket.id, {
+    requestId: randomUUID(),
+    content: "First private note",
+  });
+  await service.pump();
+  await service.pump();
+  let thread = channels.get(
+    service.store.get("ticket-notes-discord", ticket.id).threadId,
+  );
+  thread.failAfterBotSend = true;
+  const next = service.addNote(staff, ticket.id, {
+    requestId: randomUUID(),
+    content: "Recover exactly once",
+  });
+  await service.pump();
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "note")
+      service.store.set(
+        "ticket-outbox",
+        key,
+        { ...job, after: 0 },
+        Number.MAX_SAFE_INTEGER,
+      );
+  await service.pump();
+  assert.equal(
+    thread.savedMessages.filter((value) =>
+      value.embeds?.some(
+        (embed) => embed.footer?.text === `Drakora internal note ${next.id}`,
+      ),
+    ).size,
+    1,
+  );
+  assert.equal(
+    service.notes(staff, ticket.id).messages.at(-1).delivery,
+    "delivered",
+  );
+  const parent = channels.get(thread.parentId);
+  channels.delete(thread.id);
+  parent.failThreadCreation = true;
+  service.addNote(staff, ticket.id, {
+    requestId: randomUUID(),
+    content: "Thread replacement",
+  });
+  await service.pump();
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    if (job.kind === "note")
+      service.store.set(
+        "ticket-outbox",
+        key,
+        { ...job, after: 0 },
+        Number.MAX_SAFE_INTEGER,
+      );
+  await service.pump();
+  assert.equal(
+    channels.filter(
+      (value) =>
+        value.type === ChannelType.PrivateThread &&
+        value.parentId === parent.id,
+    ).size,
+    1,
+  );
+  assert.equal(service.notes(staff, ticket.id).messages[0].id, first.id);
+  assert.equal(
+    service.notes(staff, ticket.id).messages.at(-1).delivery,
+    "delivered",
+  );
+});
 
 test("staff notices link both interfaces and recover an uncertain send across restart", async (t) => {
   const app = setupDiscord(t, true);
