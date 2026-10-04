@@ -39,6 +39,29 @@ function save(store, extra = {}) {
   return record;
 }
 
+test("moderation date and reason filters combine with actions and filtered counts", (t) => {
+  const store = database(t),
+    history = moderationHistory(store);
+  const today = new Date().toISOString().slice(0, 10);
+  const start = Date.parse(`${today}T00:00:00Z`);
+  save(store, { at: start - 1, action: "ban", reason: "A unique test reason" });
+  const wanted = save(store, {
+    at: start,
+    action: "timeout",
+    reason: "A unique test reason",
+  });
+  save(store, { at: start, action: "ban", reason: "Another reason" });
+  const result = history.list({
+    from: today,
+    to: today,
+    query: "UNIQUE TEST",
+    action: "timeout",
+  });
+  assert.equal(result.total, 1);
+  assert.equal(result.items[0].id, wanted.id);
+  assert.deepEqual(result.counts, { warn: 0, timeout: 1, ban: 0 });
+});
+
 test("honeypot results connect identity and reasons to one retained moderation history", async (t) => {
   const store = database(t);
   const config = {
@@ -226,6 +249,11 @@ test("staff moderation routes combine current grants, verified identities and ti
       request.end();
     });
   assert.equal((await call("/api/moderation")).status, 200);
+  assert.equal((await call("/api/moderation?from=2026-02-30")).status, 400);
+  assert.equal(
+    (await (await call("/api/moderation?from=2099-01-01")).json()).total,
+    0,
+  );
   assert.equal(
     (
       await (await call(`/api/moderation/${applied.id}`)).json()

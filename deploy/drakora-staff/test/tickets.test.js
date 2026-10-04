@@ -55,6 +55,87 @@ const fails = (action, code) =>
   assert.throws(action, (error) => error.code === code);
 const message = (content = "Hello") => ({ requestId: randomUUID(), content });
 
+test("ticket filters combine assignment, text, dates, type and category before pagination and counts", (t) => {
+  let at = Date.parse("2026-09-30T23:59:59.999Z");
+  const { service, store } = setup(t, { now: () => at });
+  const wanted = service.create(owner, input());
+  service.claim(helper, wanted.id);
+  at = Date.parse("2026-10-01T00:00:00Z");
+  const next = service.create({ id: "101", name: "Next player" }, input());
+  service.create(
+    { id: "102", name: "Hidden owner" },
+    input({
+      type: "billing",
+      description: "Hidden payment record and private purchase references.",
+    }),
+  );
+  const filters = {
+    query: "HELPER",
+    assignment: "mine",
+    from: "2026-09-30",
+    to: "2026-09-30",
+    type: "general",
+    category: "support",
+  };
+  assert.deepEqual(
+    service.list(helper, filters).items.map((item) => item.id),
+    [wanted.id],
+  );
+  assert.equal(service.list(helper, filters).total, 1);
+  assert.equal(service.list(helper, filters).categories[0].count, 1);
+  assert.equal(service.list(helper, { query: "Hidden" }).total, 0);
+  assert.equal(
+    service
+      .list(helper)
+      .categories.some((category) => category.id === "billing"),
+    false,
+  );
+  assert.equal(
+    service.list(helper, { assignment: "unclaimed" }).items[0].id,
+    next.id,
+  );
+  assert.equal(service.list(helper, { sort: "oldest" }).items[0].id, wanted.id);
+  service.closeTicket(
+    helper,
+    wanted.id,
+    {
+      summary: "The quest was fixed and the player can continue.",
+      commands: "None",
+    },
+    true,
+  );
+  assert.equal(
+    service.list(helper, { ...filters, closed: true }).items[0].id,
+    wanted.id,
+  );
+  assert.equal(service.list(helper, filters).total, 0);
+  for (let i = 0; i < 52; i++) {
+    const ticket = {
+      ...next,
+      id: randomUUID(),
+      ign: "Paged",
+      createdAt: at + i,
+      updatedAt: at + i,
+    };
+    store.set("ticket", ticket.id, ticket, Number.MAX_SAFE_INTEGER);
+  }
+  const page = service.list(helper, {
+    query: "Paged",
+    offset: 50,
+    sort: "oldest",
+  });
+  assert.equal(page.total, 52);
+  assert.equal(page.items.length, 2);
+  assert.ok(page.items[0].createdAt < page.items[1].createdAt);
+  for (const extra of [
+    { type: [] },
+    { assignment: "other" },
+    { status: "unknown" },
+    { sort: "random" },
+  ])
+    fails(() => service.list(helper, extra), "invalid_list_filters");
+});
+
 test("ticket intake verifies fields, prevents duplicate creation and enforces the open limit", (t) => {
   const { service } = setup(t);
   const data = input();

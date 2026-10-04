@@ -9,8 +9,12 @@ import {
 import logo from "./assets/drakora-logo.png";
 import "./tickets.css";
 import { ModerationHistoryCard } from "./moderation.jsx";
+import { DateFilters } from "./list-filters.jsx";
 
 const errors = {
+  invalid_ticket_category:
+    "Choose a valid ticket category or reset the filters.",
+  invalid_list_filters: "Check the filters and choose a valid date range.",
   ticket_identity_required:
     "Open your ticket in the browser you used to create it, or connect its Discord account.",
   ticket_not_found:
@@ -334,6 +338,105 @@ function Composer({
     </form>
   );
 }
+function TicketHistory({ entries }) {
+  const [filters, setFilters] = useState({
+    query: "",
+    action: "",
+    from: "",
+    to: "",
+  });
+  const [offset, setOffset] = useState(0);
+  const change = (key, value) => {
+    setFilters((previous) => ({ ...previous, [key]: value }));
+    setOffset(0);
+  };
+  const term = filters.query.trim().toLowerCase();
+  const items = entries.filter(
+    (entry) =>
+      (!filters.action || entry.action === filters.action) &&
+      (!term ||
+        [entry.detail, entry.actor.name, entry.actor.id].some((value) =>
+          value?.toLowerCase().includes(term),
+        )) &&
+      (!filters.from ||
+        new Date(entry.at).toISOString().slice(0, 10) >= filters.from) &&
+      (!filters.to ||
+        new Date(entry.at).toISOString().slice(0, 10) <= filters.to),
+  );
+  return (
+    <section aria-label="Ticket history">
+      <h3>Ticket history</h3>
+      <div className="list-filters list-filters-compact">
+        <label>
+          Search history
+          <input
+            type="search"
+            maxLength={100}
+            value={filters.query}
+            placeholder="Staff, person, ID or event"
+            onChange={(event) => change("query", event.target.value)}
+          />
+        </label>
+        <label>
+          Event
+          <select
+            value={filters.action}
+            onChange={(event) => change("action", event.target.value)}
+          >
+            <option value="">All events</option>
+            {[...new Set(entries.map((entry) => entry.action))]
+              .sort()
+              .map((action) => (
+                <option key={action} value={action}>
+                  {action.charAt(0).toUpperCase() +
+                    action.slice(1).replaceAll("_", " ")}
+                </option>
+              ))}
+          </select>
+        </label>
+        <DateFilters {...filters} change={change} />
+        <button
+          type="button"
+          onClick={() => {
+            setFilters({ query: "", action: "", from: "", to: "" });
+            setOffset(0);
+          }}
+        >
+          Reset history filters
+        </button>
+      </div>
+      <ol className="ticket-history">
+        {items.slice(offset, offset + 25).map((entry) => (
+          <li key={entry.id}>
+            <span>{entry.detail}</span>
+            <small>
+              {entry.actor.name} · {stamp(entry.at)}
+            </small>
+          </li>
+        ))}
+      </ol>
+      <p role="status">{items.length} matching events</p>
+      {!items.length && <p>No events match these filters.</p>}
+      {items.length > 25 && (
+        <div className="ticket-pagination">
+          <button
+            disabled={!offset}
+            onClick={() => setOffset(Math.max(0, offset - 25))}
+          >
+            Previous events
+          </button>
+          <button
+            disabled={offset + 25 >= items.length}
+            onClick={() => setOffset(offset + 25)}
+          >
+            Next events
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
   const base = `${staffView ? "/api/tickets" : "/help/api/tickets"}/${id}`;
   const [ticket, setTicket] = useState(null),
@@ -810,17 +913,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             ) : (
               <p>No staff viewing</p>
             )}
-            <h3>Ticket history</h3>
-            <ol className="ticket-history">
-              {ticket.history.map((entry) => (
-                <li key={entry.id}>
-                  <span>{entry.detail}</span>
-                  <small>
-                    {entry.actor.name} · {stamp(entry.at)}
-                  </small>
-                </li>
-              ))}
-            </ol>
+            <TicketHistory entries={ticket.history} />
             {ticket.resolution && (
               <section className="ticket-resolution">
                 <h3>Private staff resolution</h3>
@@ -845,26 +938,62 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
 export function Tickets({ csrf, capabilities, logs = false }) {
   const [data, setData] = useState(null),
     [error, setError] = useState(""),
-    [offset, setOffset] = useState(0),
-    [category, setCategory] = useState("");
+    [offset, setOffset] = useState(
+      () => Number(new URLSearchParams(location.search).get("offset")) || 0,
+    ),
+    [category, setCategory] = useState(
+      () => new URLSearchParams(location.search).get("category") || "",
+    );
+  const [filters, setFilters] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return Object.fromEntries(
+      ["query", "status", "type", "assignment", "sort", "from", "to"].map(
+        (key) => [key, params.get(key) || ""],
+      ),
+    );
+  });
+  const [term, setTerm] = useState(filters.query);
+  const listSearch = new URLSearchParams({
+    ...filters,
+    category,
+    offset: String(offset),
+  }).toString();
+  function updateList(
+    nextFilters = filters,
+    nextCategory = category,
+    nextOffset = 0,
+  ) {
+    setFilters(nextFilters);
+    setCategory(nextCategory);
+    setOffset(nextOffset);
+    history.replaceState(
+      history.state,
+      "",
+      `${logs ? "/logs" : "/tickets"}?${new URLSearchParams({ ...nextFilters, category: nextCategory, offset: String(nextOffset) })}`,
+    );
+  }
+  function changeFilter(key, value) {
+    updateList({ ...filters, query: term.trim(), [key]: value });
+  }
   const latestRequest = useRef(0);
-  const selection = `${logs}:${category}:${offset}`;
-  const ready = data?.selection === selection;
+  const selection = `${logs}:${listSearch}`;
+  const ready = data?.selection === selection && !error;
   const id = location.pathname.match(/^\/tickets\/([a-f0-9-]{36})$/)?.[1];
   const refresh = useCallback(async () => {
     const requestId = ++latestRequest.current;
     try {
       const result = await request(
-        `/api/tickets?closed=${logs ? 1 : 0}&offset=${offset}&category=${category}`,
+        `/api/tickets?${listSearch}&closed=${logs ? 1 : 0}`,
       );
       if (requestId !== latestRequest.current) return;
       setData({ ...result, selection });
       setError("");
     } catch (error) {
       if (requestId !== latestRequest.current) return;
+      setData(null);
       setError(error.message);
     }
-  }, [logs, offset, category, selection]);
+  }, [logs, listSearch, selection]);
   useLive(!id ? "/api/tickets/events" : null, refresh);
   useEffect(() => {
     if (id) return;
@@ -880,8 +1009,11 @@ export function Tickets({ csrf, capabilities, logs = false }) {
   if (id)
     return (
       <div className="ticket-page ticket-detail">
-        <a className="ticket-back" href="/tickets">
-          ← Tickets
+        <a
+          className="ticket-back"
+          href={`${new URLSearchParams(location.search).get("view") === "logs" ? "/logs" : "/tickets"}?${listSearch}`}
+        >
+          ← Back to filtered tickets
         </a>
         <TicketChat
           key={id}
@@ -917,94 +1049,182 @@ export function Tickets({ csrf, capabilities, logs = false }) {
           {error}
         </p>
       )}
-      {!data && !error && <p>Loading tickets…</p>}
-      {data && (
-        <>
-          <div
-            className="ticket-category-tabs"
-            role="group"
-            aria-label="Ticket categories"
+      <div
+        className="ticket-category-tabs"
+        role="group"
+        aria-label="Ticket categories"
+      >
+        <button
+          aria-pressed={!category}
+          onClick={() => {
+            updateList(filters, "");
+          }}
+        >
+          All accessible tickets
+        </button>
+        {(data?.categories || []).map((entry) => (
+          <button
+            key={entry.id}
+            aria-pressed={category === entry.id}
+            onClick={() => {
+              updateList(filters, entry.id);
+            }}
           >
-            <button
-              aria-pressed={!category}
-              onClick={() => {
-                setCategory("");
-                setOffset(0);
-              }}
+            {entry.name} <span>{entry.count}</span>
+          </button>
+        ))}
+      </div>
+      <form
+        className="list-filters"
+        aria-label="Filter tickets"
+        onSubmit={(event) => {
+          event.preventDefault();
+          updateList({ ...filters, query: term.trim() });
+        }}
+      >
+        <label>
+          Search tickets
+          <input
+            type="search"
+            maxLength={100}
+            placeholder="Name, ID, staff, location or issue"
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+          />
+        </label>
+        {!logs && (
+          <label>
+            Status
+            <select
+              value={filters.status}
+              onChange={(event) => changeFilter("status", event.target.value)}
             >
-              All accessible tickets
-            </button>
-            {data.categories.map((entry) => (
-              <button
-                key={entry.id}
-                aria-pressed={category === entry.id}
-                onClick={() => {
-                  setCategory(entry.id);
-                  setOffset(0);
-                }}
-              >
-                {entry.name} <span>{entry.count}</span>
-              </button>
+              <option value="">All open statuses</option>
+              {Object.entries(ticketStatuses)
+                .filter(([key]) => key !== "closed")
+                .map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
+        <label>
+          Ticket type
+          <select
+            value={filters.type}
+            onChange={(event) => changeFilter("type", event.target.value)}
+          >
+            <option value="">All types</option>
+            {ticketTypes.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
             ))}
-          </div>
-          <div className="ticket-list">
-            {!ready && !error && <p>Loading tickets…</p>}
-            {ready &&
-              data.items.map((ticket) => (
-                <a
-                  className="ticket-list-row"
-                  key={ticket.id}
-                  href={`/tickets/${ticket.id}`}
-                >
-                  <Avatar actor={ticket.owner} />
-                  <div>
-                    <strong>
-                      {ticket.ign} ·{" "}
-                      {
-                        ticketTypes.find((type) => type.id === ticket.type)
-                          ?.name
-                      }
-                    </strong>
-                    <p>{ticket.location}</p>
-                    <small>
-                      {ticket.owner.name} · {stamp(ticket.createdAt)}
-                    </small>
-                  </div>
-                  <span className={`ticket-state ${ticket.status}`}>
-                    {ticketStatuses[ticket.status]}
-                  </span>
-                  <span>{ticket.claimedBy?.name || "Unclaimed"}</span>
-                </a>
-              ))}
-            {ready && !data.items.length && (
-              <p className="ticket-empty">
-                {logs
-                  ? "No closed ticket transcripts yet."
-                  : "No tickets waiting for help."}
-              </p>
-            )}
-          </div>
-          <div className="ticket-pagination">
-            <button
-              disabled={!ready || !offset}
-              onClick={() => setOffset((value) => Math.max(0, value - 50))}
+          </select>
+        </label>
+        <label>
+          Assigned staff
+          <select
+            value={filters.assignment}
+            onChange={(event) => changeFilter("assignment", event.target.value)}
+          >
+            <option value="">Anyone</option>
+            <option value="mine">Assigned to me</option>
+            <option value="unclaimed">Unclaimed</option>
+            <option value="claimed">Claimed</option>
+          </select>
+        </label>
+        <DateFilters
+          from={filters.from}
+          to={filters.to}
+          change={changeFilter}
+        />
+        <label>
+          Sort by
+          <select
+            value={filters.sort || "updated"}
+            onChange={(event) => changeFilter("sort", event.target.value)}
+          >
+            <option value="updated">Last updated</option>
+            <option value="newest">Newest opened</option>
+            <option value="oldest">Oldest opened</option>
+          </select>
+        </label>
+        <div className="list-filter-actions">
+          <button type="submit">Search</button>
+          <button
+            type="button"
+            onClick={() => {
+              setTerm("");
+              updateList(
+                Object.fromEntries(
+                  Object.keys(filters).map((key) => [key, ""]),
+                ),
+                "",
+              );
+            }}
+          >
+            Reset filters
+          </button>
+        </div>
+      </form>
+      <p className="ticket-filter-note">
+        Dates filter when tickets were opened. Category counts match the other
+        filters.
+      </p>
+      <div className="ticket-list">
+        {!ready && !error && <p>Loading tickets…</p>}
+        {ready &&
+          data.items.map((ticket) => (
+            <a
+              className="ticket-list-row"
+              key={ticket.id}
+              href={`/tickets/${ticket.id}?${listSearch}${logs ? "&view=logs" : ""}`}
             >
-              Previous
-            </button>
-            <span>
-              {ready
-                ? `${data.total} ${data.total === 1 ? "ticket" : "tickets"}`
-                : "Loading…"}
-            </span>
-            <button
-              disabled={!ready || offset + 50 >= data.total}
-              onClick={() => setOffset((value) => value + 50)}
-            >
-              Next
-            </button>
-          </div>
-        </>
-      )}
+              <Avatar actor={ticket.owner} />
+              <div>
+                <strong>
+                  {ticket.ign} ·{" "}
+                  {ticketTypes.find((type) => type.id === ticket.type)?.name}
+                </strong>
+                <p>{ticket.location}</p>
+                <small>
+                  {ticket.owner.name} · {stamp(ticket.createdAt)}
+                </small>
+              </div>
+              <span className={`ticket-state ${ticket.status}`}>
+                {ticketStatuses[ticket.status]}
+              </span>
+              <span>{ticket.claimedBy?.name || "Unclaimed"}</span>
+            </a>
+          ))}
+        {ready && !data.items.length && (
+          <p className="ticket-empty">No tickets match these filters.</p>
+        )}
+      </div>
+      <div className="ticket-pagination">
+        <button
+          disabled={!ready || !offset}
+          onClick={() =>
+            updateList(filters, category, Math.max(0, offset - 50))
+          }
+        >
+          Previous
+        </button>
+        <span>
+          {ready
+            ? `${data.total ? `${offset + 1}–${Math.min(offset + 50, data.total)} of ` : ""}${data.total} matching ${data.total === 1 ? "ticket" : "tickets"}`
+            : "Loading…"}
+        </span>
+        <button
+          disabled={!ready || offset + 50 >= (data?.total || 0)}
+          onClick={() => updateList(filters, category, offset + 50)}
+        >
+          Next
+        </button>
+      </div>
     </div>
   );
 }

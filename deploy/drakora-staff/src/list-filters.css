@@ -1,0 +1,45 @@
+.list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  margin: 16px 0;
+}
+.list-filters label {
+  display: grid;
+  gap: 8px;
+  min-width: 160px;
+  flex: 1;
+}
+.list-filters input,
+.list-filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px;
+  font: inherit;
+  color: #f2f3f5;
+  background: #232428;
+  border: 1px solid #555861;
+  border-radius: 8px;
+  color-scheme: dark;
+}
+.list-filters :is(input, select, button):focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 3px;
+}
+.list-filter-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.list-filters-compact label {
+  min-width: 0;
+  flex-basis: 100%;
+}
+@media (max-width: 600px) {
+  .list-filters label {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}

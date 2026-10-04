@@ -6,17 +6,20 @@ import {
   questionList,
 } from "../shared/application-form.js";
 import "./apply.css";
+import { DateFilters } from "./list-filters.jsx";
 import { NotificationDeliveries } from "./application-notification-settings.jsx";
 import { EvidenceLinks } from "./application-evidence.jsx";
 import { ApplicationPlayer } from "./application-player.jsx";
 import { ApplicationFormEditor } from "./application-form-editor.jsx";
 import { ApplicationStatus } from "./application-status.jsx";
 
-function applicationListSearch(offset, { role, status, name }) {
+function applicationListSearch(offset, { role, status, name, from, to }) {
   const query = new URLSearchParams({ offset: String(offset) });
   if (role) query.set("role", role);
   if (status) query.set("status", status);
   if (name) query.set("name", name);
+  if (from) query.set("from", from);
+  if (to) query.set("to", to);
   return `?${query}`;
 }
 
@@ -54,11 +57,19 @@ function ApplicationReviews({ csrf, capabilities }) {
       role: Object.hasOwn(applicationRoles, role) ? role : "",
       status: Object.hasOwn(applicationStatuses, status) ? status : "",
       name: name.length <= 80 ? name.trim() : "",
+      from: query.get("from") || "",
+      to: query.get("to") || "",
     };
   });
   const [nameInput, setNameInput] = useState(filters.name);
   const listSearch = applicationListSearch(offset, filters);
-  const filtered = Boolean(filters.role || filters.status || filters.name);
+  const filtered = Boolean(
+    filters.role ||
+    filters.status ||
+    filters.name ||
+    filters.from ||
+    filters.to,
+  );
   function updateList(nextFilters, nextOffset = 0) {
     setFilters(nextFilters);
     setOffset(nextOffset);
@@ -135,7 +146,9 @@ function ApplicationReviews({ csrf, capabilities }) {
               ? "Your roles do not have permission to view applications."
               : response.status === 404
                 ? "Application not found."
-                : "Could not load applications.",
+                : response.status === 400
+                  ? "Check the filters and choose a valid date range."
+                  : "Could not load applications.",
           );
         const result = await response.json();
         if (!controller.signal.aborted) setData(result);
@@ -174,7 +187,7 @@ function ApplicationReviews({ csrf, capabilities }) {
             updateList({ ...filters, name: nameInput.trim() });
           }}
         >
-          <fieldset className="application-filters">
+          <fieldset className="application-filters list-filters">
             <legend className="sr-only">Filter staff applications</legend>
             <label>
               Applicant name
@@ -226,6 +239,13 @@ function ApplicationReviews({ csrf, capabilities }) {
                 ))}
               </select>
             </label>
+            <DateFilters
+              from={filters.from}
+              to={filters.to}
+              change={(key, value) =>
+                updateList({ ...filters, name: nameInput.trim(), [key]: value })
+              }
+            />
             <div className="application-filter-actions">
               <button type="submit">Search</button>
               <button
@@ -233,7 +253,13 @@ function ApplicationReviews({ csrf, capabilities }) {
                 disabled={!filtered && !nameInput}
                 onClick={() => {
                   setNameInput("");
-                  updateList({ role: "", status: "", name: "" });
+                  updateList({
+                    role: "",
+                    status: "",
+                    name: "",
+                    from: "",
+                    to: "",
+                  });
                 }}
               >
                 Reset filters
@@ -241,6 +267,9 @@ function ApplicationReviews({ csrf, capabilities }) {
             </div>
           </fieldset>
         </form>
+        <p className="application-retention">
+          Dates filter when applications were submitted.
+        </p>
         <p className="application-retention">
           Denied applications are kept for reference.
         </p>

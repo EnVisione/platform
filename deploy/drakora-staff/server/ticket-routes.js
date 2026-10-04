@@ -264,7 +264,7 @@ export function ticketRouter(
   } else {
     router.get(prefix, async (req, res) => {
       const user = await identity(req),
-        offset = Math.max(0, Math.min(100000, Number(req.query.offset) || 0));
+        offset = Number(req.query.offset ?? 0);
       const closed = req.query.closed === "1";
       if (closed && !user.capabilities["logs.view"])
         throw new AuthError("ticket_access_denied");
@@ -272,7 +272,14 @@ export function ticketRouter(
         service.list(user, {
           closed,
           offset,
-          category: req.query.category || undefined,
+          category: req.query.category,
+          query: req.query.query,
+          status: req.query.status,
+          type: req.query.type,
+          assignment: req.query.assignment,
+          sort: req.query.sort,
+          from: req.query.from,
+          to: req.query.to,
         }),
       );
     });

@@ -1,5 +1,6 @@
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
+import { listFilters } from "./list-filters.js";
 import { staffCapability, communityRankNames } from "./roles.js";
 import { hash } from "./store.js";
 import {
@@ -710,7 +711,10 @@ export function applicationService(
       return saveStatus(record, decision === "approve" ? "approved" : "denied");
     });
   }
-  function list(offset = 0, { role = "", status = "", name = "" } = {}) {
+  function list(
+    offset = 0,
+    { role = "", status = "", name = "", from = "", to = "" } = {},
+  ) {
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
@@ -722,13 +726,15 @@ export function applicationService(
       name.length > 80
     )
       throw new AuthError("invalid_request", 400);
+    const { withinDate } = listFilters({ offset, query: name, from, to }, 80);
     const search = name.trim().toLowerCase();
     const page = store.page(
       "application-summary",
       50,
       offset,
-      role || status || search
+      role || status || search || from || to
         ? (item) =>
+            withinDate(item.createdAt) &&
             (!role || item.role === role) &&
             (!status || item.status === status) &&
             (!search ||

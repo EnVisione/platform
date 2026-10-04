@@ -1,4 +1,5 @@
 import { AuthError } from "./discord.js";
+import { listFilters, matchesText } from "./list-filters.js";
 
 const day = 86400000;
 const actions = ["warn", "timeout", "ban"];
@@ -35,19 +36,20 @@ export function moderationHistory(store) {
     value.at + 90 * day > Date.now();
   return {
     list(input = {}) {
-      const { offset = 0, action = "all", query = "" } = input;
+      const { action = "all" } = input;
       if (
-        !Number.isSafeInteger(offset) ||
-        offset < 0 ||
-        offset > 100000 ||
-        !["all", ...actions].includes(action) ||
-        typeof query !== "string" ||
-        query.length > 100
+        typeof (input.query ?? "") !== "string" ||
+        (input.query ?? "").length > 100 ||
+        !Number.isSafeInteger(input.offset ?? 0) ||
+        (input.offset ?? 0) < 0 ||
+        (input.offset ?? 0) > 100000
       )
+        throw new AuthError("invalid_request", 400);
+      const { offset, term, withinDate } = listFilters(input);
+      if (!["all", ...actions].includes(action))
         throw new AuthError("invalid_request", 400);
       const scoped = Object.hasOwn(input, "userId");
       const matched = !scoped || identity.test(input.userId ?? "");
-      const term = query.trim().toLowerCase();
       const values = matched
         ? store
             .entries("honeypot-audit")
@@ -56,12 +58,13 @@ export function moderationHistory(store) {
               (value) =>
                 recorded(value) &&
                 (!scoped || value.userId === input.userId) &&
-                (!term ||
-                  [value.userId, value.name, value.username].some(
-                    (text) =>
-                      typeof text === "string" &&
-                      text.toLowerCase().includes(term),
-                  )),
+                withinDate(value.at) &&
+                matchesText(term, [
+                  value.userId,
+                  value.name,
+                  value.username,
+                  record(value).reason,
+                ]),
             )
         : [];
       const counts = Object.fromEntries(actions.map((action) => [action, 0]));

@@ -1336,6 +1336,8 @@ app.get("/api/applications", async (req, res) => {
       role: req.query.role,
       status: req.query.status,
       name: req.query.name,
+      from: req.query.from,
+      to: req.query.to,
     }),
   );
 });

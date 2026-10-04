@@ -107,6 +107,9 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+  assert.equal((await call("/api/tickets?from=2026-02-30")).status, 400);
+  assert.equal((await call("/api/tickets?assignment=other")).status, 400);
+  assert.equal((await call("/api/tickets?offset=1.5")).status, 400);
   const data = {
     requestId: randomUUID(),
     type: "general",

@@ -71,6 +71,51 @@ test("Overview counts pending applications and excludes completed decisions", (t
     pending: 2,
   });
 });
+
+test("application dates combine with applicant, role and status filters without exposing private summary fields", (t) => {
+  const { service, store } = setup(t);
+  const at = Date.parse("2026-10-03T23:59:59.999Z");
+  for (let i = 0; i < 52; i++)
+    store.set(
+      "application-summary",
+      String(i).padStart(3, "0"),
+      {
+        id: String(i),
+        createdAt: at,
+        role: "builder",
+        status: "Received",
+        name: "Selected applicant",
+        browserSessionHash: "private",
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+  store.set(
+    "application-summary",
+    "older",
+    {
+      id: "older",
+      createdAt: at - 86400000,
+      role: "builder",
+      status: "Received",
+      name: "Selected applicant",
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const result = service.list(50, {
+    from: "2026-10-03",
+    to: "2026-10-03",
+    role: "builder",
+    status: "Received",
+    name: "SELECTED",
+  });
+  assert.equal(result.total, 52);
+  assert.equal(result.items.length, 2);
+  assert.equal(
+    result.items.some((item) => Object.hasOwn(item, "browserSessionHash")),
+    false,
+  );
+  assert.equal(service.list(0, { from: "2026-10-04" }).total, 0);
+});
 function answers(role = "community", communities = ["prom2"]) {
   return {
     displayName: "Application fixture",

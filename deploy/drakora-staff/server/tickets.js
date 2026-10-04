@@ -1,6 +1,7 @@
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { AuthError } from "./discord.js";
+import { listFilters, matchesText } from "./list-filters.js";
 import { validMailAddress } from "./mail-address.js";
 import {
   ticketTypes,
@@ -274,36 +275,76 @@ export function ticketService(
       current.capabilities[ticketCapability(ticket)],
     );
   }
-  function list(user, { closed = false, offset = 0, category } = {}) {
-    staff(user);
+  function list(user, input = {}) {
+    const current = staff(user);
+    const {
+      closed = false,
+      category = "",
+      status = "",
+      type = "",
+      assignment = "",
+    } = input;
+    const sort = input.sort || "updated";
+    const { offset, term, withinDate } = listFilters(input);
     if (category && !ticketCategories.some((entry) => entry.id === category))
       throw new AuthError("invalid_ticket_category", 400);
-    const matches = (ticket) =>
-      (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
-      visible(user, ticket);
-    return {
-      ...store.page(
-        "ticket",
-        50,
-        offset,
+    if (
+      (status &&
+        !["pending", "claimed", "awaiting_resolution", "closed"].includes(
+          status,
+        )) ||
+      (type && !ticketTypes.some((entry) => entry.id === type)) ||
+      !["", "mine", "unclaimed", "claimed"].includes(assignment) ||
+      !["updated", "newest", "oldest"].includes(sort)
+    )
+      throw new AuthError("invalid_list_filters", 400);
+    const values = store
+      .entries("ticket")
+      .map(([, ticket]) => ticket)
+      .filter(
         (ticket) =>
-          matches(ticket) && (!category || ticketCategory(ticket) === category),
-      ),
+          (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
+          current.capabilities[ticketCapability(ticket)] &&
+          (!status || ticket.status === status) &&
+          (!type || ticket.type === type) &&
+          (assignment !== "mine" || ticket.claimedBy?.id === current.id) &&
+          (assignment !== "unclaimed" || !ticket.claimedBy) &&
+          (assignment !== "claimed" || Boolean(ticket.claimedBy)) &&
+          withinDate(ticket.createdAt) &&
+          matchesText(term, [
+            ticket.id,
+            ticket.ign,
+            ticket.location,
+            ticket.description,
+            ticket.reportTarget,
+            ticket.owner.id,
+            ticket.owner.name,
+            ticket.claimedBy?.id,
+            ticket.claimedBy?.name,
+          ]),
+      );
+    const filtered = values.filter(
+      (ticket) => !category || ticketCategory(ticket) === category,
+    );
+    const time = (ticket) =>
+      sort === "updated" ? ticket.updatedAt : ticket.createdAt;
+    filtered.sort(
+      (a, b) =>
+        (sort === "oldest" ? time(a) - time(b) : time(b) - time(a)) ||
+        a.id.localeCompare(b.id),
+    );
+    return {
+      items: filtered.slice(offset, offset + 50),
+      total: filtered.length,
+      pageSize: 50,
       categories: ticketCategories
         .filter(
-          (entry) =>
-            rolePolicy.apply(user).capabilities[
-              `tickets.category.${entry.id}.view`
-            ],
+          (entry) => current.capabilities[`tickets.category.${entry.id}.view`],
         )
         .map((entry) => ({
           ...entry,
-          count: store
-            .entries("ticket")
-            .filter(
-              ([, ticket]) =>
-                matches(ticket) && ticketCategory(ticket) === entry.id,
-            ).length,
+          count: values.filter((ticket) => ticketCategory(ticket) === entry.id)
+            .length,
         })),
     };
   }

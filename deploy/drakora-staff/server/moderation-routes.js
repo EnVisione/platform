@@ -22,6 +22,8 @@ export function moderationRouter({
     offset: Number(req.query.offset ?? 0),
     action: req.query.action ?? "all",
     query: req.query.query ?? "",
+    from: req.query.from,
+    to: req.query.to,
   });
   router.get("/api/moderation", async (req, res) => {
     await requireStaff(req);

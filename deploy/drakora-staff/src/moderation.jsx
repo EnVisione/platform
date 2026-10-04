@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "./moderation.css";
+import { DateFilters } from "./list-filters.jsx";
 
 const labels = { warn: "Warning", timeout: "Timed out", ban: "Ban" };
 const date = (value) => new Date(value).toLocaleString();
@@ -26,7 +27,9 @@ function useModeration(url) {
               ? "Your current staff permissions do not allow this moderation history."
               : response.status === 404
                 ? "This moderation record is unavailable or has expired."
-                : "Could not load moderation history. Try again.",
+                : response.status === 400
+                  ? "Check the filters and choose a valid date range."
+                  : "Could not load moderation history. Try again.",
           );
         }
         const value = await response.json();
@@ -195,8 +198,12 @@ export function Moderation({ onNavigate }) {
       : `/api/moderation?${params}`,
   );
   const change = (key, value) => {
-    params.set(key, String(value));
-    if (key !== "offset") params.delete("offset");
+    if (value) params.set(key, String(value));
+    else params.delete(key);
+    if (key !== "offset") {
+      params.delete("offset");
+      if (key !== "query") params.set("query", term.trim());
+    }
     onNavigate(`/moderation?${params}`);
   };
   return (
@@ -274,15 +281,16 @@ export function Moderation({ onNavigate }) {
             <button onClick={refresh}>Refresh</button>
           </div>
           <form
-            className="moderation-filters"
+            className="moderation-filters list-filters"
             onSubmit={(event) => {
               event.preventDefault();
               change("query", term);
             }}
           >
             <label>
-              Discord name or ID
+              Person, Discord ID or reason
               <input
+                type="search"
                 value={term}
                 maxLength={100}
                 onChange={(event) => setTerm(event.target.value)}
@@ -301,6 +309,20 @@ export function Moderation({ onNavigate }) {
                 <option value="ban">Bans</option>
               </select>
             </label>
+            <DateFilters
+              from={params.get("from") || ""}
+              to={params.get("to") || ""}
+              change={change}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setTerm("");
+                onNavigate("/moderation");
+              }}
+            >
+              Reset filters
+            </button>
           </form>
           {!data ? (
             <LoadState error={error} refresh={refresh} />

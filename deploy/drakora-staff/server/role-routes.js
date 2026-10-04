@@ -40,7 +40,14 @@ export function roleRouter({
     );
   });
   router.get("/history", (req, res) =>
-    res.json(policy.history(req.roleUser, Number(req.query.offset ?? 0))),
+    res.json(
+      policy.history(req.roleUser, Number(req.query.offset ?? 0), {
+        query: req.query.query,
+        action: req.query.action,
+        from: req.query.from,
+        to: req.query.to,
+      }),
+    ),
   );
   router.use((req, _res, next) => {
     requireMutation(req);

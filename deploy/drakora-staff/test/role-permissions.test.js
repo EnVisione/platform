@@ -31,6 +31,56 @@ function setup(t) {
   const policy = rolePermissions(settings, store);
   return { policy, store };
 }
+
+test("role activity filters include actor and target identity and paginate the matching audit", (t) => {
+  const { store, policy } = setup(t);
+  const at = Date.parse("2026-10-03T23:59:59.999Z");
+  for (let i = 0; i < 28; i++)
+    store.set(
+      "role-audit",
+      `${i}`.padStart(3, "0"),
+      {
+        id: String(i),
+        at,
+        actor: { id: "28", name: "Manager" },
+        action: "assignment",
+        memberId: "123",
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+  store.set(
+    "role-audit",
+    "old",
+    {
+      id: "old",
+      at: at - 86400000,
+      actor: { id: "28", name: "Manager" },
+      action: "assignment",
+      memberId: "123",
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  const filters = {
+    action: "assignment",
+    query: "123",
+    from: "2026-10-03",
+    to: "2026-10-03",
+  };
+  const page = policy.history(actor("20"), 25, filters);
+  assert.equal(page.total, 28);
+  assert.equal(page.items.length, 3);
+  assert.equal(
+    policy.history(actor("20"), 0, { ...filters, query: "MANAGER" }).total,
+    28,
+  );
+  assert.equal(
+    policy.history(actor("20"), 0, { ...filters, action: "permissions" }).total,
+    0,
+  );
+  assert.throws(() => policy.history(actor("23"), 0, filters), {
+    code: "role_management_required",
+  });
+});
 const input = (policy) => ({
   revision: policy.read(actor("20")).revision,
   roles: policy.read(actor("20")).roles.map((role) => ({

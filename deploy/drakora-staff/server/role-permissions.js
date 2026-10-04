@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AuthError } from "./discord.js";
+import { listFilters, matchesText } from "./list-filters.js";
 import { permissions } from "./roles.js";
 import {
   staffPermissionCatalog,
@@ -287,11 +288,24 @@ export function rolePermissions(config, store) {
     isManager,
     isAdmin,
     roles,
-    history(user, offset = 0) {
+    history(user, offset = 0, input = {}) {
       authorize(user, "roles.view");
       if (!Number.isSafeInteger(offset) || offset < 0)
         throw new AuthError("invalid_request", 400);
-      return store.page("role-audit", 25, offset);
+      const { term, withinDate } = listFilters({ ...input, offset });
+      const { action = "" } = input;
+      if (!["", "permissions", "assignment"].includes(action))
+        throw new AuthError("invalid_list_filters", 400);
+      const page = store.page(
+        "role-audit",
+        25,
+        offset,
+        (entry) =>
+          (!action || entry.action === action) &&
+          withinDate(entry.at) &&
+          matchesText(term, [entry.actor.id, entry.actor.name, entry.memberId]),
+      );
+      return { ...page, pageSize: 25 };
     },
   };
 }

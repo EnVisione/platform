@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import "./roles.css";
+import { DateFilters } from "./list-filters.jsx";
 
 const messages = {
+  invalid_list_filters: "Check the filters and choose a valid date range.",
   role_permissions_changed:
     "Someone changed permissions while you were editing. Your draft is still here. Reload the saved permissions before trying again.",
   discord_roles_changed:
@@ -389,6 +391,140 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
   );
 }
 
+function RoleHistory({ revision }) {
+  const [filters, setFilters] = useState({
+    query: "",
+    action: "",
+    from: "",
+    to: "",
+  });
+  const [term, setTerm] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const search = new URLSearchParams({
+    ...filters,
+    offset: String(offset),
+  }).toString();
+  useEffect(() => {
+    const controller = new AbortController();
+    setData(null);
+    setError("");
+    request(`/history?${search}`, { signal: controller.signal })
+      .then((result) => {
+        if (!controller.signal.aborted) setData(result);
+      })
+      .catch((failure) => {
+        if (!controller.signal.aborted) setError(failure.message);
+      });
+    return () => controller.abort();
+  }, [search, revision, refresh]);
+  const change = (key, value) => {
+    setFilters((previous) => ({
+      ...previous,
+      query: term.trim(),
+      [key]: value,
+    }));
+    setOffset(0);
+  };
+  return (
+    <details className="role-history">
+      <summary>Role management activity</summary>
+      <form
+        className="list-filters"
+        onSubmit={(event) => {
+          event.preventDefault();
+          change("query", term.trim());
+        }}
+      >
+        <label>
+          Staff name or member ID
+          <input
+            type="search"
+            maxLength={100}
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+          />
+        </label>
+        <label>
+          Action
+          <select
+            value={filters.action}
+            onChange={(event) => change("action", event.target.value)}
+          >
+            <option value="">All actions</option>
+            <option value="permissions">Permission changes</option>
+            <option value="assignment">Discord role changes</option>
+          </select>
+        </label>
+        <DateFilters {...filters} change={change} />
+        <div className="list-filter-actions">
+          <button type="submit" className="role-secondary">
+            Search
+          </button>
+          <button
+            type="button"
+            className="role-secondary"
+            onClick={() => {
+              setTerm("");
+              setFilters({ query: "", action: "", from: "", to: "" });
+              setOffset(0);
+            }}
+          >
+            Reset filters
+          </button>
+        </div>
+      </form>
+      {error ? (
+        <p role="alert">
+          {error}{" "}
+          <button
+            className="role-secondary"
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            Retry
+          </button>
+        </p>
+      ) : !data ? (
+        <p role="status">Loading activity…</p>
+      ) : (
+        <>
+          <ul>
+            {data.items.map((entry) => (
+              <li key={entry.id}>
+                <strong>{entry.actor.name}</strong>{" "}
+                {entry.action === "permissions"
+                  ? `saved permission revision ${entry.revision}`
+                  : `requested Discord role changes for ${entry.memberId}`}
+                <small>{time(entry.at)}</small>
+              </li>
+            ))}
+            {!data.items.length && <li>No activity matches these filters.</li>}
+          </ul>
+          <nav className="role-history-pages" aria-label="Role activity pages">
+            <button
+              className="role-secondary"
+              disabled={!offset}
+              onClick={() => setOffset(Math.max(0, offset - 25))}
+            >
+              Previous
+            </button>
+            <span role="status">{data.total} matching changes</span>
+            <button
+              className="role-secondary"
+              disabled={offset + 25 >= data.total}
+              onClick={() => setOffset(offset + 25)}
+            >
+              Next
+            </button>
+          </nav>
+        </>
+      )}
+    </details>
+  );
+}
+
 export function Roles({ csrf, userId }) {
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState([]);
@@ -397,7 +533,6 @@ export function Roles({ csrf, userId }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState(null);
   const [auditRefresh, setAuditRefresh] = useState(0);
   const dirty = Boolean(
     data && JSON.stringify(draft) !== JSON.stringify(draftRoles(data)),
@@ -418,17 +553,6 @@ export function Roles({ csrf, userId }) {
     });
     return () => controller.abort();
   }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    request("/history", { signal: controller.signal })
-      .then((result) => {
-        if (!controller.signal.aborted) setHistory(result);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setHistory({ error: true });
-      });
-    return () => controller.abort();
-  }, [auditRefresh]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event) => {
@@ -700,37 +824,7 @@ export function Roles({ csrf, userId }) {
               onAudit={() => setAuditRefresh((value) => value + 1)}
             />
           )}
-          <details className="role-history">
-            <summary>Recent role management activity</summary>
-            {history?.error ? (
-              <p>
-                Could not load activity.{" "}
-                <button
-                  className="role-secondary"
-                  onClick={() => setAuditRefresh((value) => value + 1)}
-                >
-                  Retry
-                </button>
-              </p>
-            ) : history ? (
-              <ul>
-                {history.items.map((entry) => (
-                  <li key={entry.id}>
-                    <strong>{entry.actor.name}</strong>{" "}
-                    {entry.action === "permissions"
-                      ? `saved permission revision ${entry.revision}`
-                      : `requested Discord role changes for ${entry.memberId}`}
-                    <small>{time(entry.at)}</small>
-                  </li>
-                ))}
-                {!history.items.length && (
-                  <li>No role management changes yet.</li>
-                )}
-              </ul>
-            ) : (
-              <p>Loading activity…</p>
-            )}
-          </details>
+          <RoleHistory revision={auditRefresh} />
         </>
       )}
     </section>

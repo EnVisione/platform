@@ -661,3 +661,9 @@
   margin-left: 10px;
   font-weight: 700;
 }
+
+.ticket-filter-note {
+  color: #b5bac1;
+  font-size: 0.9rem;
+  margin: 8px 0 16px;
+}

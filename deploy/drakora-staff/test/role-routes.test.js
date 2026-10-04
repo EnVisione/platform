@@ -77,6 +77,11 @@ test("role endpoints require staff host, current Manager or Founder access, CSRF
       req.on("error", reject);
       req.end(options.body);
     });
+  assert.equal(
+    (await call("/history?from=2026-10-04&to=2026-10-03")).status,
+    400,
+  );
+  assert.equal((await call("/history?action=unknown")).status, 400);
   const catalog = await call("/");
   assert.equal(catalog.status, 200);
   assert.equal(
