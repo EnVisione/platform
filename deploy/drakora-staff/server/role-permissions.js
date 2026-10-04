@@ -89,18 +89,24 @@ export function rolePermissions(config, store) {
         }
         if (key.startsWith("mail.inbox.partners@drakora.org."))
           enabled = managers.includes(role.name);
+        if (key === "tickets.takeover" || key.endsWith(".takeover"))
+          enabled = enabled && admins.includes(role.name);
         return [key, enabled];
       }),
     );
   const deletion = (key) =>
     key === "tickets.delete" ||
     (key.startsWith("tickets.category.") && key.endsWith(".delete"));
+  const takeover = (key) =>
+    key === "tickets.takeover" ||
+    (key.startsWith("tickets.category.") && key.endsWith(".takeover"));
+  const adminOnly = (key) => deletion(key) || takeover(key);
   const values = (role) =>
     Object.fromEntries(
       Object.entries({ ...defaults(role), ...state.overrides[role.id] }).map(
         ([key, value]) => [
           key,
-          value && (!deletion(key) || admins.includes(role.name)),
+          value && (!adminOnly(key) || admins.includes(role.name)),
         ],
       ),
     );
@@ -168,7 +174,7 @@ export function rolePermissions(config, store) {
           role.id && (role.name !== "Founder" || isFounder(current)),
         ),
         locked: [
-          ...(!admins.includes(role.name) ? keys.filter(deletion) : []),
+          ...(!admins.includes(role.name) ? keys.filter(adminOnly) : []),
           ...(!isFounder(current)
             ? keys.filter((key) => key.startsWith("tickets.category.billing."))
             : []),
@@ -230,6 +236,11 @@ export function rolePermissions(config, store) {
         keys.some((key) => deletion(key) && entry.permissions[key])
       )
         throw new AuthError("ticket_deletion_protected", 400);
+      if (
+        !admins.includes(role.name) &&
+        keys.some((key) => takeover(key) && entry.permissions[key])
+      )
+        throw new AuthError("ticket_takeover_protected", 400);
       if (
         keys.some(
           (key) =>

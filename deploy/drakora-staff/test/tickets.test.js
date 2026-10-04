@@ -314,6 +314,127 @@ test("claim is atomic, repeat-safe and cannot be stolen by another staff member"
   assert.equal(service.get(ticket.id).claimedBy.id, helper.id);
 });
 
+test("staff replies mark a ticket as helped without silently assigning it or extending owner retention", (t) => {
+  let at = Date.now();
+  const { service, store } = setup(t, { now: () => at });
+  const ticket = service.create(owner, input());
+  service.reply(owner, ticket.id, message("More details from the player"));
+  assert.equal(service.get(ticket.id).status, "pending");
+  at += 1000;
+  fails(
+    () => service.reply(helper, ticket.id, message(""), true),
+    "invalid_message",
+  );
+  assert.equal(service.get(ticket.id).status, "pending");
+  const reply = message("I am checking the quest now.");
+  service.reply(helper, ticket.id, reply, true);
+  const current = service.view(owner, ticket.id);
+  assert.equal(current.status, "claimed");
+  assert.equal(current.claimedBy, null);
+  assert.equal(current.helpedBy.id, helper.id);
+  assert.equal(service.get(ticket.id).lastActiveAt, at - 1000);
+  assert.ok(store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`));
+  service.reply(helper, ticket.id, reply, true);
+  assert.equal(service.get(ticket.id).revision, current.revision);
+  service.claim(otherStaff, ticket.id);
+  service.reply(helper, ticket.id, message("I found more information."), true);
+  assert.equal(service.get(ticket.id).claimedBy.id, otherStaff.id);
+});
+
+test("Discord staff replies update helped status once and never reopen closed tickets", (t) => {
+  const { service } = setup(t);
+  const ticket = service.create(owner, input());
+  const incoming = {
+    id: "discord-first-reply",
+    actor: helper,
+    staff: true,
+    at: Date.now(),
+    content: "Checking this from Discord.",
+  };
+  service.ingest(ticket.id, incoming);
+  const revision = service.get(ticket.id).revision;
+  service.ingest(ticket.id, incoming);
+  assert.equal(service.get(ticket.id).revision, revision);
+  assert.equal(service.get(ticket.id).status, "claimed");
+  assert.equal(service.get(ticket.id).helpedBy.id, helper.id);
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "Checked the quest and repaired its progress.",
+      commands: "None",
+    },
+    true,
+  );
+  service.ingest(
+    ticket.id,
+    { ...incoming, id: "discord-recovered", at: Date.now() - 1000 },
+    true,
+  );
+  assert.equal(service.get(ticket.id).status, "closed");
+  assert.equal(service.get(ticket.id).ratingStaff.id, helper.id);
+});
+
+test("Admin takeover is audited, category restricted, and rejects stale assignments", (t) => {
+  const { service, policy } = setup(t);
+  const admin = { id: "203", name: "Admin", roles: ["10", "21"] };
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  fails(
+    () => service.takeover(otherStaff, ticket.id, helper.id),
+    "ticket_access_denied",
+  );
+  assert.equal(service.view(admin, ticket.id, true).actions.takeover, true);
+  service.takeover(admin, ticket.id, helper.id);
+  const revision = service.get(ticket.id).revision;
+  service.takeover(admin, ticket.id, helper.id);
+  assert.equal(service.get(ticket.id).revision, revision);
+  assert.equal(service.get(ticket.id).claimedBy.id, admin.id);
+  assert.equal(service.view(admin, ticket.id, true).actions.takeover, false);
+  const entry = service.view(owner, ticket.id).history.at(-1);
+  assert.equal(entry.action, "taken_over");
+  assert.equal(entry.actor.id, admin.id);
+  assert.match(entry.detail, /Admin took over the ticket from Helper/);
+  fails(
+    () => service.takeover(manager, ticket.id, helper.id),
+    "ticket_assignment_changed",
+  );
+  service.takeover(manager, ticket.id, admin.id);
+  const billing = service.create(
+    { ...owner, id: "101" },
+    input({ type: "billing" }),
+  );
+  fails(
+    () => service.takeover(admin, billing.id, manager.id),
+    "ticket_access_denied",
+  );
+  const edit = policy.read(manager);
+  const roles = edit.roles
+    .filter((role) => role.id)
+    .map(({ id, permissions }) => ({
+      id,
+      permissions: { ...permissions },
+    }));
+  roles.find((role) => role.id === "21").permissions[
+    "tickets.category.support.takeover"
+  ] = false;
+  policy.save(manager, { revision: edit.revision, roles });
+  fails(
+    () => service.takeover(admin, ticket.id, manager.id),
+    "ticket_access_denied",
+  );
+  service.closeTicket(
+    manager,
+    ticket.id,
+    {
+      summary: "Checked and resolved the quest progression.",
+      commands: "None",
+    },
+    true,
+  );
+  fails(() => service.takeover(manager, ticket.id, admin.id), "ticket_closed");
+});
+
 test("message retry is idempotent and attachment references cannot cross owners or tickets", (t) => {
   const { service } = setup(t);
   const first = service.create(owner, input()),

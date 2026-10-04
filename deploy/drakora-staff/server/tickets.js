@@ -63,7 +63,8 @@ export function ticketService(
   function staff(user, ticket, capability = "tickets.view") {
     const current = rolePolicy.apply(user);
     if (
-      (capability === "tickets.delete" && !rolePolicy.isAdmin(current)) ||
+      (["tickets.delete", "tickets.takeover"].includes(capability) &&
+        !rolePolicy.isAdmin(current)) ||
       !current.capabilities[capability] ||
       (ticket &&
         !current.capabilities[
@@ -124,7 +125,9 @@ export function ticketService(
       ticket.type !== "partnership" &&
       ticket.owner.guest &&
       !internal &&
-      (["opened", "claimed", "closed", "reopened"].includes(action) ||
+      (["opened", "claimed", "taken_over", "closed", "reopened"].includes(
+        action,
+      ) ||
         (action === "message" && user.id !== ticket.owner.id))
     )
       put("ticket-email-outbox", `${ticket.id}:${ticket.revision}`, {
@@ -178,11 +181,12 @@ export function ticketService(
       origin: ticket.origin,
       status: ticket.status,
       claimedBy: ticket.claimedBy,
+      helpedBy: ticket.helpedBy || null,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       revision: ticket.revision,
       rating: ticket.rating,
-      ratingStaff: ticket.ratingStaff || ticket.claimedBy,
+      ratingStaff: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
       closureId: ticket.closureId || null,
       channelRetained: Boolean(ticket.channelId),
       deletionPending: store
@@ -225,13 +229,21 @@ export function ticketService(
       safe.partnership = ticket.partnership || null;
       const current = rolePolicy.apply(user);
       safe.actions = Object.fromEntries(
-        ["view", "reply", "claim", "close", "delete"].map((action) => [
-          action,
-          Boolean(
-            current.capabilities[`tickets.${action}`] &&
-            current.capabilities[ticketCapability(ticket, action)],
-          ),
-        ]),
+        ["view", "reply", "claim", "takeover", "close", "delete"].map(
+          (action) => [
+            action,
+            Boolean(
+              current.capabilities[`tickets.${action}`] &&
+              current.capabilities[ticketCapability(ticket, action)] &&
+              (!["delete", "takeover"].includes(action) ||
+                rolePolicy.isAdmin(current)) &&
+              (action !== "takeover" ||
+                (["pending", "claimed"].includes(ticket.status) &&
+                  ticket.claimedBy &&
+                  ticket.claimedBy.id !== user.id)),
+            ),
+          ],
+        ),
       );
       safe.resolution = ticket.resolution
         ? {
@@ -575,6 +587,12 @@ export function ticketService(
       return id;
     });
   }
+  function markHelped(ticket, user) {
+    if (ticket.status !== "pending") return;
+    ticket.status = "claimed";
+    ticket.helpedBy = publicActor(user);
+    if (ticket.type !== "partnership") queue(ticket, "status");
+  }
   function reply(user, id, input, staffView = false) {
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.reply");
@@ -618,6 +636,7 @@ export function ticketService(
         message,
       );
       queue(ticket, "message", String(message.sequence).padStart(12, "0"));
+      if (staffView) markHelped(ticket, user);
       audit(ticket, user, "message", "Message sent");
     });
     announce(ticket);
@@ -626,13 +645,37 @@ export function ticketService(
   function claim(user, id) {
     const ticket = get(id);
     staff(user, ticket, "tickets.claim");
+    if (!["pending", "claimed"].includes(ticket.status))
+      throw new AuthError("ticket_closed", 409);
     if (ticket.claimedBy?.id === user.id) return ticket;
-    if (ticket.status !== "pending" || ticket.claimedBy)
-      throw new AuthError("ticket_already_claimed", 409);
+    if (ticket.claimedBy) throw new AuthError("ticket_already_claimed", 409);
     store.transaction(() => {
       ticket.claimedBy = publicActor(user);
       ticket.status = "claimed";
       audit(ticket, user, "claimed", `${user.name} claimed the ticket`);
+      queue(ticket, "status");
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function takeover(user, id, previousStaffId) {
+    const ticket = get(id);
+    staff(user, ticket, "tickets.takeover");
+    if (!["pending", "claimed"].includes(ticket.status))
+      throw new AuthError("ticket_closed", 409);
+    if (ticket.claimedBy?.id === user.id) return ticket;
+    if (!ticket.claimedBy || ticket.claimedBy.id !== previousStaffId)
+      throw new AuthError("ticket_assignment_changed", 409);
+    store.transaction(() => {
+      const previous = ticket.claimedBy;
+      ticket.claimedBy = publicActor(user);
+      ticket.status = "claimed";
+      audit(
+        ticket,
+        user,
+        "taken_over",
+        `${user.name} took over the ticket from ${previous.name}`,
+      );
       queue(ticket, "status");
     });
     announce(ticket);
@@ -654,7 +697,7 @@ export function ticketService(
     store.transaction(() => {
       if (["pending", "claimed"].includes(ticket.status)) {
         ticket.closureId = randomUUID();
-        ticket.ratingStaff = ticket.claimedBy;
+        ticket.ratingStaff = ticket.claimedBy || ticket.helpedBy;
         if (!ticket.owner.guest && ticket.type !== "partnership")
           queue(ticket, "feedback", ticket.closureId);
       }
@@ -738,13 +781,14 @@ export function ticketService(
         ticket.closureId || String(ticket.closedAt),
         {
           at: ticket.closedAt,
-          claimedBy: ticket.ratingStaff || ticket.claimedBy,
+          claimedBy: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
           rating: ticket.rating,
           resolution: ticket.resolution,
         },
       );
       ticket.status = "pending";
       ticket.claimedBy = null;
+      ticket.helpedBy = null;
       ticket.resolution = null;
       ticket.rating = null;
       ticket.ratingStaff = null;
@@ -1040,6 +1084,7 @@ export function ticketService(
       put(`ticket-messages:${id}`, key, message);
       put("ticket-discord-message", incoming.id, { ticketId: id, key });
       ticket.lastDiscordId = incoming.id;
+      if (message.staff) markHelped(ticket, incoming.actor);
       audit(
         ticket,
         incoming.actor,
@@ -1281,6 +1326,7 @@ export function ticketService(
     visible,
     reply,
     claim,
+    takeover,
     closeTicket,
     reopen,
     deleteChannel,
@@ -1311,6 +1357,14 @@ export function ticketService(
     authorize,
     attach(value) {
       transport = value;
+      for (const [, ticket] of store.entries("ticket"))
+        if (
+          ticket.channelId &&
+          !ticket.erasingAt &&
+          ["pending", "claimed"].includes(ticket.status) &&
+          !store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`)
+        )
+          queue(ticket, "status");
     },
     all() {
       return store

@@ -411,6 +411,20 @@ export function ticketRouter(
     );
   if (staffView)
     router.post(
+      `${prefix}/:id/takeover`,
+      express.json({ limit: "2kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        service.takeover(
+          await identity(req),
+          req.params.id,
+          req.body?.claimedBy,
+        );
+        res.json({ ok: true });
+      },
+    );
+  if (staffView)
+    router.post(
       `${prefix}/:id/delete-channel`,
       express.json({ limit: "2kb" }),
       async (req, res) => {

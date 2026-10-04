@@ -1177,6 +1177,67 @@ async function supportTicket(service, user, transport) {
   return ticket;
 }
 
+test("native staff replies refresh the Discord overview and only Admin or higher can take over", async (t) => {
+  const { service, transport, channels, user, client, staffMembers } =
+    setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  const target = channels.get(service.get(ticket.id).channelId);
+  const helper = staffMembers.get("201"),
+    manager = staffMembers.get("200");
+  const updated = new Promise((resolve) =>
+    service.events.once("changed", resolve),
+  );
+  const reply = {
+    id: "20000",
+    channelId: target.id,
+    guildId: "2",
+    author: helper.user,
+    member: helper,
+    createdTimestamp: Date.now(),
+    content: "I am investigating the quest now.",
+    attachments: new Collection(),
+  };
+  target.savedMessages.set(reply.id, reply);
+  client.emit("messageCreate", reply);
+  await updated;
+  await service.pump();
+  const intro = await target.messages.fetch(
+    service.store.get("ticket-discord", ticket.id).introId,
+  );
+  assert.equal(
+    intro.embeds[0].fields.find((field) => field.name === "Status").value,
+    "Being helped",
+  );
+  assert.equal(
+    intro.embeds[0].fields.find((field) => field.name === "Helping you").value,
+    "Helper",
+  );
+  assert.equal(service.get(ticket.id).claimedBy, null);
+  const claimed = await click(client, helper.user, `ticket:claim:${ticket.id}`);
+  assert.equal(claimed.flags, 64);
+  await service.pump();
+  const control = intro.data.components[0].components.find(
+    (button) => button.label === "Take over (Admin+)",
+  );
+  assert.equal(control.custom_id, `ticket:takeover:${ticket.id}:201`);
+  const denied = await click(client, { ...user, id: "100" }, control.custom_id);
+  assert.match(denied.data, /permission/);
+  const taken = await click(client, manager.user, control.custom_id);
+  assert.equal(taken.flags, 64);
+  await service.pump();
+  assert.equal(service.get(ticket.id).claimedBy.id, "200");
+  assert.equal(
+    intro.embeds[0].fields.find((field) => field.name === "Helping you").value,
+    "Manager",
+  );
+  const ordinaryClaim = await click(
+    client,
+    helper.user,
+    `ticket:claim:${ticket.id}`,
+  );
+  assert.match(ordinaryClaim.data, /already claimed/);
+});
+
 test("reopened Discord tickets preserve old messages through reconciliation and private closure cycles", async (t) => {
   const context = setupDiscord(t);
   const { service, transport, channels, user, client, dms } = context;

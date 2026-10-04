@@ -23,6 +23,8 @@ const errors = {
   ticket_access_denied: "Your staff permissions do not allow this action.",
   ticket_already_claimed:
     "Another staff member has already claimed this ticket.",
+  ticket_assignment_changed:
+    "This ticket's assignment changed. Reload it before taking over.",
   ticket_limit:
     "You have three open tickets. Continue in an existing ticket below.",
   ticket_ip_limit:
@@ -557,7 +559,8 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
               )}
             {staffView &&
               ticket.actions?.claim &&
-              ticket.status === "pending" && (
+              active &&
+              !ticket.claimedBy && (
                 <button
                   className="ticket-primary"
                   disabled={busy}
@@ -566,6 +569,17 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
                   Claim ticket
                 </button>
               )}
+            {staffView && ticket.actions?.takeover && (
+              <button
+                className="ticket-primary"
+                disabled={busy}
+                onClick={() =>
+                  action("takeover", { claimedBy: ticket.claimedBy.id })
+                }
+              >
+                Take over ticket
+              </button>
+            )}
             {staffView &&
               ticket.actions?.close &&
               ticket.status !== "closed" && (
@@ -873,6 +887,12 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
           <dd>{ticket.origin === "discord" ? "Discord" : "Website"}</dd>
           <dt>Assigned staff</dt>
           <dd>{ticket.claimedBy?.name || "Unclaimed"}</dd>
+          {ticket.helpedBy && (
+            <>
+              <dt>First staff reply</dt>
+              <dd>{ticket.helpedBy.name}</dd>
+            </>
+          )}
         </dl>
         {staffView && (
           <>
@@ -1032,7 +1052,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
           <h2>{logs ? "Community logs" : "Tickets"}</h2>
           <p>
             {logs
-              ? "Ticket text, staff resolution records and history are kept permanently. Attachments expire after 30 days."
+              ? "Ticket text, staff resolution records and history follow the twelve month inactivity rule. Attachments expire after 30 days."
               : "Claim a ticket, help the player, and record the resolution."}
           </p>
         </div>
@@ -1198,7 +1218,12 @@ export function Tickets({ csrf, capabilities, logs = false }) {
               <span className={`ticket-state ${ticket.status}`}>
                 {ticketStatuses[ticket.status]}
               </span>
-              <span>{ticket.claimedBy?.name || "Unclaimed"}</span>
+              <span>
+                {ticket.claimedBy?.name ||
+                  (ticket.helpedBy
+                    ? `Replied by ${ticket.helpedBy.name}`
+                    : "Unclaimed")}
+              </span>
             </a>
           ))}
         {ready && !data.items.length && (

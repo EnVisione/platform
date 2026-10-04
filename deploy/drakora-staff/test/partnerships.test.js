@@ -225,6 +225,8 @@ test("staff email replies and verified incoming email stay in one request with d
   );
   await contact.pump();
   assert.equal(state.emails.length, 2);
+  assert.equal(tickets.get(ticket.id).status, "claimed");
+  assert.equal(tickets.get(ticket.id).helpedBy.id, manager.id);
   assert.equal(tickets.messages(ticket.id)[0].delivery, "delivered");
   const details = {
     messageId: "<reply@example.invalid>",

@@ -300,6 +300,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             custom_id: `ticket:claim:${ticket.id}`,
             disabled: Boolean(ticket.claimedBy),
           },
+          ...(ticket.claimedBy
+            ? [
+                {
+                  type: 2,
+                  style: 2,
+                  label: "Take over (Admin+)",
+                  custom_id: `ticket:takeover:${ticket.id}:${ticket.claimedBy.id}`,
+                },
+              ]
+            : []),
           {
             type: 2,
             style: 2,
@@ -348,7 +358,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         { name: "Status", value: ticketStatuses[ticket.status], inline: true },
         {
           name: "Helping you",
-          value: ticket.claimedBy?.name || "Waiting for a staff member",
+          value:
+            ticket.claimedBy?.name ||
+            ticket.helpedBy?.name ||
+            "Waiting for a staff member",
           inline: true,
         },
       ],
@@ -1506,7 +1519,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       )
         await interaction.deferReply({ flags: 64 });
       const staffIdentity =
-        !owner || ["close", "delete", "delete-confirm"].includes(action)
+        !owner ||
+        ["close", "takeover", "delete", "delete-confirm"].includes(action)
           ? await staffUser(interaction.user.id)
           : null;
       const user = staffIdentity || actor(interaction.user, interaction.member);
@@ -1620,6 +1634,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
       if (!interaction.deferred) await interaction.deferReply({ flags: 64 });
       if (action === "claim") service.claim(user, id);
+      else if (action === "takeover") service.takeover(user, id, closureId);
       else if (action === "close") service.closeTicket(user, id, {}, false);
       else if (action === "resolve")
         service.closeTicket(
@@ -1685,6 +1700,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         {
           ticket_already_claimed:
             "Another staff member already claimed this ticket.",
+          ticket_assignment_changed:
+            "This ticket's assignment changed. Use its current Take over button.",
+          ticket_closed:
+            "This ticket is closed. Reopen it before claiming or taking it over.",
           ticket_access_denied: "You do not have permission to do that.",
           ticket_limit:
             "You already have three open tickets. Continue in an existing ticket.",

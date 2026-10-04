@@ -22,7 +22,8 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     service = ticketService(config, store, policy);
   const player = { id: "100", name: "Player" },
     helper = policy.apply({ id: "200", name: "Helper", roles: ["10", "23"] });
-  let signedIn = true,
+  let staffIdentity = helper,
+    signedIn = true,
     uploads = 0;
   const transport = {
     async assertMember() {},
@@ -77,7 +78,7 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
       staffView: true,
       database: store,
       dist: "/does-not-exist",
-      authorize: async () => helper,
+      authorize: async () => staffIdentity,
       mutation: (req) => {
         if (
           req.headers.origin !== config.staffOrigin ||
@@ -141,6 +142,68 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     requestId: randomUUID(),
   });
   assert.equal(response.status, 201);
+  const staffHeaders = { Origin: config.staffOrigin };
+  response = await call(
+    `/api/tickets/${id}/messages`,
+    {
+      content: "I am checking the issue now.",
+      requestId: randomUUID(),
+    },
+    staffHeaders,
+  );
+  assert.equal(response.status, 201);
+  assert.equal(service.get(id).status, "claimed");
+  assert.equal(
+    (await call(`/api/tickets/${id}/claim`, {}, staffHeaders)).status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/takeover`,
+        { claimedBy: helper.id },
+        staffHeaders,
+      )
+    ).status,
+    403,
+  );
+  staffIdentity = policy.apply({
+    id: "201",
+    name: "Admin",
+    roles: ["10", "21"],
+  });
+  assert.equal(
+    (await call(`/api/tickets/${id}/takeover`, { claimedBy: helper.id }))
+      .status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/takeover`,
+        { claimedBy: "stale-assignee" },
+        staffHeaders,
+      )
+    ).status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/takeover`,
+        { claimedBy: helper.id },
+        staffHeaders,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(service.get(id).claimedBy.id, "201");
+  assert.equal(
+    (await call(`/help/api/tickets/${id}/takeover`, { claimedBy: "201" }))
+      .status,
+    404,
+  );
+  staffIdentity = helper;
   const attachment = (
     bytes,
     name,

@@ -28,6 +28,13 @@ export const staffPermissions = [
     ["tickets.view"],
   ],
   [
+    "tickets.takeover",
+    "Tickets",
+    "Take over tickets",
+    "Admin or higher can take responsibility for a ticket assigned to another staff member.",
+    ["tickets.claim"],
+  ],
+  [
     "tickets.close",
     "Tickets",
     "Resolve tickets",
@@ -216,22 +223,30 @@ export const inboxPermission = (address, action = "view") =>
 export function staffPermissionCatalog(identities = []) {
   const categoryPermissions = ticketCategories.flatMap(
     ({ id: category, name }) =>
-      ["view", "reply", "claim", "close", "delete"].map((action) => ({
-        key: `tickets.category.${category}.${action}`,
-        group: `${name} tickets`,
-        label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve", delete: "Delete channels for" }[action]} ${name.toLowerCase()} tickets`,
-        description:
-          category === "billing"
-            ? "Billing access defaults to Founders. Only a Founder can change these grants."
-            : "Applies to the queue, messages, files, history and transcripts in this category.",
-        requires: [
-          "dashboard.view",
-          "tickets.view",
-          ...(action === "view"
-            ? []
-            : [`tickets.${action}`, `tickets.category.${category}.view`]),
-        ],
-      })),
+      ["view", "reply", "claim", "takeover", "close", "delete"].map(
+        (action) => ({
+          key: `tickets.category.${category}.${action}`,
+          group: `${name} tickets`,
+          label: `${{ view: "View", reply: "Reply to", claim: "Claim", takeover: "Take over", close: "Resolve", delete: "Delete channels for" }[action]} ${name.toLowerCase()} tickets`,
+          description:
+            category === "billing"
+              ? "Billing access defaults to Founders. Only a Founder can change these grants."
+              : "Applies to the queue, messages, files, history and transcripts in this category.",
+          requires: [
+            "dashboard.view",
+            "tickets.view",
+            ...(action === "view"
+              ? []
+              : [
+                  `tickets.${action}`,
+                  `tickets.category.${category}.view`,
+                  ...(action === "takeover"
+                    ? [`tickets.category.${category}.claim`]
+                    : []),
+                ]),
+          ],
+        }),
+      ),
   );
   const inboxPermissions = identities.flatMap(({ address }) =>
     ["view", "send", "reply"].map((action) => ({

@@ -95,7 +95,7 @@ test("notices wait for Discord links, persist through restart and remind once at
   assert.equal(app.store.entries("ticket-notice-outbox").length, 0);
 });
 
-test("claims and player closures cancel reminders, including while retrying", async (t) => {
+test("claims, staff replies and player closures cancel reminders, including while retrying", async (t) => {
   const app = setup(t),
     notices = app.worker();
   app.service.attach(app.transport);
@@ -110,13 +110,25 @@ test("claims and player closures cancel reminders, including while retrying", as
   await app.service.pump();
   await notices.pump();
   app.service.closeTicket(app.owner, closed.id, {});
+  const replied = app.create();
+  await app.service.pump();
+  await notices.pump();
+  app.service.reply(
+    { id: "200", name: "Helper", roles: ["10", "23"] },
+    replied.id,
+    {
+      requestId: randomUUID(),
+      content: "I am looking into this now.",
+    },
+    true,
+  );
   app.advance(3600000);
   await notices.pump();
   assert.equal(
     app.sent.filter((value) => value.event === "unclaimed").length,
     0,
   );
-  for (const ticket of [claimed, closed])
+  for (const ticket of [claimed, replied, closed])
     assert.equal(
       app.store.get("ticket-notice-delivery", `${ticket.id}:unclaimed`).status,
       "cancelled",
