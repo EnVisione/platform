@@ -501,7 +501,7 @@ function PublicSite() {
   }, [title]);
   return (
     <div className="public-site">
-      <AmbientFire ready={Boolean(content)} />
+      <AmbientFire ready={Boolean(content)} intro={home} />
       <a href="#main" className="public-skip">
         Skip to content
       </a>

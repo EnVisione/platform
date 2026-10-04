@@ -94,7 +94,7 @@ export function FireScenery({ image, forest = false }) {
   );
 }
 
-export function AmbientFire({ ready = true }) {
+export function AmbientFire({ ready = true, intro = false }) {
   const canvas = useRef(null);
   const dragon = useRef(null);
   const foreground = useRef(null);
@@ -110,12 +110,13 @@ export function AmbientFire({ ready = true }) {
       undefined,
       foreground.current,
       scenery.current,
+      intro,
     );
     return () => {
       motion.current.destroy();
       motion.current = null;
     };
-  }, [ready]);
+  }, [ready, intro]);
   return (
     <>
       <div className="public-fire" aria-hidden="true">
@@ -127,17 +128,19 @@ export function AmbientFire({ ready = true }) {
         ref={scenery}
         aria-hidden="true"
       />
-      <div className="public-dragon-flight" aria-hidden="true">
-        <canvas
-          className="public-fire-canvas public-fire-foreground"
-          ref={foreground}
-        />
-        <div
-          className="public-fire-dragon"
-          ref={dragon}
-          style={{ backgroundImage: `url(${dragonSprite})` }}
-        />
-      </div>
+      {intro && (
+        <div className="public-dragon-flight" aria-hidden="true">
+          <canvas
+            className="public-fire-canvas public-fire-foreground"
+            ref={foreground}
+          />
+          <div
+            className="public-fire-dragon"
+            ref={dragon}
+            style={{ backgroundImage: `url(${dragonSprite})` }}
+          />
+        </div>
+      )}
       <button
         hidden={!ready}
         type="button"

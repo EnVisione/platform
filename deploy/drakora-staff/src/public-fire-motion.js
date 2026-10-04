@@ -68,6 +68,7 @@ export function attachFireMotion(
   rendererFactory = createFireRenderer,
   foregroundCanvas = null,
   sceneryCanvas = null,
+  playIntro = false,
 ) {
   const document = environment.document;
   const reducedMotion = environment.matchMedia(
@@ -117,8 +118,12 @@ export function attachFireMotion(
   let destroyed = false;
   let contextLost = false;
   let unavailable = false;
-  let intro = !reducedMotion.matches && !mobile.matches;
+  let intro = playIntro && !reducedMotion.matches && !mobile.matches;
   let pointer = { x: -1000, y: -1000, dx: 0, dy: 0 };
+
+  function hideDragon() {
+    if (dragon) dragon.style.opacity = "0";
+  }
 
   function resetPointer() {
     pointer = { x: -1000, y: -1000, dx: 0, dy: 0 };
@@ -150,7 +155,7 @@ export function attachFireMotion(
       unavailable = true;
       stop();
       layer.classList.remove("has-webgl");
-      dragon.style.opacity = "0";
+      hideDragon();
     }
     resetPointer();
   }
@@ -158,11 +163,11 @@ export function attachFireMotion(
   function initialize() {
     if (renderer || contextLost || unavailable) return;
     renderer = rendererFactory(canvas);
-    if (renderer && foregroundCanvas)
+    if (renderer && foregroundCanvas && intro)
       foreground = rendererFactory(foregroundCanvas, { foreground: true });
     if (renderer && sceneryCanvas)
       scenery = rendererFactory(sceneryCanvas, { scenery: true });
-    foregroundDone = false;
+    foregroundDone = !intro;
     unavailable = !renderer;
     layer.classList.toggle("has-webgl", Boolean(renderer));
     resize();
@@ -217,7 +222,7 @@ export function attachFireMotion(
         foregroundDone = time >= 8;
       }
       const sprite = scene.dragon;
-      if (time <= 8 || dragon.style.opacity !== "0") {
+      if (dragon && (time <= 8 || dragon.style.opacity !== "0")) {
         dragon.style.transform = `translate(${sprite.x - sprite.size / 2}px, ${environment.innerHeight - sprite.y - (sprite.size * 128) / 144 / 2}px) rotate(${sprite.roll}deg)`;
         dragon.style.width = `${sprite.size}px`;
         dragon.style.height = `${(sprite.size * 128) / 144}px`;
@@ -249,7 +254,7 @@ export function attachFireMotion(
         layer.classList.remove("has-webgl");
         foregroundCanvas?.style.setProperty("visibility", "hidden");
         sceneryCanvas?.style.setProperty("visibility", "hidden");
-        dragon.style.opacity = "0";
+        hideDragon();
       }
       return;
     }
@@ -293,7 +298,7 @@ export function attachFireMotion(
     foregroundCanvas?.style.setProperty("visibility", "hidden");
     sceneryCanvas?.style.setProperty("visibility", "hidden");
     layer.classList.remove("has-webgl");
-    dragon.style.opacity = "0";
+    hideDragon();
   }
 
   function restored() {
@@ -337,7 +342,7 @@ export function attachFireMotion(
       foreground?.destroy();
       scenery?.destroy();
       renderer = foreground = scenery = null;
-      dragon.style.opacity = "0";
+      hideDragon();
       environment.removeEventListener("pointermove", move);
       environment.removeEventListener("pointerout", leave);
       environment.removeEventListener("blur", resetPointer);

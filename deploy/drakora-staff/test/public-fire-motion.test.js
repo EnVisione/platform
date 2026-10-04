@@ -10,6 +10,7 @@ function fixture({
   mobile = false,
   scenery = false,
   scrollbar = 0,
+  intro = true,
 } = {}) {
   const environment = new EventTarget();
   const document = new EventTarget();
@@ -77,7 +78,7 @@ function fixture({
       },
     },
   };
-  const dragon = { style: {} };
+  const dragon = intro ? { style: {} } : null;
   function rendererFactory(canvas, options = {}) {
     const kind = options.scenery
       ? "scenery"
@@ -123,6 +124,7 @@ function fixture({
     rendererFactory,
     overlay,
     sceneryLayer,
+    intro,
   );
   return {
     environment,
@@ -263,6 +265,35 @@ test("reduced motion and unsupported WebGL avoid a render loop", () => {
   }
 });
 
+test("pages without the Home intro keep scenery lit and never create a dragon renderer", () => {
+  const f = fixture({ intro: false, foreground: true, scenery: true });
+  try {
+    for (const time of [0, 4000, 12000]) {
+      f.tick(time);
+      const scene = f.calls.at(-1).scene;
+      assert.equal(scene.dragon.opacity, 0);
+      assert.equal(scene.breath[2], 0);
+      assert.equal(scene.fires[0].lit, 1);
+    }
+    assert.ok(f.calls.every((call) => call.kind !== "foreground"));
+    assert.deepEqual(f.counts(), { created: 2, disposed: 0 });
+    f.document.hidden = true;
+    f.send(f.document, "visibilitychange");
+    f.document.hidden = false;
+    f.send(f.document, "visibilitychange");
+    f.tick(16000);
+    assert.equal(f.calls.at(-1).scene.dragon.opacity, 0);
+    f.send(f.canvas, "webglcontextlost");
+    f.send(f.canvas, "webglcontextrestored");
+    f.tick(20000);
+    assert.ok(f.calls.every((call) => call.kind !== "foreground"));
+  } finally {
+    f.motion.destroy();
+  }
+  assert.equal(f.frames.size, 0);
+  assert.deepEqual(f.counts(), { created: 4, disposed: 4 });
+});
+
 test("context loss stops rendering and restoration recreates resources without repeating the intro", () => {
   const f = fixture();
   try {
@@ -398,7 +429,7 @@ test("mobile never starts GPU rendering and a viewport change releases desktop r
   } finally {
     desktop.motion.destroy();
   }
-  assert.deepEqual(desktop.counts(), { created: 4, disposed: 4 });
+  assert.deepEqual(desktop.counts(), { created: 3, disposed: 3 });
 });
 
 test("scenery flames keep document positions across scroll and use canvas CSS width", () => {
