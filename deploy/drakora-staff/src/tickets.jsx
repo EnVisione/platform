@@ -41,6 +41,13 @@ const errors = {
   resolution_required: "Explain what was done in at least 20 characters.",
   commands_required: "Record the commands used, or enter None.",
   ticket_already_rated: "You have already rated this ticket.",
+  ticket_close_first: "Close the ticket before deleting its Discord channel.",
+  ticket_reopen_pending:
+    "The transcript is still being saved. Try reopening again shortly.",
+  ticket_feedback_expired:
+    "This ticket changed. Reload it to see current feedback and reopen options.",
+  partnership_limit:
+    "There is already an open partnership request for this contact. Continue in that request.",
   invalid_request:
     "Your session changed. Reload this page before trying again.",
 };
@@ -332,6 +339,7 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
   const [ticket, setTicket] = useState(null),
     [error, setError] = useState(""),
     [closing, setClosing] = useState(false),
+    [deleting, setDeleting] = useState(false),
     [busy, setBusy] = useState(false),
     [older, setOlder] = useState([]),
     [hasEarlier, setHasEarlier] = useState(null);
@@ -418,6 +426,31 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             </small>
           </div>
           <div className="ticket-actions">
+            {!active && (!staffView || ticket.actions?.close) && (
+              <button
+                disabled={busy || ticket.deletionPending}
+                onClick={() =>
+                  action("reopen", { closureId: ticket.closureId })
+                }
+              >
+                Reopen ticket
+              </button>
+            )}
+            {staffView &&
+              !active &&
+              ticket.channelRetained &&
+              ticket.actions?.delete && (
+                <button
+                  disabled={busy || ticket.deletionPending}
+                  onClick={() => setDeleting((value) => !value)}
+                >
+                  {ticket.deletionPending
+                    ? "Deleting channel…"
+                    : deleting
+                      ? "Cancel deletion"
+                      : "Delete Discord channel"}
+                </button>
+              )}
             {staffView &&
               ticket.actions?.claim &&
               ticket.status === "pending" && (
@@ -573,6 +606,25 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             </p>
           )}
         </div>
+        {staffView && deleting && !active && ticket.channelRetained && (
+          <div className="ticket-close-confirm">
+            <p>
+              Delete the closed Discord channel? Its messages and saved
+              transcript remain in the staff dashboard.
+            </p>
+            <button
+              className="ticket-primary"
+              disabled={busy || ticket.deletionPending}
+              onClick={() => {
+                setDeleting(false);
+                void action("delete-channel", { closureId: ticket.closureId });
+              }}
+            >
+              Delete channel
+            </button>
+            <button onClick={() => setDeleting(false)}>Keep channel</button>
+          </div>
+        )}
         {!staffView && closing && active && (
           <div className="ticket-close-confirm">
             <p>Close this ticket? Staff will still document the work done.</p>
@@ -619,20 +671,37 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
             </p>
             {!staffView && !ticket.rating && (
               <div className="ticket-rating">
-                <span>Optional: how helpful was the support?</span>
+                <span>
+                  {ticket.ratingStaff?.name
+                    ? `How did ${ticket.ratingStaff.name} do?`
+                    : "How helpful was the support?"}{" "}
+                  Your 1–5 rating is private to you and authorized staff.
+                </span>
                 {[1, 2, 3, 4, 5].map((value) => (
                   <button
                     key={value}
                     disabled={busy}
                     aria-label={`Rate support ${value} out of 5`}
-                    onClick={() => action("rating", { rating: value })}
+                    onClick={() =>
+                      action("rating", {
+                        rating: value,
+                        closureId: ticket.closureId,
+                      })
+                    }
                   >
                     {value} ★
                   </button>
                 ))}
               </div>
             )}
-            {ticket.rating && <p>Player rating: {ticket.rating}/5</p>}
+            {ticket.rating && (
+              <p>
+                Player rating: {ticket.rating}/5
+                {ticket.ratingStaff?.name
+                  ? ` · ${ticket.ratingStaff.name}`
+                  : ""}
+              </p>
+            )}
             <a
               className="ticket-primary"
               href={`${base}/transcript${staffView ? "?copy=staff" : ""}`}
@@ -703,6 +772,27 @@ function TicketChat({ id, csrf, staffView = false, capabilities = {} }) {
         </dl>
         {staffView && (
           <>
+            {ticket.previousResolutions?.map((closure, index) => (
+              <section key={`${closure.at}:${index}`}>
+                <h3>Previous closure · {stamp(closure.at)}</h3>
+                {closure.rating && (
+                  <p>
+                    Private rating: {closure.rating}/5 ·{" "}
+                    {closure.claimedBy?.name || "Support team"}
+                  </p>
+                )}
+                {closure.resolution && (
+                  <>
+                    <p>{closure.resolution.summary}</p>
+                    <p>Commands: {closure.resolution.commands}</p>
+                    <p>Recorded by {closure.resolution.actor.name}</p>
+                    {closure.resolution.attachments.map((file) => (
+                      <FileView key={file.id} file={file} />
+                    ))}
+                  </>
+                )}
+              </section>
+            ))}
             {capabilities["moderation.view"] && (
               <ModerationHistoryCard
                 key={`moderation:${ticket.id}`}

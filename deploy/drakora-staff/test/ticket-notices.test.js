@@ -226,6 +226,8 @@ test("staff notice configuration is optional and rejects malformed channel ident
   assert.equal(validateConfig(config), config);
   config.tickets.staffChannelId = "1555475842925334578";
   assert.equal(validateConfig(config), config);
+  config.tickets.feedbackChannelId = "1463953464915923232";
+  assert.equal(validateConfig(config), config);
   for (const value of [
     null,
     "",
@@ -235,5 +237,36 @@ test("staff notice configuration is optional and rejects malformed channel ident
   ]) {
     config.tickets.staffChannelId = value;
     assert.throws(() => validateConfig(config), /staff notice channel/);
+    config.tickets.staffChannelId = "1555475842925334578";
+    config.tickets.feedbackChannelId = value;
+    assert.throws(() => validateConfig(config), /feedback channel/);
+    config.tickets.feedbackChannelId = "1463953464915923232";
   }
+});
+
+test("reopened notices start a new reminder timer and cancel older closure cycles", async (t) => {
+  const app = setup(t),
+    notices = app.worker(),
+    ticket = app.create();
+  app.service.attach(app.transport);
+  await app.service.pump();
+  await notices.pump();
+  app.advance(3600000);
+  app.service.closeTicket(app.owner, ticket.id, {});
+  await app.service.pump();
+  await app.service.reopen(app.owner, ticket.id);
+  await notices.pump();
+  assert.deepEqual(
+    app.sent.map((value) => value.event),
+    ["opened", "reopened"],
+  );
+  app.advance(3599999);
+  await notices.pump();
+  assert.equal(app.sent.length, 2);
+  app.advance(1);
+  await notices.pump();
+  assert.deepEqual(
+    app.sent.map((value) => value.event),
+    ["opened", "reopened", "unclaimed"],
+  );
 });

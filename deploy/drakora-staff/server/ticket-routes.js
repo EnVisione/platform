@@ -402,6 +402,34 @@ export function ticketRouter(
         res.json({ ok: true });
       },
     );
+  if (staffView)
+    router.post(
+      `${prefix}/:id/delete-channel`,
+      express.json({ limit: "2kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        await service.deleteChannel(
+          await identity(req),
+          req.params.id,
+          req.body.closureId,
+        );
+        res.json({ ok: true });
+      },
+    );
+  router.post(
+    `${prefix}/:id/reopen`,
+    express.json({ limit: "2kb" }),
+    async (req, res) => {
+      checkMutation(req);
+      await service.reopen(
+        await identity(req),
+        req.params.id,
+        staffView,
+        req.body.closureId,
+      );
+      res.json({ ok: true });
+    },
+  );
   router.post(
     `${prefix}/:id/close`,
     express.json({ limit: "16kb" }),
@@ -422,7 +450,12 @@ export function ticketRouter(
       express.json({ limit: "2kb" }),
       async (req, res) => {
         checkMutation(req);
-        service.rate(await identity(req), req.params.id, req.body.rating);
+        service.rate(
+          await identity(req),
+          req.params.id,
+          req.body.rating,
+          req.body.closureId,
+        );
         res.json({ ok: true });
       },
     );
@@ -512,7 +545,9 @@ export function ticketRouter(
         req.params.id,
         staffCopy,
         transport.bytes,
-        { authorizeAsStaff: staffView },
+        {
+          authorizeAsStaff: staffView,
+        },
       );
       res
         .set({

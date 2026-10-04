@@ -35,6 +35,13 @@ export const staffPermissions = [
     ["tickets.view"],
   ],
   [
+    "tickets.delete",
+    "Tickets",
+    "Delete closed Discord channels",
+    "Admin or higher can remove a closed channel after its transcript is saved. Dashboard history is kept.",
+    ["tickets.view"],
+  ],
+  [
     "logs.view",
     "Logs",
     "View ticket logs",
@@ -209,10 +216,10 @@ export const inboxPermission = (address, action = "view") =>
 export function staffPermissionCatalog(identities = []) {
   const categoryPermissions = ticketCategories.flatMap(
     ({ id: category, name }) =>
-      ["view", "reply", "claim", "close"].map((action) => ({
+      ["view", "reply", "claim", "close", "delete"].map((action) => ({
         key: `tickets.category.${category}.${action}`,
         group: `${name} tickets`,
-        label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve" }[action]} ${name.toLowerCase()} tickets`,
+        label: `${{ view: "View", reply: "Reply to", claim: "Claim", close: "Resolve", delete: "Delete channels for" }[action]} ${name.toLowerCase()} tickets`,
         description:
           category === "billing"
             ? "Billing access defaults to Founders. Only a Founder can change these grants."

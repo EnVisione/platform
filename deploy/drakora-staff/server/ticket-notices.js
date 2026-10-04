@@ -33,6 +33,7 @@ export function ticketNotices(
           if (stopped || processed >= 20) break;
           const ticket = service.get(job.ticketId);
           if (
+            (job.cycle || 0) !== (ticket.reopenedCount || 0) ||
             ["closed", "awaiting_resolution"].includes(ticket.status) ||
             (job.event === "unclaimed" &&
               (ticket.status !== "pending" || ticket.claimedBy))
@@ -50,8 +51,10 @@ export function ticketNotices(
             continue;
           if (
             job.event === "unclaimed" &&
-            store.get("ticket-notice-delivery", `${ticket.id}:opened`)
-              ?.status !== "sent"
+            store.get(
+              "ticket-notice-delivery",
+              job.openedKey || `${ticket.id}:opened`,
+            )?.status !== "sent"
           )
             continue;
           processed++;

@@ -28,9 +28,23 @@ function setupDiscord(t, notices = false) {
   client.user = { id: "bot" };
   client.isReady = () => true;
   const dms = [];
+  let dmChannel;
   client.users = {
     async fetch() {
       return {
+        async createDM() {
+          if (!dmChannel) {
+            dmChannel = createChannel({ type: ChannelType.DM });
+            channels.delete(dmChannel.id);
+            const send = dmChannel.send;
+            dmChannel.send = async (data) => {
+              const result = await send(data);
+              dms.push(data);
+              return result;
+            };
+          }
+          return dmChannel;
+        },
         async send(data) {
           dms.push(data);
         },
@@ -114,6 +128,9 @@ function setupDiscord(t, notices = false) {
           guildId: "2",
           author: { id: "bot", bot: true },
           embeds: data.embeds || [],
+          content: data.content || "",
+          components: data.components || [],
+          nonce: data.nonce,
           data,
           attachments: new Collection(),
           async edit(data) {
@@ -265,6 +282,10 @@ function setupDiscord(t, notices = false) {
     staffChannel,
     user,
     dms,
+    createChannel,
+    get dmChannel() {
+      return dmChannel;
+    },
     get sends() {
       return sends;
     },
@@ -424,7 +445,10 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   const outgoing = service.reply(
     { id: user.id, name: "Player", avatar: user.displayAvatarURL() },
     ticket.id,
-    { requestId: randomUUID(), content: "Hello from the web" },
+    {
+      requestId: randomUUID(),
+      content: "Hello from the web",
+    },
   );
   await service.pump();
   assert.equal(context.sends, 1);
@@ -453,9 +477,8 @@ test("Discord transport creates private tickets, preserves webhook identity and 
     true,
   );
   await service.pump();
-  assert.equal(channels.has(target.id), false);
-  assert.equal(service.get(ticket.id).channelId, null);
-  assert.equal(service.view(user, ticket.id).sync, "saved");
+  assert.equal(channels.has(target.id), true);
+  assert.equal(service.get(ticket.id).channelId, target.id);
   assert.equal(context.dms.length, 1);
   assert.equal(service.messages(ticket.id)[0].content, "Hello from the web");
   assert.ok(
@@ -609,7 +632,10 @@ test("historical report files in shared support storage require both category gr
     Buffer.from("proof"),
     "proof.txt",
     "text/plain",
-    { ...report, type: "general" },
+    {
+      ...report,
+      type: "general",
+    },
   );
   service.store.set(
     "ticket-media",
@@ -848,7 +874,7 @@ test("ticket visibility follows screened staff membership and Dashboard access i
   assert.ok(!target.overwrites.some((value) => value.id === "201"));
 });
 
-test("closure saves paginated missed history and preserves Discord files before channel deletion", async (t) => {
+test("closure removes owner access and preserves paginated history before Admin channel deletion", async (t) => {
   const { service, transport, channels, user, dms } = setupDiscord(t);
   const ticket = service.create(
     { id: user.id, name: "Player" },
@@ -903,7 +929,7 @@ test("closure saves paginated missed history and preserves Discord files before 
     false,
   );
   await service.pump();
-  assert.equal(channels.has(target.id), false);
+  assert.equal(channels.has(target.id), true);
   assert.equal(service.messages(ticket.id).length, 600);
   const [, file] = service.store.entries("ticket-media")[0];
   assert.notEqual(file.channelId, target.id);
@@ -912,10 +938,31 @@ test("closure saves paginated missed history and preserves Discord files before 
   assert.equal((await transport.bytes(file)).toString(), "picture");
   assert.equal(
     dms[0].components[0].components[0].custom_id,
-    `ticket:rate:${ticket.id}`,
+    `ticket:rate:${ticket.id}:${service.get(ticket.id).closureId}`,
   );
   service.rate({ id: user.id, name: "Player" }, ticket.id, 4);
   assert.equal(service.get(ticket.id).rating, 4);
+  const ownerPermissions = target.overwrites.find(
+    (entry) => entry.id === user.id,
+  );
+  assert.ok(ownerPermissions.deny.includes(P.ViewChannel));
+  assert.ok(!ownerPermissions.allow.includes(P.ViewChannel));
+  await assert.rejects(
+    service.deleteChannel({ id: "200", roles: ["10", "23"] }, ticket.id),
+    { code: "ticket_access_denied" },
+  );
+  const admin = { id: "admin", name: "Admin", roles: ["10", "21"] };
+  await service.deleteChannel(admin, ticket.id);
+  await service.pump();
+  await service.pump();
+  assert.equal(channels.has(target.id), false);
+  assert.equal(service.messages(ticket.id).length, 600);
+  assert.equal(
+    (
+      await transport.bytes(service.store.get("ticket-media", file.id))
+    ).toString(),
+    "picture",
+  );
 });
 
 test("closure leaves the channel intact if history permissions or ownership are unavailable", async (t) => {
@@ -967,6 +1014,11 @@ test("a lost channel deletion response resumes from the saved transcript checkpo
     throw new Error("Deletion response lost");
   };
   service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
+  await service.pump();
+  await service.deleteChannel(
+    { id: "admin", name: "Admin", roles: ["10", "21"] },
+    ticket.id,
+  );
   await service.pump();
   assert.equal(
     service.store.get("ticket-discord-close", ticket.id).ready,
@@ -1048,7 +1100,230 @@ test("attachment copy failure keeps the original channel and resumes without ext
       Number.MAX_SAFE_INTEGER,
     );
   await service.pump();
-  assert.equal(channels.has(target.id), false);
+  assert.equal(channels.has(target.id), true);
   assert.equal(service.store.get("ticket-media", id).expiresAt, file.expiresAt);
   assert.equal(service.messages(ticket.id).length, 1);
+});
+
+function click(client, user, customId, values = [], guildId = "2") {
+  return new Promise((resolve) =>
+    client.emit("interactionCreate", {
+      guildId,
+      user,
+      customId,
+      values,
+      isChatInputCommand: () => false,
+      async deferReply(data) {
+        this.deferred = true;
+        this.flags = data.flags;
+      },
+      async reply(data) {
+        this.replied = true;
+        resolve({ data, flags: data.flags });
+      },
+      async editReply(data) {
+        resolve({ data, flags: this.flags });
+      },
+    }),
+  );
+}
+async function supportTicket(service, user, transport) {
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    ign: "Jojo",
+    type: "general",
+    location: "Void",
+    description:
+      "A detailed issue to verify private feedback and ticket reopening.",
+  });
+  await transport.create(ticket);
+  await service.pump();
+  return ticket;
+}
+
+test("reopened Discord tickets preserve old messages through reconciliation and private closure cycles", async (t) => {
+  const context = setupDiscord(t);
+  const { service, transport, channels, user, client, dms } = context;
+  const ticket = await supportTicket(service, user, context.transport);
+  await service.pump();
+  const original = channels.get(service.get(ticket.id).channelId);
+  original.savedMessages.set("20000", {
+    id: "20000",
+    channelId: original.id,
+    guildId: "2",
+    author: user,
+    content: "Original Discord history",
+    createdTimestamp: Date.now() - 10000,
+    attachments: new Collection(),
+  });
+  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  assert.equal(dms.length, 1);
+  assert.match(dms[0].content, /How did Helper do/);
+  const oldCycle = service.get(ticket.id).closureId;
+  let result = await click(client, user, "ticket:mine");
+  assert.equal(result.flags, 64);
+  result = await click(client, user, "ticket:mine-choice", [ticket.id]);
+  assert.equal(result.flags, 64);
+  assert.match(result.data.content, /How did Helper do/);
+  result = await click(
+    client,
+    { ...user, id: "999" },
+    `ticket:rating:${ticket.id}:${oldCycle}`,
+    ["5"],
+  );
+  assert.equal(result.flags, 64);
+  assert.equal(service.get(ticket.id).rating, null);
+  result = await click(client, user, `ticket:rating:${ticket.id}:${oldCycle}`, [
+    "4",
+  ]);
+  assert.match(result.data, /private rating has been saved/);
+  result = await click(client, user, `ticket:reopen:${ticket.id}:${oldCycle}`);
+  assert.match(result.data, /Ticket reopened/);
+  await service.pump();
+  const current = service.get(ticket.id);
+  assert.equal(current.channelId, original.id);
+  assert.ok(
+    original.overwrites
+      .find((entry) => entry.id === user.id)
+      .allow.includes(P.ViewChannel),
+  );
+  await transport.recover();
+  assert.equal(
+    service.messages(ticket.id)[0].content,
+    "Original Discord history",
+  );
+  assert.equal(service.messages(ticket.id)[0].deleted, false);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  assert.equal(dms.length, 2);
+  result = await click(client, user, `ticket:rating:${ticket.id}:${oldCycle}`, [
+    "1",
+  ]);
+  assert.match(result.data, /earlier closure/);
+  assert.equal(service.get(ticket.id).rating, null);
+  await service.deleteChannel({ id: "admin", roles: ["10", "21"] }, ticket.id);
+  await service.pump();
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  assert.notEqual(service.get(ticket.id).channelId, original.id);
+  await transport.recover();
+  assert.equal(
+    service.messages(ticket.id)[0].content,
+    "Original Discord history",
+  );
+  assert.equal(service.messages(ticket.id)[0].deleted, false);
+});
+
+test("blocked DMs ping only the owner in the tickets channel and retry removal without another ping", async (t) => {
+  const context = setupDiscord(t);
+  const { config, service, client, user, createChannel, dms } = context;
+  const target = createChannel({
+    type: ChannelType.GuildText,
+    name: "tickets",
+  });
+  config.tickets.feedbackChannelId = target.id;
+  const originalFetch = client.users.fetch;
+  client.users.fetch = async (...args) => {
+    const account = await originalFetch(...args);
+    const dm = await account.createDM();
+    dm.send = async () => {
+      throw Object.assign(new Error("DM blocked"), { code: 50007 });
+    };
+    return account;
+  };
+  let removals = 0;
+  const remove = target.messages.delete;
+  target.messages.delete = async (id) => {
+    if (++removals === 1) throw new Error("Temporary removal failure");
+    await remove(id);
+  };
+  const ticket = await supportTicket(service, user, context.transport);
+  await service.pump();
+  service.claim(
+    { id: "201", name: "Secret Staff", roles: ["10", "23"] },
+    ticket.id,
+  );
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  await service.pump();
+  const ping = target.savedMessages.first();
+  assert.ok(ping);
+  assert.deepEqual(ping.data.allowedMentions, { parse: [], users: [user.id] });
+  assert.equal(ping.data.components.length, 0);
+  assert.ok(!JSON.stringify(ping.data).includes("Secret Staff"));
+  assert.ok(!JSON.stringify(ping.data).includes(ticket.id));
+  assert.equal(dms.length, 0);
+  assert.ok(service.get(ticket.id).channelId);
+  await service.reopen(user, ticket.id);
+  assert.equal(service.get(ticket.id).status, "pending");
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    service.store.set(
+      "ticket-outbox",
+      key,
+      { ...job, after: 0 },
+      Number.MAX_SAFE_INTEGER,
+    );
+  await service.pump();
+  await service.pump();
+  assert.equal(target.savedMessages.size, 0);
+  assert.equal(removals, 2);
+  assert.equal(
+    service.store.entries("ticket-feedback-delivery")[0][1].route,
+    "channel",
+  );
+  service.claim(
+    { id: "201", name: "Secret Staff", roles: ["10", "23"] },
+    ticket.id,
+  );
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const options = await click(client, user, "ticket:mine-choice", [ticket.id]);
+  assert.equal(options.flags, 64);
+  assert.match(options.data.content, /How did Secret Staff do/);
+});
+
+test("feedback recovers a lost DM send response without sending another message", async (t) => {
+  const context = setupDiscord(t);
+  const { service, client, user, dmChannel } = context;
+  const account = await client.users.fetch(user.id);
+  const target = await account.createDM();
+  target.failAfterBotSend = true;
+  const ticket = await supportTicket(service, user, context.transport);
+  await service.pump();
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  assert.equal(target.savedMessages.size, 1);
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    service.store.set(
+      "ticket-outbox",
+      key,
+      { ...job, after: 0 },
+      Number.MAX_SAFE_INTEGER,
+    );
+  await service.pump();
+  assert.equal(target.savedMessages.size, 1);
+  assert.equal(service.store.entries("ticket-outbox").length, 0);
+});
+
+test("temporary DM delivery errors retry privately without a fallback ping", async (t) => {
+  const context = setupDiscord(t);
+  const { config, service, client, user, createChannel } = context;
+  const fallback = createChannel({
+    type: ChannelType.GuildText,
+    name: "tickets",
+  });
+  config.tickets.feedbackChannelId = fallback.id;
+  const account = await client.users.fetch(user.id);
+  const dm = await account.createDM();
+  dm.send = async () => {
+    throw Object.assign(new Error("Temporary failure"), { code: 503 });
+  };
+  const ticket = await supportTicket(service, user, context.transport);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  assert.equal(fallback.savedMessages.size, 0);
+  assert.equal(service.store.entries("ticket-feedback-send")[0][1].route, "dm");
+  assert.equal(service.store.entries("ticket-feedback-delivery").length, 0);
 });

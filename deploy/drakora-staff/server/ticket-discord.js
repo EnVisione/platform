@@ -151,6 +151,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             P.SendMessages,
             P.AttachFiles,
           ];
+          if (permission.id === ticket.owner.id) {
+            permission.allow = permission.allow.filter(
+              (bit) => bit !== P.ViewChannel && bit !== P.ReadMessageHistory,
+            );
+            permission.deny.push(P.ViewChannel, P.ReadMessageHistory);
+          }
         }
     return permissions;
   }
@@ -220,7 +226,36 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     if (!value?.isTextBased()) throw new Error("Ticket channel is unavailable");
     return value;
   }
-  function controls(ticket) {
+  function controls(ticket, staffControls = false) {
+    if (
+      staffControls &&
+      ["closed", "awaiting_resolution"].includes(ticket.status)
+    )
+      return [
+        {
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 2,
+              label: "Reopen ticket",
+              custom_id: feedbackId("reopen", ticket),
+            },
+            {
+              type: 2,
+              style: 4,
+              label: "Delete channel · Admin+",
+              custom_id: feedbackId("delete", ticket),
+            },
+            {
+              type: 2,
+              style: 5,
+              label: "Staff dashboard",
+              url: `${config.staffOrigin}/tickets/${ticket.id}`,
+            },
+          ],
+        },
+      ];
     if (["closed", "awaiting_resolution"].includes(ticket.status))
       return [
         {
@@ -230,13 +265,20 @@ export function ticketDiscord(config, service, client, rolePolicy) {
               type: 2,
               style: 1,
               label: "Rate the help",
-              custom_id: `ticket:rate:${ticket.id}`,
+              custom_id: feedbackId("rate", ticket),
+              disabled: ticket.rating !== null,
             },
             {
               type: 2,
               style: 2,
               label: "Get transcript",
               custom_id: `ticket:transcript:${ticket.id}`,
+            },
+            {
+              type: 2,
+              style: 2,
+              label: "Reopen ticket",
+              custom_id: feedbackId("reopen", ticket),
             },
             {
               type: 2,
@@ -273,6 +315,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         ],
       },
     ];
+  }
+  function feedbackId(action, ticket) {
+    return `ticket:${action}:${ticket.id}${ticket.closureId ? `:${ticket.closureId}` : ""}`;
+  }
+  function feedbackQuestion(ticket) {
+    const name = ticket.ratingStaff?.name || ticket.claimedBy?.name;
+    return `${name ? `How did ${name.replace(/[\\*_~`|]/g, "")} do?` : "How helpful was the support?"} Rate the help from 1 to 5. Your rating is visible only to you and authorized staff.`;
   }
   function overview(ticket) {
     return {
@@ -358,7 +407,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         ])
       )
         throw new Error("Ticket staff notice channel permissions are missing");
-      const footer = `Ticket ${ticket.id} · ${job.event}`;
+      const footer = `Ticket ${ticket.id} · ${job.event}${job.cycle ? ` · ${job.cycle}` : ""}`;
       const put = (value) =>
         service.store.set(
           "ticket-notice-send",
@@ -414,15 +463,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         embeds: [
           {
             title:
-              job.event === "opened"
-                ? `New ${category === "partnership" ? "partnership request" : `${category} ticket`}`
-                : "Ticket still waiting for staff",
+              job.event === "reopened"
+                ? "Ticket reopened"
+                : job.event === "opened"
+                  ? `New ${category === "partnership" ? "partnership request" : `${category} ticket`}`
+                  : "Ticket still waiting for staff",
             description: restricted
-              ? job.event === "opened"
+              ? job.event !== "unclaimed"
                 ? "A restricted ticket has opened. Authorized staff can review it."
                 : "A restricted ticket has been unclaimed for at least one hour. Authorized staff can review it."
-              : job.event === "opened"
-                ? `**${ticket.ign}** opened a ${ticketTypes.find((type) => type.id === ticket.type).name.toLowerCase()} ticket.`
+              : job.event !== "unclaimed"
+                ? `**${ticket.ign}** ${job.event === "reopened" ? "reopened" : "opened"} a ${ticketTypes.find((type) => type.id === ticket.type).name.toLowerCase()} ticket.`
                 : `**${ticket.ign}** has been waiting for at least one hour. This ticket still needs a staff member.`,
             color: 0xb92323,
             footer: { text: footer },
@@ -463,6 +514,143 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     },
     async assertMember(id) {
       await (await guild()).members.fetch(id);
+    },
+    async feedback(ticket, job, key) {
+      await ready();
+      const delivered = service.store.get("ticket-feedback-delivery", key);
+      if (delivered) return { id: delivered.messageId };
+      const kind = "ticket-feedback-send";
+      let intent = service.store.get(kind, key) || { route: "dm" };
+      const persist = () =>
+        service.store.set(kind, key, intent, Number.MAX_SAFE_INTEGER);
+      const nonce = createHash("sha256").update(key).digest("hex").slice(0, 25);
+      let target;
+      if (intent.route === "dm") {
+        try {
+          target = await (await client.users.fetch(ticket.owner.id)).createDM();
+        } catch (error) {
+          if (error.code !== 50007) throw error;
+          intent = { route: "channel" };
+          persist();
+        }
+      }
+      if (intent.route === "channel") {
+        if (!settings.feedbackChannelId)
+          throw new Error("Ticket feedback channel is not configured");
+        target = await channel(settings.feedbackChannelId);
+        if (
+          target.guildId !== settings.guildId ||
+          target.type !== ChannelType.GuildText ||
+          !target
+            .permissionsFor(client.user)
+            ?.has([P.ViewChannel, P.ReadMessageHistory])
+        )
+          throw new Error("Ticket feedback channel permissions are missing");
+      }
+      if (intent.channelId && intent.channelId !== target.id)
+        throw new Error("Ticket feedback channel changed during delivery");
+      const finish = async (sent) => {
+        intent.messageId = sent.id;
+        persist();
+        if (intent.route === "channel") {
+          try {
+            await target.messages.delete(sent.id);
+          } catch (error) {
+            if (error.code !== 10008) throw error;
+          }
+        }
+        service.store.transaction(() => {
+          service.store.set(
+            "ticket-feedback-delivery",
+            key,
+            {
+              ticketId: ticket.id,
+              closureId: job.ref,
+              route: intent.route,
+              channelId: target.id,
+              messageId: sent.id,
+              at: Date.now(),
+            },
+            Number.MAX_SAFE_INTEGER,
+          );
+          service.store.delete(kind, key);
+        });
+        return { id: sent.id };
+      };
+      if (intent.messageId) return finish({ id: intent.messageId });
+      if (intent.channelId) {
+        for (let page = 0; page < 5; page++) {
+          const batch = await target.messages.fetch({
+            limit: 100,
+            ...(intent.before ? { before: intent.before } : {}),
+          });
+          const found = batch.find(
+            (message) =>
+              message.author.id === client.user.id &&
+              (intent.route === "channel"
+                ? String(message.nonce) === nonce
+                : message.components?.some((row) =>
+                    row.components.some(
+                      (component) =>
+                        (component.customId || component.custom_id) ===
+                        feedbackId("rate", ticket),
+                    ),
+                  )),
+          );
+          if (found) return finish(found);
+          const oldest = [...batch.keys()].sort((a, b) =>
+            BigInt(a) < BigInt(b) ? -1 : 1,
+          )[0];
+          if (batch.size < 100 || BigInt(oldest) <= BigInt(intent.after)) {
+            delete intent.before;
+            persist();
+            break;
+          }
+          intent.before = oldest;
+          persist();
+          if (page === 4) return { pending: true };
+        }
+      } else {
+        const latest = await target.messages.fetch({ limit: 1 });
+        intent.channelId = target.id;
+        intent.after = latest.first()?.id || "0";
+        persist();
+      }
+      const current = service.get(ticket.id);
+      if (current.closureId !== job.ref || current.rating !== null)
+        return { cancelled: true };
+      if (intent.route === "channel") {
+        const owner = await (await guild()).members.fetch(ticket.owner.id);
+        if (
+          !target
+            .permissionsFor(owner)
+            ?.has([P.ViewChannel, P.ReadMessageHistory]) ||
+          !target.permissionsFor(client.user)?.has(P.SendMessages)
+        )
+          throw new Error("Ticket feedback channel permissions are missing");
+      }
+      try {
+        return await finish(
+          await target.send({
+            content:
+              intent.route === "dm"
+                ? `Your Drakora ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}`
+                : `<@${ticket.owner.id}> Your ticket is closed. Use My tickets in the ticket panel to rate the support privately or reopen it.`,
+            components: intent.route === "dm" ? controls(ticket) : [],
+            allowedMentions:
+              intent.route === "dm"
+                ? { parse: [] }
+                : { parse: [], users: [ticket.owner.id] },
+            nonce,
+            enforceNonce: true,
+          }),
+        );
+      } catch (error) {
+        if (intent.route !== "dm" || error.code !== 50007) throw error;
+        intent = { route: "channel" };
+        persist();
+        return { pending: true };
+      }
     },
     async create(ticket) {
       await ready();
@@ -527,6 +715,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         allowedMentions: { parse: [] },
       });
       await target.permissionOverwrites.set(ticketOverwrites(ticket, members));
+    },
+    async deleteChannel(ticket) {
+      await ready();
+      return await closeChannel(ticket, true);
     },
     async message(ticket, message, attachments, { retry = false } = {}) {
       await ready();
@@ -778,7 +970,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       closing,
     );
   }
-  async function closeChannel(ticket) {
+  async function closeChannel(ticket, deletion = false) {
     let snapshot = service.store.get("ticket-discord-close", ticket.id);
     const persist = () =>
       service.store.set(
@@ -807,16 +999,25 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       target.topic !== marker(ticket.id)
     )
       throw new Error("Ticket channel ownership does not match");
+    if (
+      !target
+        .permissionsFor(client.user)
+        ?.has([P.ViewChannel, P.ReadMessageHistory, P.ManageChannels])
+    )
+      throw new Error("Ticket closure permissions are missing");
+    await target.permissionOverwrites.set(
+      ticketOverwrites(ticket, await staffMembers()),
+    );
+    const saved = service.store.get("ticket-discord", ticket.id);
+    if (saved?.introId)
+      await (
+        await target.messages.fetch(saved.introId)
+      ).edit({
+        embeds: [overview(ticket)],
+        components: controls(ticket, true),
+        allowedMentions: { parse: [] },
+      });
     if (!snapshot?.ready) {
-      if (
-        !target
-          .permissionsFor(client.user)
-          ?.has([P.ViewChannel, P.ReadMessageHistory, P.ManageChannels])
-      )
-        throw new Error("Ticket closure permissions are missing");
-      await target.permissionOverwrites.set(
-        ticketOverwrites(ticket, await staffMembers()),
-      );
       snapshot ||= { channelId: target.id, historySaved: false };
       for (let page = 0; !snapshot.historySaved && page < 5; page++) {
         snapshot.before = await reconcile(
@@ -860,6 +1061,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           {
             ...current,
             ...stored,
+            sourceChannelId: current.channelId,
+            sourceAttachmentId: current.attachmentId,
             mirrorChannelId: null,
             mirrorMessageId: null,
           },
@@ -875,26 +1078,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       snapshot.ready = true;
       persist();
     }
-    if (!ticket.owner.guest && !snapshot.ownerNotified) {
-      snapshot.ownerNotified = true;
-      persist();
-      try {
-        await (
-          await client.users.fetch(ticket.owner.id)
-        ).send({
-          content:
-            "Your Drakora ticket is closed. Its transcript is saved. You can optionally rate the support or request your HTML transcript below.",
-          components: controls(ticket),
-          allowedMentions: { parse: [] },
-        });
-      } catch {
-        console.error(
-          "Ticket closure DM unavailable. Private web access remains available.",
-        );
-      }
-    }
+    if (!deletion) return { closed: true };
     try {
-      await target.delete("Closed ticket transcript saved in staff logs");
+      await target.delete(
+        "Admin deleted closed ticket channel; transcript saved in staff logs",
+      );
     } catch (error) {
       if (error.code !== 10003) throw error;
     }
@@ -1060,11 +1248,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     // snapshot before fetching. newer gateway messages are outside this deletion check.
     const known = service
       .messages(ticket.id)
-      .filter((message) => message.origin === "discord" && !message.deleted);
+      .filter(
+        (message) =>
+          message.origin === "discord" &&
+          !message.deleted &&
+          message.sequence > (ticket.reopenedSequence || 0),
+      );
     const batch = await target.messages.fetch({
       limit: 100,
       ...(before ? { before } : {}),
     });
+    if (service.get(ticket.id).channelId !== target.id) return null;
     const sorted = [...batch.values()].sort(
       (a, b) =>
         a.createdTimestamp - b.createdTimestamp ||
@@ -1094,9 +1288,20 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       );
     return interaction.reply({
       content: "Choose the kind of help you need. Your ticket stays private.",
-      components: [new ActionRowBuilder().addComponents(select)],
+      components: [
+        new ActionRowBuilder().addComponents(select),
+        myTicketsButton(),
+      ],
       flags: 64,
     });
+  }
+  function myTicketsButton() {
+    return {
+      type: 1,
+      components: [
+        { type: 2, style: 2, label: "My tickets", custom_id: "ticket:mine" },
+      ],
+    };
   }
   function input(id, label, style, min, max, value, required = true) {
     const field = new TextInputBuilder()
@@ -1121,8 +1326,45 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     )
       return intake(interaction);
     if (!interaction.customId?.startsWith("ticket:")) return;
-    const [, action, id] = interaction.customId.split(":");
+    const [, action, selectedId, closureId] = interaction.customId.split(":");
+    const id = action === "mine-choice" ? interaction.values[0] : selectedId;
     try {
+      if (action === "mine") {
+        const mine = service
+          .all()
+          .filter(
+            (ticket) =>
+              ticket.owner.id === interaction.user.id &&
+              ticket.type !== "partnership",
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 25);
+        return await interaction.reply({
+          content: mine.length
+            ? "Choose your ticket. Feedback and reopen options are private."
+            : "You do not have any tickets yet.",
+          components: mine.length
+            ? [
+                new ActionRowBuilder().addComponents(
+                  new StringSelectMenuBuilder()
+                    .setCustomId("ticket:mine-choice")
+                    .setPlaceholder("Choose your ticket")
+                    .addOptions(
+                      mine.map((ticket) => ({
+                        label:
+                          `${ticket.ign} · ${ticketStatuses[ticket.status]} · ${ticket.id.slice(0, 8)}`.slice(
+                            0,
+                            100,
+                          ),
+                        value: ticket.id,
+                      })),
+                    ),
+                ),
+              ]
+            : [],
+          flags: 64,
+        });
+      }
       if (action === "type") {
         const type = interaction.values[0];
         const form = ticketIntake(type);
@@ -1173,9 +1415,54 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       }
       const ticket = service.get(id),
         owner = interaction.user.id === ticket.owner.id;
-      const staffIdentity = await staffUser(interaction.user.id);
+      if (
+        [
+          "mine-choice",
+          "rate",
+          "rating",
+          "reopen",
+          "delete",
+          "delete-confirm",
+        ].includes(action)
+      )
+        await interaction.deferReply({ flags: 64 });
+      const staffIdentity =
+        !owner || ["close", "delete", "delete-confirm"].includes(action)
+          ? await staffUser(interaction.user.id)
+          : null;
       const user = staffIdentity || actor(interaction.user, interaction.member);
       if (!owner) service.staff(user || { roles: [] }, ticket);
+      if (
+        ["rate", "rating", "reopen", "delete", "delete-confirm"].includes(
+          action,
+        ) &&
+        (closureId ? ticket.closureId !== closureId : ticket.reopenedCount)
+      )
+        throw new AuthError("ticket_feedback_expired", 409);
+      if (action === "mine-choice") {
+        service.authorize(user, ticket);
+        return await interaction.editReply({
+          content: ["closed", "awaiting_resolution"].includes(ticket.status)
+            ? feedbackQuestion(ticket)
+            : "Your ticket is still open. Continue in your private ticket.",
+          components: ["closed", "awaiting_resolution"].includes(ticket.status)
+            ? controls(ticket)
+            : [
+                {
+                  type: 1,
+                  components: [
+                    {
+                      type: 2,
+                      style: 5,
+                      label: "View ticket",
+                      url: `${config.applications.publicOrigin}${ticketPath(ticket)}`,
+                    },
+                  ],
+                },
+              ],
+          allowedMentions: { parse: [] },
+        });
+      }
       if (
         action === "close" &&
         (!owner ||
@@ -1205,14 +1492,41 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             ),
         );
       }
+      if (action === "delete") {
+        service.staff(user, ticket, "tickets.delete");
+        if (!["closed", "awaiting_resolution"].includes(ticket.status))
+          throw new AuthError("ticket_close_first", 409);
+        return await interaction.editReply({
+          content:
+            "Delete this closed Discord channel? Its messages, history and saved transcript remain in the staff dashboard.",
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 4,
+                  label: "Delete channel",
+                  custom_id: feedbackId("delete-confirm", ticket),
+                },
+              ],
+            },
+          ],
+          allowedMentions: { parse: [] },
+        });
+      }
       if (action === "rate") {
         service.authorize(user, ticket);
-        return await interaction.reply({
-          content: "Optional: how helpful was the support?",
+        if (!["closed", "awaiting_resolution"].includes(ticket.status))
+          throw new AuthError("ticket_feedback_expired", 409);
+        if (ticket.rating !== null)
+          throw new AuthError("ticket_already_rated", 409);
+        return await interaction.editReply({
+          content: feedbackQuestion(ticket),
           components: [
             new ActionRowBuilder().addComponents(
               new StringSelectMenuBuilder()
-                .setCustomId(`ticket:rating:${id}`)
+                .setCustomId(feedbackId("rating", ticket))
                 .setPlaceholder("Choose 1–5 stars")
                 .addOptions(
                   [1, 2, 3, 4, 5].map((value) => ({
@@ -1222,10 +1536,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 ),
             ),
           ],
-          flags: 64,
+          allowedMentions: { parse: [] },
         });
       }
-      await interaction.deferReply({ flags: 64 });
+      if (!interaction.deferred) await interaction.deferReply({ flags: 64 });
       if (action === "claim") service.claim(user, id);
       else if (action === "close") service.closeTicket(user, id, {}, false);
       else if (action === "resolve")
@@ -1239,7 +1553,11 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           true,
         );
       else if (action === "rating")
-        service.rate(user, id, Number(interaction.values[0]));
+        service.rate(user, id, Number(interaction.values[0]), closureId);
+      else if (action === "reopen")
+        await service.reopen(user, id, !owner, closureId);
+      else if (action === "delete-confirm")
+        await service.deleteChannel(user, id, closureId);
       else if (action === "transcript") {
         service.authorize(user, ticket, !owner);
         if (!owner)
@@ -1275,7 +1593,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return await interaction.editReply(
         action === "close"
           ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
-          : "Ticket updated.",
+          : action === "rating"
+            ? "Thank you. Your private rating has been saved."
+            : action === "delete-confirm"
+              ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
+              : action === "reopen"
+                ? "Ticket reopened. Staff can claim it again."
+                : "Ticket updated.",
       );
     } catch (error) {
       const message =
@@ -1289,7 +1613,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             "Check your Minecraft username and provide detailed information.",
           invalid_report_target:
             "Enter the username or Discord user ID of the person you are reporting.",
+          ticket_close_first:
+            "Close the ticket before deleting its Discord channel.",
           ticket_already_rated: "You have already rated this ticket.",
+          ticket_feedback_expired:
+            "These options belong to an earlier closure. Use My tickets in the ticket panel for current options.",
+          ticket_reopen_pending:
+            "The transcript is still being saved. Try reopening again shortly.",
         }[error.code] ||
         "This action could not be completed. Your existing ticket is safe; please try again.";
       if (interaction.deferred || interaction.replied)

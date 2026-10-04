@@ -60,6 +60,7 @@ export function ticketService(
   function staff(user, ticket, capability = "tickets.view") {
     const current = rolePolicy.apply(user);
     if (
+      (capability === "tickets.delete" && !rolePolicy.isAdmin(current)) ||
       !current.capabilities[capability] ||
       (ticket &&
         !current.capabilities[
@@ -116,7 +117,7 @@ export function ticketService(
       ticket.type !== "partnership" &&
       ticket.owner.guest &&
       !internal &&
-      (["opened", "claimed", "closed"].includes(action) ||
+      (["opened", "claimed", "closed", "reopened"].includes(action) ||
         (action === "message" && user.id !== ticket.owner.id))
     )
       put("ticket-email-outbox", `${ticket.id}:${ticket.revision}`, {
@@ -174,11 +175,19 @@ export function ticketService(
       updatedAt: ticket.updatedAt,
       revision: ticket.revision,
       rating: ticket.rating,
+      ratingStaff: ticket.ratingStaff || ticket.claimedBy,
+      closureId: ticket.closureId || null,
+      channelRetained: Boolean(ticket.channelId),
+      deletionPending: store
+        .entries("ticket-outbox")
+        .some(([, job]) => job.ticketId === id && job.kind === "delete"),
       path: ticket.type === "partnership" ? null : ticketPath(ticket),
       category: ticketCategory(ticket),
-      discordUrl: ticket.channelId
-        ? `https://discord.com/channels/${config.tickets.guildId}/${ticket.channelId}`
-        : null,
+      discordUrl:
+        ticket.channelId &&
+        (staffView || ["pending", "claimed"].includes(ticket.status))
+          ? `https://discord.com/channels/${config.tickets.guildId}/${ticket.channelId}`
+          : null,
       sync:
         ticket.type === "partnership"
           ? ticket.partnership.preference
@@ -209,7 +218,7 @@ export function ticketService(
       safe.partnership = ticket.partnership || null;
       const current = rolePolicy.apply(user);
       safe.actions = Object.fromEntries(
-        ["view", "reply", "claim", "close"].map((action) => [
+        ["view", "reply", "claim", "close", "delete"].map((action) => [
           action,
           Boolean(
             current.capabilities[`tickets.${action}`] &&
@@ -225,6 +234,21 @@ export function ticketService(
             ),
           }
         : null;
+      safe.previousResolutions = store
+        .entries(`ticket-closures:${id}`)
+        .map(([, closure]) => ({
+          ...closure,
+          resolution: closure.resolution
+            ? {
+                ...closure.resolution,
+                attachments: closure.resolution.attachments
+                  .map((fileId) =>
+                    mediaView(store.get("ticket-media", fileId), true, id),
+                  )
+                  .filter(Boolean),
+              }
+            : null,
+        }));
       safe.deliveryIssues = store
         .entries(
           ticket.type === "partnership"
@@ -580,6 +604,12 @@ export function ticketService(
         }
       : null;
     store.transaction(() => {
+      if (["pending", "claimed"].includes(ticket.status)) {
+        ticket.closureId = randomUUID();
+        ticket.ratingStaff = ticket.claimedBy;
+        if (!ticket.owner.guest && ticket.type !== "partnership")
+          queue(ticket, "feedback", ticket.closureId);
+      }
       ticket.status = staffView ? "closed" : "awaiting_resolution";
       ticket.closedAt = now();
       if (resolution) {
@@ -605,9 +635,150 @@ export function ticketService(
     announce(ticket);
     return ticket;
   }
-  function rate(user, id, rating) {
+  async function reopen(user, id, staffView = false, closureId) {
+    authorize(user, get(id), staffView, "tickets.close");
+    await pump();
+    const ticket = get(id);
+    authorize(user, ticket, staffView, "tickets.close");
+    if (["pending", "claimed"].includes(ticket.status)) return ticket;
+    if (closureId !== undefined && closureId !== (ticket.closureId || null))
+      throw new AuthError("ticket_feedback_expired", 409);
+    if (
+      store
+        .entries("ticket-outbox")
+        .some(([, job]) => job.ticketId === id && job.kind === "delete") ||
+      store.get("ticket-outbox", `${id}:create:${id}`) ||
+      store.get("ticket-outbox", `${id}:status:${id}`)
+    )
+      throw new AuthError("ticket_reopen_pending", 409);
+    const others = store
+      .entries("ticket")
+      .map(([, entry]) => entry)
+      .filter((entry) => entry.id !== id);
+    if (ticket.type === "partnership") {
+      if (
+        others.some(
+          (entry) =>
+            entry.type === "partnership" &&
+            entry.status !== "closed" &&
+            (entry.owner.id === ticket.owner.id ||
+              entry.guestNetwork === ticket.guestNetwork ||
+              entry.contactEmail?.toLowerCase() ===
+                ticket.contactEmail?.toLowerCase()),
+        )
+      )
+        throw new AuthError("partnership_limit", 409);
+    } else if (ticket.owner.guest) {
+      if (
+        others.some(
+          (entry) =>
+            entry.guestNetwork === ticket.guestNetwork &&
+            ["pending", "claimed"].includes(entry.status),
+        )
+      )
+        throw new AuthError("ticket_ip_limit", 409);
+    } else if (
+      others.filter(
+        (entry) =>
+          entry.owner.id === ticket.owner.id && entry.status !== "closed",
+      ).length >= 3
+    )
+      throw new AuthError("ticket_limit", 409);
+    store.transaction(() => {
+      put(
+        `ticket-closures:${id}`,
+        ticket.closureId || String(ticket.closedAt),
+        {
+          at: ticket.closedAt,
+          claimedBy: ticket.ratingStaff || ticket.claimedBy,
+          rating: ticket.rating,
+          resolution: ticket.resolution,
+        },
+      );
+      ticket.status = "pending";
+      ticket.claimedBy = null;
+      ticket.resolution = null;
+      ticket.rating = null;
+      ticket.ratingStaff = null;
+      ticket.reopenedCount = (ticket.reopenedCount || 0) + 1;
+      if (!ticket.channelId) {
+        ticket.reopenedSequence = ticket.sequence;
+        delete ticket.lastDiscordId;
+      }
+      delete ticket.closedAt;
+      delete ticket.closureId;
+      delete ticket.discordDeletedAt;
+      delete ticket.discordArchivedAt;
+      store.delete("ticket-discord-close", id);
+      if (!ticket.channelId)
+        for (const kind of [
+          "ticket-discord-cursor",
+          "ticket-discord-sweep",
+          "ticket-discord",
+        ])
+          store.delete(kind, id);
+      audit(
+        ticket,
+        user,
+        "reopened",
+        "Ticket reopened and returned to the waiting queue",
+      );
+      queue(
+        ticket,
+        ticket.type === "partnership" || ticket.channelId ? "status" : "create",
+      );
+      if (config.tickets.staffChannelId) {
+        const cycle = `${id}:reopened:${ticket.reopenedCount}`;
+        for (const event of ["reopened", "unclaimed"])
+          put("ticket-notice-outbox", `${cycle}:${event}`, {
+            ticketId: id,
+            event,
+            channelId: config.tickets.staffChannelId,
+            openedKey: `${cycle}:reopened`,
+            cycle: ticket.reopenedCount,
+            after: now() + (event === "unclaimed" ? 3600000 : 0),
+            attempts: 0,
+          });
+      }
+    });
+    announce(ticket);
+    return ticket;
+  }
+  async function deleteChannel(user, id, closureId) {
+    staff(user, get(id), "tickets.delete");
+    await pump();
+    const ticket = get(id);
+    staff(user, ticket, "tickets.delete");
+    if (!["closed", "awaiting_resolution"].includes(ticket.status))
+      throw new AuthError("ticket_close_first", 409);
+    if (closureId !== undefined && closureId !== (ticket.closureId || null))
+      throw new AuthError("ticket_feedback_expired", 409);
+    if (!ticket.channelId) return ticket;
+    if (
+      store
+        .entries("ticket-outbox")
+        .some(([, job]) => job.ticketId === id && job.kind === "delete")
+    )
+      return ticket;
+    store.transaction(() => {
+      store.delete("ticket-discord-close", id);
+      audit(
+        ticket,
+        user,
+        "channel_deletion_requested",
+        "Admin requested Discord channel deletion; dashboard history is kept",
+        true,
+      );
+      queue(ticket, "delete", ticket.channelId);
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function rate(user, id, rating, closureId) {
     const ticket = get(id);
     authorize(user, ticket);
+    if (closureId !== undefined && closureId !== (ticket.closureId || null))
+      throw new AuthError("ticket_feedback_expired", 409);
     if (
       !["closed", "awaiting_resolution"].includes(ticket.status) ||
       !Number.isInteger(rating) ||
@@ -747,12 +918,16 @@ export function ticketService(
       const previous = message.attachments.map((fileId) =>
         store.get("ticket-media", fileId),
       );
+      const sameAttachment = (saved, incoming) =>
+        saved &&
+        (saved.attachmentId === incoming.attachmentId ||
+          (saved.sourceChannelId === incoming.channelId &&
+            saved.sourceAttachmentId === incoming.attachmentId));
       const attachmentsChanged =
         metadata !== undefined &&
         (metadata.length !== previous.length ||
           metadata.some(
-            (file, index) =>
-              file.attachmentId !== previous[index]?.attachmentId,
+            (file, index) => !sameAttachment(previous[index], file),
           ));
       if (
         message.origin !== "discord" ||
@@ -765,8 +940,8 @@ export function ticketService(
         if (attachmentsChanged) {
           message.attachments = metadata.map(
             (file) =>
-              previous.find((old) => old.attachmentId === file.attachmentId)
-                ?.id || saveAttachment(file),
+              previous.find((old) => sameAttachment(old, file))?.id ||
+              saveAttachment(file),
           );
           for (const old of previous)
             if (!message.attachments.includes(old.id)) {
@@ -833,7 +1008,13 @@ export function ticketService(
     running = Promise.resolve()
       .then(async () => {
         const blocked = new Set();
-        const priority = { create: 0, message: 1, status: 2 };
+        const priority = {
+          create: 0,
+          message: 1,
+          status: 2,
+          delete: 3,
+          feedback: 4,
+        };
         let attempts = 0;
         for (const [key, job] of store
           .entries("ticket-outbox")
@@ -849,7 +1030,27 @@ export function ticketService(
             continue;
           }
           const ticket = get(job.ticketId);
-          if (job.kind !== "create" && !ticket.channelId) {
+          if (job.kind === "feedback") {
+            const intent = store.get("ticket-feedback-send", key);
+            const cleanup = intent?.route === "channel" && intent.channelId;
+            if (
+              !cleanup &&
+              (job.ref !== ticket.closureId ||
+                ticket.rating !== null ||
+                !["closed", "awaiting_resolution"].includes(ticket.status))
+            ) {
+              store.delete("ticket-outbox", key);
+              store.delete("ticket-feedback-send", key);
+              continue;
+            }
+            if (
+              job.failed ||
+              (!cleanup &&
+                ticket.channelId &&
+                !store.get("ticket-discord-close", ticket.id)?.ready)
+            )
+              continue;
+          } else if (job.kind !== "create" && !ticket.channelId) {
             if (ticket.discordDeletedAt || ticket.discordArchivedAt)
               store.delete("ticket-outbox", key);
             continue;
@@ -857,8 +1058,22 @@ export function ticketService(
           if (attempts++ === 20) break;
           try {
             if (job.kind === "create") await transport.create(ticket);
-            else if (job.kind === "status") {
-              const result = await transport.status(ticket);
+            else if (job.kind === "feedback") {
+              const result = await transport.feedback(ticket, job, key);
+              if (result?.pending) continue;
+            } else if (job.kind === "status" || job.kind === "delete") {
+              if (
+                job.kind === "delete" &&
+                (ticket.channelId !== job.ref ||
+                  !["closed", "awaiting_resolution"].includes(ticket.status))
+              ) {
+                store.delete("ticket-outbox", key);
+                continue;
+              }
+              const result =
+                job.kind === "delete"
+                  ? await transport.deleteChannel(ticket)
+                  : await transport.status(ticket);
               if (result?.pending) continue;
               if (result?.deleted)
                 store.transaction(() => {
@@ -909,6 +1124,7 @@ export function ticketService(
             job.after =
               now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));
             job.failure = error.code || "discord_unavailable";
+            if (job.kind === "feedback") job.failed = job.attempts >= 20;
             if (store.get("ticket-outbox", key)?.generation === job.generation)
               put("ticket-outbox", key, job);
             console.error(
@@ -947,6 +1163,7 @@ export function ticketService(
           if (
             ["closed", "awaiting_resolution"].includes(ticket.status) &&
             ticket.channelId &&
+            !store.get("ticket-discord-close", ticket.id)?.ready &&
             !store.get("ticket-outbox", `${ticket.id}:status:${ticket.id}`)
           )
             queue(ticket, "status");
@@ -968,6 +1185,8 @@ export function ticketService(
     reply,
     claim,
     closeTicket,
+    reopen,
+    deleteChannel,
     rate,
     media,
     upload,

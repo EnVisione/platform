@@ -300,7 +300,7 @@ test("a status change during delivery retains a fresh outbox job", async (t) => 
     },
   });
   await service.pump();
-  assert.equal(store.entries("ticket-outbox").length, 1);
+  assert.equal(store.entries("ticket-outbox").length, 2);
   await service.pump();
   assert.equal(calls, 2);
   assert.equal(service.get(ticket.id).status, "awaiting_resolution");
@@ -482,7 +482,9 @@ test("player HTML escapes content and excludes private staff resolution and evid
     ticket.id,
     false,
     async () => Buffer.from("proof"),
-    { authorizeAsStaff: true },
+    {
+      authorizeAsStaff: true,
+    },
   );
   assert.ok(!playerCopy.includes("PRIVATE-RESOLUTION"));
 });
@@ -620,23 +622,41 @@ test("oversized attachment batches roll back without consuming uploaded files", 
   assert.equal(service.media(owner, ticket.id, files[0].id).used, false);
 });
 
-test("closed channels are removed immediately while transcripts stay in staff logs", async (t) => {
+test("closure retains the channel and Admin deletion preserves logs while reopening restores access", async (t) => {
   const { service, store } = setup(t);
   const ticket = service.create(owner, input());
-  const removed = [];
+  const admin = { id: "admin", name: "Admin", roles: ["10", "21"] };
+  let removed = 0,
+    created = 0;
   service.attach({
     async create(value) {
-      service.bind(value.id, "900");
+      service.bind(value.id, `channel-${++created}`);
     },
     async message() {
-      return { id: "901" };
+      return { id: randomUUID() };
     },
     async status(value) {
-      removed.push(value.id);
+      if (["closed", "awaiting_resolution"].includes(value.status))
+        store.set(
+          "ticket-discord-close",
+          value.id,
+          { ready: true, channelId: value.channelId },
+          Number.MAX_SAFE_INTEGER,
+        );
+      return { closed: true };
+    },
+    async deleteChannel() {
+      removed++;
       return { deleted: true };
+    },
+    async feedback() {
+      return { id: randomUUID() };
     },
   });
   await service.pump();
+  await assert.rejects(service.deleteChannel(admin, ticket.id), {
+    code: "ticket_close_first",
+  });
   service.reply(owner, ticket.id, message("Keep this in the transcript."));
   service.closeTicket(
     helper,
@@ -648,26 +668,44 @@ test("closed channels are removed immediately while transcripts stay in staff lo
     true,
   );
   await service.pump();
-  assert.deepEqual(removed, [ticket.id]);
-  assert.equal(service.get(ticket.id).channelId, null);
-  assert.equal(service.view(owner, ticket.id).sync, "saved");
+  assert.equal(service.get(ticket.id).channelId, "channel-1");
   assert.equal(service.view(owner, ticket.id).discordUrl, null);
-  assert.equal(service.linked("900"), null);
-  assert.equal(store.entries("ticket-outbox").length, 0);
-  assert.equal(service.list(helper, { closed: true }).total, 1);
+  assert.equal(service.view(helper, ticket.id, true).actions.delete, false);
+  assert.equal(service.view(admin, ticket.id, true).actions.delete, true);
+  assert.equal(removed, 0);
+  await service.expire();
+  assert.equal(removed, 0);
+  await assert.rejects(service.deleteChannel(helper, ticket.id), {
+    code: "ticket_access_denied",
+  });
+  await service.reopen(owner, ticket.id);
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, "channel-1");
+  assert.equal(created, 1);
+  assert.ok(service.view(owner, ticket.id).discordUrl);
+  service.closeTicket(owner, ticket.id, {});
+  await service.pump();
+  await service.deleteChannel(admin, ticket.id);
+  await service.pump();
+  assert.equal(removed, 1);
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(service.linked("channel-1"), null);
   const html = await ticketTranscript(service, helper, ticket.id, true);
   assert.match(html, /Keep this in the transcript/);
   assert.match(html, /Confirmed the issue is resolved/);
-  service.rate(owner, ticket.id, 5);
-  assert.equal(service.get(ticket.id).rating, 5);
+  await service.reopen(owner, ticket.id);
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, "channel-2");
+  assert.equal(service.messages(ticket.id).length, 1);
 });
 
-test("channel removal waits for queued replies including retry backoff", async (t) => {
+test("Admin channel deletion waits for queued replies and blocks reopening until safe removal", async (t) => {
   let time = Date.now(),
     failed = true,
     removed = false;
-  const { service } = setup(t, { now: () => time });
+  const { service, store } = setup(t, { now: () => time });
   const ticket = service.create(owner, input());
+  const admin = { id: "admin", roles: ["10", "21"] };
   service.attach({
     async create(value) {
       service.bind(value.id, "900");
@@ -676,18 +714,32 @@ test("channel removal waits for queued replies including retry backoff", async (
       if (failed) throw new Error("Offline");
       return { id: "901" };
     },
-    async status() {
+    async status(value) {
+      store.set(
+        "ticket-discord-close",
+        value.id,
+        { ready: true },
+        Number.MAX_SAFE_INTEGER,
+      );
+    },
+    async deleteChannel() {
       removed = true;
       return { deleted: true };
+    },
+    async feedback() {
+      return { id: "902" };
     },
   });
   await service.pump();
   service.reply(owner, ticket.id, message());
   service.closeTicket(owner, ticket.id, {});
   await service.pump();
-  assert.equal(removed, false);
+  await service.deleteChannel(admin, ticket.id);
   await service.pump();
   assert.equal(removed, false);
+  await assert.rejects(service.reopen(owner, ticket.id), {
+    code: "ticket_reopen_pending",
+  });
   failed = false;
   time += 60001;
   await service.pump();
@@ -704,28 +756,33 @@ test("channel removal waits for queued replies including retry backoff", async (
   );
   await service.pump();
   assert.equal(service.get(ticket.id).status, "closed");
-  assert.equal(service.view(helper, ticket.id, true).deliveryPending, 0);
 });
 
-test("maintenance queues existing closed channels for the same safe removal", async (t) => {
+test("maintenance locks legacy closed channels without deleting them", async (t) => {
   const { service, store } = setup(t);
   const ticket = service.create(owner, input());
   service.bind(ticket.id, "900");
   service.closeTicket(owner, ticket.id, {});
   for (const [key] of store.entries("ticket-outbox"))
     store.delete("ticket-outbox", key);
-  let removed = 0;
+  let closed = 0;
   service.attach({
-    async status() {
-      removed++;
-      return { deleted: true };
+    async status(value) {
+      closed++;
+      store.set(
+        "ticket-discord-close",
+        value.id,
+        { ready: true },
+        Number.MAX_SAFE_INTEGER,
+      );
+      return { closed: true };
     },
   });
   await service.expire();
-  assert.equal(removed, 1);
-  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(closed, 1);
+  assert.equal(service.get(ticket.id).channelId, "900");
   await service.expire();
-  assert.equal(removed, 1);
+  assert.equal(closed, 1);
 });
 
 test("category permissions guard lists, attention, messages, files and transcripts and can be revoked", async (t) => {
@@ -749,7 +806,9 @@ test("category permissions guard lists, attention, messages, files and transcrip
       fails(action, "ticket_access_denied");
     await assert.rejects(
       ticketTranscript(service, user, ticket.id, { staffView: true }),
-      { code: "ticket_access_denied" },
+      {
+        code: "ticket_access_denied",
+      },
     );
   }
   assert.equal(service.view(owner, ticket.id).id, ticket.id);
@@ -784,4 +843,145 @@ test("category permissions guard lists, attention, messages, files and transcrip
     ] = false;
   policy.save(founder, { revision: updated.revision, roles: revocation });
   fails(() => service.view(helper, ticket.id, true), "ticket_access_denied");
+});
+
+test("reopening preserves private resolutions and ratings and reapplies quotas and category permissions", async (t) => {
+  const { service } = setup(t);
+  service.attach({
+    async create(ticket) {
+      service.bind(ticket.id, `channel-${ticket.id}`);
+    },
+    async message() {
+      return { id: randomUUID() };
+    },
+    async status() {
+      return { deleted: true };
+    },
+    async feedback() {
+      return { id: randomUUID() };
+    },
+  });
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  service.reply(owner, ticket.id, message("Original conversation"));
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "PRIVATE original resolution for the first round of support.",
+      commands: "None",
+    },
+    true,
+  );
+  const cycle = service.get(ticket.id).closureId;
+  service.rate(owner, ticket.id, 4, cycle);
+  await assert.rejects(service.reopen({ id: "999" }, ticket.id), {
+    code: "ticket_not_found",
+  });
+  await Promise.all([
+    service.reopen(owner, ticket.id),
+    service.reopen(owner, ticket.id),
+  ]);
+  const current = service.get(ticket.id);
+  assert.equal(current.status, "pending");
+  assert.equal(current.claimedBy, null);
+  assert.equal(current.rating, null);
+  assert.equal(current.reopenedCount, 1);
+  assert.equal(service.messages(ticket.id)[0].content, "Original conversation");
+  const staffView = service.view(helper, ticket.id, true);
+  assert.equal(staffView.previousResolutions[0].rating, 4);
+  assert.equal(staffView.previousResolutions[0].claimedBy.id, helper.id);
+  assert.match(staffView.previousResolutions[0].resolution.summary, /PRIVATE/);
+  assert.equal(service.view(owner, ticket.id).previousResolutions, undefined);
+  assert.match(
+    await ticketTranscript(service, helper, ticket.id, true),
+    /PRIVATE original resolution/,
+  );
+  assert.ok(
+    !(await ticketTranscript(service, owner, ticket.id, false)).includes(
+      "PRIVATE",
+    ),
+  );
+  service.claim(otherStaff, ticket.id);
+  service.closeTicket(owner, ticket.id, {});
+  fails(
+    () => service.rate(owner, ticket.id, 1, cycle),
+    "ticket_feedback_expired",
+  );
+  service.rate(owner, ticket.id, 5, service.get(ticket.id).closureId);
+  assert.equal(service.get(ticket.id).ratingStaff.id, otherStaff.id);
+  await service.reopen(owner, ticket.id);
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "The next support session has now been completed.",
+      commands: "None",
+    },
+    true,
+  );
+  await service.pump();
+  await service.pump();
+  for (let i = 0; i < 3; i++) service.create(owner, input());
+  await assert.rejects(service.reopen(owner, ticket.id), {
+    code: "ticket_limit",
+  });
+
+  const guest = { id: "guest:first", guest: true, name: "Jojo" };
+  const guestTicket = service.create(
+    guest,
+    input({ email: "guest@example.invalid" }),
+    "web",
+    "a".repeat(64),
+  );
+  service.closeTicket(guest, guestTicket.id, {});
+  await service.pump();
+  await service.pump();
+  service.create(
+    { ...guest, id: "guest:second" },
+    input({ email: "other@example.invalid" }),
+    "web",
+    "a".repeat(64),
+  );
+  await assert.rejects(service.reopen(guest, guestTicket.id), {
+    code: "ticket_ip_limit",
+  });
+  const report = service.create(
+    { id: "reported-owner", name: "Reporter" },
+    input({ type: "staff", reportTarget: "StaffName" }),
+  );
+  service.closeTicket(
+    manager,
+    report.id,
+    {
+      summary: "Private staff report resolution recorded by a manager.",
+      commands: "None",
+    },
+    true,
+  );
+  await assert.rejects(service.reopen(helper, report.id, true), {
+    code: "ticket_access_denied",
+  });
+  await service.pump();
+  await service.pump();
+  await service.reopen(manager, report.id, true);
+  assert.equal(service.get(report.id).status, "pending");
+});
+
+test("reopening waits for transcript capture instead of racing a pending closure", async (t) => {
+  const { service } = setup(t);
+  const ticket = service.create(owner, input());
+  service.bind(ticket.id, "old-channel");
+  service.closeTicket(owner, ticket.id, {});
+  service.attach({
+    async create() {},
+    async status() {
+      return { pending: true };
+    },
+  });
+  await assert.rejects(service.reopen(owner, ticket.id), {
+    code: "ticket_reopen_pending",
+  });
+  assert.equal(service.get(ticket.id).status, "awaiting_resolution");
+  assert.equal(service.get(ticket.id).channelId, "old-channel");
 });

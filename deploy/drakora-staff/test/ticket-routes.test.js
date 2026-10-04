@@ -29,7 +29,12 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     async create(ticket) {
       service.bind(ticket.id, `channel-${ticket.id}`);
     },
-    async status() {},
+    async status() {
+      return { deleted: true };
+    },
+    async feedback() {
+      return { id: randomUUID() };
+    },
     async message() {
       return { id: randomUUID() };
     },
@@ -234,6 +239,47 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   response = await call(`/help/api/tickets/${id}`);
   const playerView = await response.json();
   assert.equal(playerView.resolution, undefined);
+  response = await call(`/help/api/tickets/${id}/rating`, { rating: 5 });
+  assert.equal(response.status, 200);
+  assert.equal(
+    (
+      await call(
+        `/api/tickets/${id}/delete-channel`,
+        {},
+        { Origin: config.staffOrigin },
+      )
+    ).status,
+    403,
+  );
+  await service.pump();
+  assert.equal(
+    (await call(`/help/api/tickets/${other.id}/reopen`, {})).status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(
+        `/help/api/tickets/${id}/reopen`,
+        {},
+        { "X-CSRF-Token": "wrong" },
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(`/help/api/tickets/${id}/reopen`, {
+        closureId: playerView.closureId,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(service.get(id).status, "pending");
+  assert.equal(service.view(player, id).previousResolutions, undefined);
+  assert.match(
+    service.view(helper, id, true).previousResolutions[0].resolution.summary,
+    /PRIVATE/,
+  );
   response = await call(`/help/api/tickets/${id}/transcript`);
   assert.match(
     response.headers.get("content-security-policy"),
@@ -248,7 +294,7 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   response = await call(`/api/tickets/${id}/transcript`);
   assert.ok((await response.text()).includes("PRIVATE:"));
   response = await call(`/help/api/tickets/${id}/rating`, { rating: 5 });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 400);
 });
 
 test("website guests use private sessions, required email and a shared IP open-ticket quota", async (t) => {

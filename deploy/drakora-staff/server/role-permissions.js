@@ -90,7 +90,18 @@ export function rolePermissions(config, store) {
         return [key, enabled];
       }),
     );
-  const values = (role) => ({ ...defaults(role), ...state.overrides[role.id] });
+  const deletion = (key) =>
+    key === "tickets.delete" ||
+    (key.startsWith("tickets.category.") && key.endsWith(".delete"));
+  const values = (role) =>
+    Object.fromEntries(
+      Object.entries({ ...defaults(role), ...state.overrides[role.id] }).map(
+        ([key, value]) => [
+          key,
+          value && (!deletion(key) || admins.includes(role.name)),
+        ],
+      ),
+    );
   const isFounder = (user) =>
     roles.some(
       (role) => role.name === "Founder" && user.roles?.includes(role.id),
@@ -98,6 +109,10 @@ export function rolePermissions(config, store) {
   const isManager = (user) =>
     roles.some(
       (role) => managers.includes(role.name) && user.roles?.includes(role.id),
+    );
+  const isAdmin = (user) =>
+    roles.some(
+      (role) => admins.includes(role.name) && user.roles?.includes(role.id),
     );
   function apply(user) {
     const base = permissions(config, user.roles);
@@ -151,6 +166,7 @@ export function rolePermissions(config, store) {
           role.id && (role.name !== "Founder" || isFounder(current)),
         ),
         locked: [
+          ...(!admins.includes(role.name) ? keys.filter(deletion) : []),
           ...(!isFounder(current)
             ? keys.filter((key) => key.startsWith("tickets.category.billing."))
             : []),
@@ -208,6 +224,11 @@ export function rolePermissions(config, store) {
       )
         throw new AuthError("role_management_protected", 400);
       if (
+        !admins.includes(role.name) &&
+        keys.some((key) => deletion(key) && entry.permissions[key])
+      )
+        throw new AuthError("ticket_deletion_protected", 400);
+      if (
         keys.some(
           (key) =>
             entry.permissions[key] &&
@@ -264,6 +285,7 @@ export function rolePermissions(config, store) {
     audit,
     isFounder,
     isManager,
+    isAdmin,
     roles,
     history(user, offset = 0) {
       authorize(user, "roles.view");

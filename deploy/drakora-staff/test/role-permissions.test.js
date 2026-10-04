@@ -309,3 +309,42 @@ test("category and inbox defaults preserve billing and partnership privacy acros
     false,
   );
 });
+
+test("closed ticket channel deletion is restricted to Admin or higher and category grants", (t) => {
+  const { policy, store } = setup(t);
+  for (const rank of ["20", "28", "21", "29", "22", "30", "23"]) {
+    const caps = policy.apply(actor(rank)).capabilities;
+    assert.equal(caps["tickets.delete"], ["20", "28", "21"].includes(rank));
+    assert.equal(caps["tickets.category.billing.delete"], rank === "20");
+  }
+  const edit = input(policy);
+  change(edit, "23", "tickets.delete", true);
+  assert.throws(() => policy.save(actor("20"), edit), {
+    code: "ticket_deletion_protected",
+  });
+  store.set(
+    "role-permissions",
+    "current",
+    {
+      revision: 1,
+      overrides: {
+        23: { "tickets.delete": true, "tickets.category.support.delete": true },
+      },
+    },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(
+    rolePermissions(settings, store).apply(actor("23")).capabilities[
+      "tickets.delete"
+    ],
+    false,
+  );
+  const valid = input(policy);
+  change(valid, "21", "tickets.category.support.delete", false);
+  policy.save(actor("20"), valid);
+  assert.equal(policy.apply(actor("21")).capabilities["tickets.delete"], true);
+  assert.equal(
+    policy.apply(actor("21")).capabilities["tickets.category.support.delete"],
+    false,
+  );
+});
