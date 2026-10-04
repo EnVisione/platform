@@ -486,6 +486,11 @@
   display: grid;
   gap: 6px;
 }
+.ticket-composer-hint {
+  display: block;
+  color: #b5bac1;
+  margin-top: 4px;
+}
 .ticket-composer-actions {
   display: flex;
   gap: 10px;

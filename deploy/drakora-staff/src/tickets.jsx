@@ -149,7 +149,15 @@ function Composer({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const pending = useRef(null),
-    input = useRef(null);
+    input = useRef(null),
+    message = useRef(null),
+    restoreFocus = useRef(false);
+  useEffect(() => {
+    if (!busy && restoreFocus.current) {
+      restoreFocus.current = false;
+      if (document.activeElement === document.body) message.current?.focus();
+    }
+  }, [busy]);
   function addFiles(values) {
     const selected = [...values];
     if (files.length + selected.length > 5) {
@@ -175,6 +183,8 @@ function Composer({
   async function send(event) {
     event.preventDefault();
     if (busy) return;
+    restoreFocus.current =
+      !resolution && document.activeElement === message.current;
     setBusy(true);
     setError("");
     try {
@@ -251,11 +261,28 @@ function Composer({
         {resolution ? "Work done and outcome" : "Message"}
       </label>
       <textarea
+        ref={message}
         id={resolution ? "ticket-resolution" : "ticket-message"}
+        aria-describedby={resolution ? undefined : "ticket-message-hint"}
         value={content}
         onChange={(event) => {
           setContent(event.target.value);
           pending.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (
+            resolution ||
+            event.key !== "Enter" ||
+            event.shiftKey ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.nativeEvent.isComposing ||
+            event.keyCode === 229
+          )
+            return;
+          event.preventDefault();
+          if (!busy && !event.repeat) event.currentTarget.form.requestSubmit();
         }}
         placeholder={
           resolution
@@ -268,6 +295,11 @@ function Composer({
         rows={resolution ? 4 : 2}
         disabled={busy}
       />
+      {!resolution && (
+        <small id="ticket-message-hint" className="ticket-composer-hint">
+          Enter to send · Shift+Enter for a new line
+        </small>
+      )}
       {resolution && (
         <label>
           Commands run
