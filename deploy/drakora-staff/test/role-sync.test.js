@@ -99,6 +99,60 @@ test("first sync copies staff ranks to main and preserves unrelated roles and ac
   assert.equal(app.changes.length, 2);
 });
 
+test("new specialist links preserve existing teams in both guilds and synchronize later removals", async (t) => {
+  const settings = structuredClone(config);
+  settings.applications = {
+    specialistRoles: { builder: "51", developer: "25", artist: "52" },
+  };
+  const app = setup(
+    t,
+    [snapshot("1", ["28", "25", "10"]), snapshot("2", ["128", "99"])],
+    settings,
+  );
+  await app.sync.initialize();
+  const legacy = app.store.get("discord-role-sync", "42");
+  delete legacy.mappedIds;
+  app.store.set("discord-role-sync", "42", legacy, Number.MAX_SAFE_INTEGER);
+  app.roster.get("2:42").roles.push("151");
+  settings.roleSync.roles.push(
+    { staffId: "51", mainId: "151" },
+    { staffId: "25", mainId: "125" },
+    { staffId: "52", mainId: "152" },
+  );
+  await app.restart();
+  assert.deepEqual(new Set(app.roles("1")), new Set(["28", "25", "51", "10"]));
+  assert.deepEqual(
+    new Set(app.roles("2")),
+    new Set(["128", "125", "151", "99"]),
+  );
+  await app.update(snapshot("2", ["128", "151", "99"]));
+  assert.deepEqual(new Set(app.roles("1")), new Set(["28", "51", "10"]));
+  await app.update(snapshot("1", ["28", "51", "52", "10"]));
+  assert.ok(app.roles("2").includes("152"));
+  await app.restart();
+  assert.equal(app.roles("1").includes("25"), false);
+  assert.equal(app.roles("2").includes("125"), false);
+});
+
+test("first sync combines independent specialist roles without replacing the preferred community rank", async (t) => {
+  const settings = structuredClone(config);
+  settings.applications = {
+    specialistRoles: { builder: "51", developer: "25" },
+  };
+  settings.roleSync.roles.push(
+    { staffId: "51", mainId: "151" },
+    { staffId: "25", mainId: "125" },
+  );
+  const app = setup(
+    t,
+    [snapshot("1", ["28", "25"]), snapshot("2", ["123", "151"])],
+    settings,
+  );
+  await app.sync.initialize();
+  assert.deepEqual(new Set(app.roles("1")), new Set(["28", "25", "51"]));
+  assert.deepEqual(new Set(app.roles("2")), new Set(["128", "125", "151"]));
+});
+
 test("changes in either server replace the old rank without granting dashboard access", async (t) => {
   const app = setup(t, [snapshot("1", ["23"]), snapshot("2", ["123"])]);
   await app.sync.initialize();

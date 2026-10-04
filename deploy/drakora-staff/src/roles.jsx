@@ -153,9 +153,9 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
     <section aria-labelledby="member-roles-title">
       <h3 id="member-roles-title">Assign Discord roles</h3>
       <p>
-        Community ranks sync between the main and staff servers. Builder, Dev
-        and Artist roles are assigned in the staff server; matching main-server
-        roles are not configured. Minecraft sync will be added later.
+        Community ranks sync between the main and staff servers. Specialist
+        roles marked “Both servers” sync too. Other specialist roles stay in the
+        staff server. Dashboard admission is a separate choice.
       </p>
       <form
         className="roles-search"
@@ -320,6 +320,9 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                     }
                   />
                   {role.label}
+                  {data.discordRoles.some(
+                    (entry) => entry.id === role.id && entry.syncsToMain,
+                  ) && " · Both servers"}
                 </label>
               ))}
             </div>

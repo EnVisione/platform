@@ -30,7 +30,7 @@ const member = (guildId, id, roles) => ({
   name: `Member ${id}`,
   roles,
 });
-function setup(t, members) {
+function setup(t, members, settings = config) {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   const roster = new Map(
     members.map((value) => [
@@ -65,8 +65,8 @@ function setup(t, members) {
       changes.push({ guildId, id, role, add });
     },
   };
-  let sync = staffRoleSync(config, store, transport);
-  const policy = rolePermissions(config, store);
+  let sync = staffRoleSync(settings, store, transport);
+  const policy = rolePermissions(settings, store);
   const extras = {
     lookup: async (id) =>
       structuredClone([...roster.values()].filter((value) => value.id === id)),
@@ -77,7 +77,7 @@ function setup(t, members) {
       ids.map((id) => ({ id, assignable: !blocked.has(id) })),
     change: (id, role, add) => transport.change("1", id, role, add),
   };
-  let assignments = roleAssignments(config, store, policy, extras, sync);
+  let assignments = roleAssignments(settings, store, policy, extras, sync);
   t.after(async () => {
     await assignments.close();
     await sync.close();
@@ -107,8 +107,8 @@ function setup(t, members) {
     async restart() {
       await assignments.close();
       await sync.close();
-      sync = staffRoleSync(config, store, transport);
-      assignments = roleAssignments(config, store, policy, extras, sync);
+      sync = staffRoleSync(settings, store, transport);
+      assignments = roleAssignments(settings, store, policy, extras, sync);
       await sync.initialize();
     },
   };
@@ -134,6 +134,63 @@ test("panel assignments update both Discord servers while preserving unrelated a
   );
   assert.equal(app.assignments.status("42").request.status, "applied");
   assert.equal(app.policy.history(actor("20")).items[0].memberId, "42");
+});
+
+test("mapped specialist panel changes use both guilds and never reappear after removal or restart", async (t) => {
+  const settings = structuredClone(config);
+  settings.roleSync.roles.push(
+    { staffId: "51", mainId: "151" },
+    { staffId: "25", mainId: "125" },
+    { staffId: "52", mainId: "152" },
+  );
+  const app = setup(
+    t,
+    [member("1", "42", ["23", "99"]), member("2", "42", ["123", "98"])],
+    settings,
+  );
+  const metadata = await app.assignments.metadata(actor("28"));
+  assert.ok(
+    metadata
+      .filter((role) => ["51", "25", "52"].includes(role.id))
+      .every((role) => role.syncsToMain),
+  );
+  await app.assignments.assign(
+    actor("28"),
+    "42",
+    await app.input("42", "23", ["51", "25"], {
+      dashboard: false,
+      todo: false,
+    }),
+  );
+  assert.deepEqual(
+    new Set(app.roster.get("1:42").roles),
+    new Set(["23", "99", "51", "25"]),
+  );
+  assert.deepEqual(
+    new Set(app.roster.get("2:42").roles),
+    new Set(["123", "98", "151", "125"]),
+  );
+  app.blocked.add("152");
+  await app.assignments.assign(
+    actor("28"),
+    "42",
+    await app.input("42", "23", ["52"], { dashboard: false, todo: false }),
+  );
+  assert.equal(
+    app.assignments.status("42").discord["Main server"].status,
+    "retry",
+  );
+  app.blocked.clear();
+  await app.sync.retry(true);
+  await app.restart();
+  assert.deepEqual(
+    new Set(app.roster.get("1:42").roles),
+    new Set(["23", "99", "52"]),
+  );
+  assert.deepEqual(
+    new Set(app.roster.get("2:42").roles),
+    new Set(["123", "98", "152"]),
+  );
 });
 
 test("Manager and Founder promotions, demotions and protected access changes require a Founder", async (t) => {

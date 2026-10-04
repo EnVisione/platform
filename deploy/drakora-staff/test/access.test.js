@@ -10,6 +10,50 @@ const permissions = (roles) => evaluatePermissions(config, roles);
 import { openStore } from "../server/store.js";
 import { discordClient } from "../server/discord.js";
 import { memberActivity } from "../server/activity.js";
+import { availableApplicationRoles } from "../server/applications.js";
+
+test("public Discord identity recognizes mapped main-server specialist roles without granting dashboard access", async () => {
+  const settings = {
+    ...config,
+    applications: {
+      specialistRoles: { builder: "51", developer: "25", artist: "52" },
+    },
+    roleSync: {
+      guildId: "2",
+      roles: [
+        { staffId: "51", mainId: "151" },
+        { staffId: "25", mainId: "125" },
+        { staffId: "52", mainId: "152" },
+        { staffId: "20", mainId: "120" },
+      ],
+    },
+  };
+  let main = { roles: ["151", "125", "120", "10"] };
+  const client = discordClient(settings, {}, async (url) => {
+    if (url.endsWith("/oauth2/token"))
+      return Response.json({ access_token: "test" });
+    if (url.endsWith("/users/@me"))
+      return Response.json({
+        id: "42",
+        username: "Builder",
+        verified: true,
+        email: "builder@example.invalid",
+      });
+    if (url.endsWith("/guilds/1/member"))
+      return new Response(null, { status: 404 });
+    assert.ok(url.endsWith("/guilds/2/member"));
+    return Response.json(main);
+  });
+  const identity = await client.identity("code");
+  assert.deepEqual(identity.roles, ["51", "25"]);
+  assert.equal(evaluatePermissions(settings, identity.roles).dashboard, false);
+  assert.deepEqual(availableApplicationRoles(settings, identity), [
+    "community",
+    "artist",
+  ]);
+  main = { ...main, pending: true };
+  assert.deepEqual((await client.identity("code")).roles, []);
+});
 
 test("Dashboard admission grants workspace access without the legacy Todo role", () => {
   for (const rank of ranks) {
@@ -70,6 +114,31 @@ test("highest rank determines Huly permissions and specialist roles stay in Huly
     "Discord Management",
     "Server Management",
   ]);
+});
+
+test("configured specialist ranks appear in staff profiles without granting admission or elevated workspace permissions", () => {
+  const settings = {
+    ...config,
+    ranks: [
+      ...config.ranks,
+      { id: "51", name: "Builder", huly: "USER", dashboard: false },
+      { id: "52", name: "Artist", huly: "USER", dashboard: false },
+    ],
+  };
+  const teams = evaluatePermissions(settings, ["51", "25", "52"]);
+  assert.deepEqual(teams.hulyRanks, ["Developer", "Builder", "Artist"]);
+  assert.equal(teams.hulyRole, "USER");
+  assert.equal(teams.dashboard, false);
+  assert.equal(teams.todo, false);
+  assert.deepEqual(teams.dashboardRanks, []);
+  const founder = evaluatePermissions(settings, ["20", "51", "25", "52", "10"]);
+  assert.deepEqual(founder.hulyRanks, [
+    "Founder",
+    "Developer",
+    "Builder",
+    "Artist",
+  ]);
+  assert.equal(founder.hulyRole, "OWNER");
 });
 test("persistent store encrypts secrets, expires data, and consumes handoffs once", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "drakora-store-"));

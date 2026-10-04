@@ -86,6 +86,11 @@ export function roleAssignments(config, store, policy, transport, sync) {
   const locks = new Map();
   let stopped = false;
   const managed = policy.roles.filter((role) => role.id);
+  const mappedIds = new Set(
+    (config.roleSync?.roles ?? []).map((role) => role.staffId),
+  );
+  const syncRoles = (request) =>
+    [request.rank, ...request.extraRoles].filter((id) => mappedIds.has(id));
   const mainRole = (id) =>
     config.roleSync?.roles.find((role) => role.mainId === id)?.staffId;
   const staffRoles = (members) =>
@@ -171,9 +176,14 @@ export function roleAssignments(config, store, policy, transport, sync) {
       const request = store.get("role-assignment", id);
       if (stopped || !request || request.status === "applied") return;
       try {
-        if (!request.rankQueued) {
-          await sync.assign(id, request.rank ? [request.rank] : []);
+        const roles = syncRoles(request);
+        if (
+          !request.rankQueued ||
+          JSON.stringify(request.syncedRoles) !== JSON.stringify(roles)
+        ) {
+          await sync.assign(id, roles);
           request.rankQueued = true;
+          request.syncedRoles = roles;
           set(request);
         }
         const members = await transport.lookup(id);
@@ -189,7 +199,9 @@ export function roleAssignments(config, store, policy, transport, sync) {
           return;
         }
         const extraIds = [
-          ...managed.filter((role) => role.specialist).map((role) => role.id),
+          ...managed
+            .filter((role) => role.specialist && !mappedIds.has(role.id))
+            .map((role) => role.id),
           ...Object.values(config.accessRoles),
         ];
         const desired = new Set(request.extraRoles);
@@ -257,7 +269,11 @@ export function roleAssignments(config, store, policy, transport, sync) {
     },
     async metadata(user) {
       policy.authorize(user, "roles.view");
-      return transport.metadata(managed.map((role) => role.id));
+      const roles = await transport.metadata(managed.map((role) => role.id));
+      return roles.map((role) => ({
+        ...role,
+        syncsToMain: mappedIds.has(role.id),
+      }));
     },
     async assign(user, id, input) {
       const current = policy.authorize(user, "roles.assign");
@@ -333,8 +349,9 @@ export function roleAssignments(config, store, policy, transport, sync) {
           specialists: input.specialists,
           access: input.access,
         });
-        await sync.assign(id, input.rank ? [input.rank] : []);
-        set({ ...request, rankQueued: true });
+        const syncedRoles = syncRoles(request);
+        await sync.assign(id, syncedRoles);
+        set({ ...request, rankQueued: true, syncedRoles });
         return { queued: true, id, ...status(id) };
       }).then(async (result) => {
         await reconcile(id);

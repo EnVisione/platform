@@ -79,6 +79,10 @@ export function staffRoleSync(config, store, transport) {
   const settings = config.roleSync;
   const guildIds = [config.guildId, settings.guildId];
   const workers = new Map();
+  const specialistIds = new Set(
+    Object.values(config.applications?.specialistRoles ?? {}),
+  );
+  const mappedIds = settings.roles.map((role) => role.staffId);
   let initialization;
   let initialized = false;
   let stopped = false;
@@ -223,6 +227,7 @@ export function staffRoleSync(config, store, transport) {
   function newState(id) {
     return {
       id,
+      mappedIds,
       roles: null,
       version: 0,
       observed: {},
@@ -274,8 +279,16 @@ export function staffRoleSync(config, store, transport) {
       state = store.get(kind, member.id) ?? newState(member.id);
       if (!state.version) {
         const source = peer && canonical(peer).length ? peer : member;
-        if (!canonical(source).length) return;
-        intent(state, source.guildId, canonical(source));
+        const roles = new Set(canonical(source));
+        for (const entry of [member, peer].filter(Boolean))
+          for (const id of canonical(entry))
+            if (specialistIds.has(id)) roles.add(id);
+        if (!roles.size) return;
+        intent(
+          state,
+          source.guildId,
+          mappedIds.filter((id) => roles.has(id)),
+        );
       }
     }
     state.observed[member.guildId] = observation(
@@ -317,12 +330,27 @@ export function staffRoleSync(config, store, transport) {
         const members = guildIds
           .map((guildId) => snapshots.get(guildId).get(id))
           .filter(Boolean);
+        const knownIds = new Set(
+          !state.version
+            ? mappedIds.filter((id) => !specialistIds.has(id))
+            : (state.mappedIds ??
+                mappedIds.filter(
+                  (id) =>
+                    !specialistIds.has(id) ||
+                    state.roles?.includes(id) ||
+                    Object.values(state.observed).some((entry) =>
+                      entry.roles.includes(id),
+                    ),
+                )),
+        );
+        const knownRoles = (roles) => roles.filter((id) => knownIds.has(id));
+        const observedRoles = (member) => knownRoles(canonical(member));
         const changed = members.filter((member) => {
           const previous = state.observed[member.guildId];
           return (
             previous &&
             previous.joinedAt === member.joinedAt &&
-            !equal(previous.roles, canonical(member)) &&
+            !equal(knownRoles(previous.roles), observedRoles(member)) &&
             !consumeEcho(state, member.guildId, canonical(member))
           );
         });
@@ -338,25 +366,36 @@ export function staffRoleSync(config, store, transport) {
           source = members.find(
             (member) =>
               member.guildId === preferred &&
-              (state.version || canonical(member).length),
+              (state.version || observedRoles(member).length),
           );
           if (
             !source &&
             (members.length === 1 ||
-              equal(canonical(members[0]), canonical(members[1])))
+              equal(observedRoles(members[0]), observedRoles(members[1])))
           )
             source = members[0];
           if (
             !source &&
-            members.filter((member) => canonical(member).length).length === 1
+            members.filter((member) => observedRoles(member).length).length ===
+              1
           )
-            source = members.find((member) => canonical(member).length);
+            source = members.find((member) => observedRoles(member).length);
           if (!source) {
             state.roles = null;
             state.version++;
           }
         }
-        if (source) intent(state, source.guildId, canonical(source));
+        const desired = source ? observedRoles(source) : state.roles;
+        if (desired !== null) {
+          const roles = new Set(desired);
+          for (const member of members)
+            for (const id of canonical(member))
+              if (!knownIds.has(id)) roles.add(id);
+          const merged = mappedIds.filter((id) => roles.has(id));
+          if (source || !equal(state.roles, merged))
+            intent(state, source?.guildId ?? state.sourceGuildId, merged);
+        }
+        state.mappedIds = mappedIds;
         for (const member of members)
           state.observed[member.guildId] = observation(
             member,

@@ -182,6 +182,22 @@ export function discordClient(
       `/users/@me/guilds/${config.guildId}/member`,
       tokens.access_token,
     );
+    const roles = new Set(member?.pending ? [] : (member?.roles ?? []));
+    const specialistIds = new Set(
+      Object.values(config.applications?.specialistRoles ?? {}),
+    );
+    const specialistMappings = (config.roleSync?.roles ?? []).filter((role) =>
+      specialistIds.has(role.staffId),
+    );
+    if (specialistMappings.length) {
+      const mainMember = await api(
+        `/users/@me/guilds/${config.roleSync.guildId}/member`,
+        tokens.access_token,
+      );
+      if (mainMember && !mainMember.pending)
+        for (const role of specialistMappings)
+          if (mainMember.roles.includes(role.mainId)) roles.add(role.staffId);
+    }
     return {
       id: profile.id,
       name: profile.global_name || profile.username,
@@ -189,7 +205,7 @@ export function discordClient(
       avatar: discordAvatar(profile),
       email:
         profile.verified && profile.email ? profile.email.toLowerCase() : null,
-      roles: member?.pending ? [] : (member?.roles ?? []),
+      roles: [...roles],
     };
   }
   return { login, check, identity, observe };
