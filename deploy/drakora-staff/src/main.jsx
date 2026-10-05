@@ -865,11 +865,12 @@ function App() {
         <span className="nav-label">STAFF</span>
         <nav aria-label="Main navigation">
           <a
-            className={`nav-item${settingsPage || accountsPage || applicationsPage || emailPage || rolesPage || websitePage || ticketsPage || logsPage || moderationPage || workspaceView ? "" : " active"}`}
+            className={`nav-item${settingsPage || accountsPage || reviewPage || applicationsPage || emailPage || rolesPage || websitePage || ticketsPage || logsPage || moderationPage || workspaceView ? "" : " active"}`}
             href="/"
             aria-current={
               settingsPage ||
               accountsPage ||
+              reviewPage ||
               applicationsPage ||
               emailPage ||
               rolesPage ||
@@ -934,9 +935,9 @@ function App() {
           )}
           {user.manager && (
             <a
-              className={`nav-item${accountsPage ? " active" : ""}`}
+              className={`nav-item${accountsPage || reviewPage ? " active" : ""}`}
               href="/accounts"
-              aria-current={accountsPage ? "page" : undefined}
+              aria-current={accountsPage || reviewPage ? "page" : undefined}
             >
               <span aria-hidden="true">♙</span>Accounts
             </a>
@@ -1095,7 +1096,7 @@ function App() {
               ? "dashboard dashboard-workspace"
               : applicationsPage
                 ? "dashboard dashboard-applications"
-                : ticketsPage || logsPage
+                : ticketsPage || logsPage || reviewPage
                   ? "dashboard dashboard-tickets"
                   : emailPage
                     ? "dashboard dashboard-mail"

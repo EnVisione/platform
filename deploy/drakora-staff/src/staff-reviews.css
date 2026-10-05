@@ -66,6 +66,19 @@
 .review-text {
   white-space: pre-wrap;
 }
+.review-filters input,
+.review-filters select,
+.review-conversation textarea,
+.review-decision textarea,
+.review-decision select {
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #36393f;
+  color: inherit;
+  font: inherit;
+}
 .review-conversation textarea,
 .review-decision textarea {
   width: 100%;
