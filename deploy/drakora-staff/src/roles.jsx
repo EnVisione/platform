@@ -76,7 +76,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
   const [selected, setSelected] = useState(null);
   const [rank, setRank] = useState("");
   const [specialists, setSpecialists] = useState([]);
-  const [access, setAccess] = useState({ dashboard: false, todo: false });
+  const [access, setAccess] = useState({ dashboard: false });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -330,7 +330,8 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
             <p className="roles-help">
               The Dashboard role admits this member to the staff portal and
               automatically creates their workspace membership. Tracker and
-              Calendar permissions are controlled above.
+              Calendar permissions are controlled above. Your staff roles
+              determine which Tracker boards you can open.
             </p>
             <div className="role-checks">
               <label>

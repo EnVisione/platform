@@ -161,7 +161,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
         .map((role) => role.id),
       access: {
         dashboard: roles.includes(config.accessRoles.dashboard),
-        todo: roles.includes(config.accessRoles.todo),
       },
       inStaff: members.some((member) => member.guildId === config.guildId),
       inMain: members.some(
@@ -202,7 +201,7 @@ export function roleAssignments(config, store, policy, transport, sync) {
           ...managed
             .filter((role) => role.specialist && !mappedIds.has(role.id))
             .map((role) => role.id),
-          ...Object.values(config.accessRoles),
+          config.accessRoles.dashboard,
         ];
         const desired = new Set(request.extraRoles);
         const changes = extraIds.filter(
@@ -258,8 +257,7 @@ export function roleAssignments(config, store, policy, transport, sync) {
           input.specialists.some(
             (id) => !managed.some((role) => role.specialist && role.id === id),
           ) ||
-          typeof input.access?.dashboard !== "boolean" ||
-          typeof input.access?.todo !== "boolean")) ||
+          typeof input.access?.dashboard !== "boolean")) ||
       (addRole &&
         ![
           ...managed.map((role) => role.id),
@@ -296,7 +294,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
             .map((role) => role.id),
           access: {
             dashboard: extras.has(config.accessRoles.dashboard),
-            todo: extras.has(config.accessRoles.todo),
           },
         };
         if (
@@ -321,9 +318,8 @@ export function roleAssignments(config, store, policy, transport, sync) {
           (role) => roles.includes(role.id) !== (input.rank === role.id),
         ) ||
           (roles.some((id) => protectedRoles.some((role) => role.id === id)) &&
-            (input.access.dashboard !==
-              roles.includes(config.accessRoles.dashboard) ||
-              input.access.todo !== roles.includes(config.accessRoles.todo))))
+            input.access.dashboard !==
+              roles.includes(config.accessRoles.dashboard)))
       )
         throw new AuthError("founder_role_required");
       if (
@@ -336,7 +332,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
       const extraRoles = [
         ...input.specialists,
         ...(input.access.dashboard ? [config.accessRoles.dashboard] : []),
-        ...(input.access.todo ? [config.accessRoles.todo] : []),
       ];
       const request = {
         id,

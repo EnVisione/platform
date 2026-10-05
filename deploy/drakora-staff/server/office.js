@@ -16,6 +16,7 @@ import { discordAvatar } from "./avatar.js";
 import { memberActivity } from "./activity.js";
 import { discordRoleTransport, staffRoleSync } from "./role-sync.js";
 import { discordRoleAdministration } from "./role-assignment.js";
+import { reconcileTrackerChannels } from "./tracker-channels.js";
 import {
   discordMailTransport,
   mailNotifications,
@@ -97,7 +98,7 @@ export function discordOffice(config, store, dependencies = {}) {
     async setOpen(room, open) {
       const target = await channel(room.id, ChannelType.GuildVoice);
       await target.permissionOverwrites.edit(
-        config.accessRoles.todo,
+        config.accessRoles.dashboard,
         { ViewChannel: true, Connect: open, Speak: true },
         { reason: "staff meeting access" },
       );
@@ -108,7 +109,7 @@ export function discordOffice(config, store, dependencies = {}) {
         ChannelType.GuildText,
       );
       const message = await target.send({
-        content: `<@&${config.accessRoles.todo}> **${room.name} is starting.**\nHosted by <@${user.id}>. Join when you are ready.`,
+        content: `<@&${config.accessRoles.dashboard}> **${room.name} is starting.**\nHosted by <@${user.id}>. Join when you are ready.`,
         components: [
           {
             type: 1,
@@ -124,7 +125,7 @@ export function discordOffice(config, store, dependencies = {}) {
         ],
         allowedMentions: {
           parse: [],
-          roles: [config.accessRoles.todo],
+          roles: [config.accessRoles.dashboard],
           users: [],
         },
         nonce,
@@ -231,6 +232,36 @@ export function discordOffice(config, store, dependencies = {}) {
         if (!member.user.bot)
           activity.observe(member.id, member.presence?.status);
       ready = true;
+      const category = await guild.channels.fetch(config.office.categoryId);
+      if (!category || category.type !== ChannelType.GuildCategory)
+        throw new Error(
+          "Office category configuration no longer matches Discord",
+        );
+      await category.permissionOverwrites.edit(
+        config.accessRoles.dashboard,
+        { ViewChannel: true, Connect: true, Speak: true },
+        { reason: "dashboard staff office access" },
+      );
+      const invitations = await channel(
+        config.office.inviteChannelId,
+        ChannelType.GuildText,
+      );
+      await invitations.permissionOverwrites.edit(
+        config.accessRoles.dashboard,
+        { ViewChannel: true, SendMessages: true, ReadMessageHistory: true },
+        { reason: "dashboard staff office access" },
+      );
+      for (const room of config.office.rooms.filter(
+        (room) => room.kind === "voice",
+      )) {
+        const voice = await channel(room.id, ChannelType.GuildVoice);
+        await voice.permissionOverwrites.edit(
+          config.accessRoles.dashboard,
+          { ViewChannel: true, Connect: true, Speak: true },
+          { reason: "dashboard staff office access" },
+        );
+      }
+      await reconcileTrackerChannels(config, guild);
       await meetings.reconcile();
       attempts = 0;
       console.log("Discord office connected.");
@@ -362,7 +393,7 @@ export function discordOffice(config, store, dependencies = {}) {
         const target = guild?.channels.cache.get(room.id);
         const allowed =
           target
-            ?.permissionsFor(config.accessRoles.todo)
+            ?.permissionsFor(config.accessRoles.dashboard)
             ?.has(PermissionFlagsBits.Connect) ?? false;
         return {
           ...room,

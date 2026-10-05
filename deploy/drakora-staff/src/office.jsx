@@ -12,7 +12,6 @@ const statuses = {
 };
 const errors = {
   meeting_host_required: "Only Founder and Admin can manage meetings.",
-  todo_role_required: "You need the Todo role to use the staff office.",
   office_unavailable:
     "Discord is reconnecting. Meeting controls will return shortly.",
   meeting_recovery_required:
@@ -49,7 +48,7 @@ function MeetingDialog({ confirm, cancel, action }) {
       </h2>
       <p>
         {confirm.action === "start"
-          ? "This unlocks the room and posts an invitation that notifies the Todo role in Discord."
+          ? "This unlocks the room and posts an invitation for dashboard staff in Discord."
           : "This closes the room to new joins and marks the invitation as ended. People already connected can finish their conversation."}
       </p>
       <div>

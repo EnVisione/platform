@@ -21,6 +21,7 @@ import {
 import { workspaceSessions } from "./workspace-session.js";
 import { discordOffice } from "./office.js";
 import { discordTodoSync } from "./todo-sync.js";
+import { trackerAccessService } from "./tracker-access.js";
 import { validateConfig } from "./config.js";
 import { minecraftRegistry } from "./minecraft.js";
 import {
@@ -175,6 +176,7 @@ const partnerships =
     : undefined;
 office?.onAccessChanged((packet) => {
   const access = discord.observe(packet);
+  if (access) trackerAccess?.changed();
   if (!access?.revoked) return;
   for (const socket of sockets)
     if (socket.userId === access.id) socket.destroy();
@@ -223,6 +225,9 @@ const assignmentTimer = assignments
 assignmentTimer?.unref();
 const todoSync = config.todoForums
   ? discordTodoSync(config, store, huly)
+  : undefined;
+const trackerAccess = config.trackerProjects?.length
+  ? trackerAccessService(config, store, huly, discord)
   : undefined;
 office?.onTodoChanged(() => todoSync?.changed());
 const app = express();
@@ -1167,6 +1172,7 @@ app.use(
     requireMutation,
     staffHost,
     onPolicyChange() {
+      trackerAccess?.changed();
       void office?.emailAlerts?.refreshPermissions();
       void ticketTransport
         ?.refreshPermissions()
@@ -1706,6 +1712,7 @@ server.listen(3000, "0.0.0.0", () =>
   console.log("Drakora staff service ready."),
 );
 todoSync?.start();
+trackerAccess?.start();
 applications?.start();
 tickets?.start();
 retention.start();
@@ -1719,6 +1726,7 @@ async function stop() {
   await onboarding?.close();
   await assignments?.close();
   await todoSync?.close();
+  await trackerAccess?.close();
   await applications?.close();
   await partnerships?.close();
   await ticketEmails?.close();

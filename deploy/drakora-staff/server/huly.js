@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { syncProjectRoles } from "./project-roles.js";
 import { syncAvatar } from "./profile.js";
 import { AuthError } from "./discord.js";
+import { syncTrackerMember } from "./tracker-access.js";
 
 export function hulyClient(config, store, fetcher = fetch) {
   function accountToken(account, until) {
@@ -112,6 +113,7 @@ export function hulyClient(config, store, fetcher = fetch) {
     if (JSON.stringify(user.projectRanks) !== JSON.stringify(projectRanks)) {
       await syncProjectRoles(config, serviceToken(), account, projectRanks);
     }
+    await syncTrackerMember(config, serviceToken(), user, account);
     const latest = store.get("user", user.id);
     if ((latest?.accessRevision || 0) !== (user.accessRevision || 0))
       throw new AuthError("login_required", 401);

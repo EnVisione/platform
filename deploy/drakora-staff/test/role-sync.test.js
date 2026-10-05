@@ -352,6 +352,33 @@ test("optional configuration rejects access-role mappings and ambiguous role pai
     office: { ...fixture.office, categoryId: "31", inviteChannelId: "32" },
   };
   assert.equal(validateConfig(valid), valid);
+  const retired = structuredClone(valid);
+  delete retired.accessRoles.todo;
+  retired.trackerProjects = [
+    { projectId: "dev", name: "Dev", roleIds: ["20", "25"] },
+  ];
+  retired.todoForums = [{ channelId: "41", projectId: "dev" }];
+  assert.equal(validateConfig(retired), retired);
+  for (const projects of [
+    [],
+    [null],
+    [{ projectId: "dev", name: "Dev", roleIds: [] }],
+    [{ projectId: "dev", name: "Dev", roleIds: ["999"] }],
+    [retired.trackerProjects[0], retired.trackerProjects[0]],
+  ]) {
+    assert.throws(
+      () => validateConfig({ ...retired, trackerProjects: projects }),
+      /Tracker projects/,
+    );
+  }
+  assert.throws(
+    () =>
+      validateConfig({
+        ...retired,
+        todoForums: [{ channelId: "41", projectId: "unmanaged" }],
+      }),
+    /Discord forums/,
+  );
   const disabled = structuredClone(valid);
   delete disabled.roleSync;
   assert.equal(validateConfig(disabled), disabled);

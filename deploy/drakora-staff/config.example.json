@@ -45,8 +45,7 @@
   "hulyAccounts": "http://account:3000",
   "hulyUpstream": "http://nginx:80",
   "accessRoles": {
-    "dashboard": "REPLACE_DASHBOARD_ROLE_ID",
-    "todo": "REPLACE_TODO_ROLE_ID"
+    "dashboard": "REPLACE_DASHBOARD_ROLE_ID"
   },
   "ranks": [
     {

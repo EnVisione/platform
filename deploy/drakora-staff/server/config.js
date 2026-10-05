@@ -159,15 +159,9 @@ export function validateConfig(config) {
     config.guildId,
     config.discordClientId,
     config.accessRoles?.dashboard,
-    config.accessRoles?.todo,
   ];
-  if (
-    !ids.every(snowflake) ||
-    config.accessRoles.dashboard === config.accessRoles.todo
-  )
-    throw new Error(
-      "Configure a guild and distinct dashboard and Todo access roles",
-    );
+  if (!ids.every(snowflake))
+    throw new Error("Configure a guild and dashboard access role");
   if (
     !Array.isArray(config.ranks) ||
     !config.ranks.length ||
@@ -184,6 +178,32 @@ export function validateConfig(config) {
     );
   if (new Set(config.ranks.map((rank) => rank.id)).size !== config.ranks.length)
     throw new Error("Staff rank IDs must be unique");
+  if (
+    config.trackerProjects !== undefined &&
+    (!Array.isArray(config.trackerProjects) ||
+      !config.trackerProjects.length ||
+      config.trackerProjects.length > 50 ||
+      config.trackerProjects.some(
+        (project) =>
+          !project ||
+          typeof project.projectId !== "string" ||
+          !project.projectId.trim() ||
+          typeof project.name !== "string" ||
+          !project.name.trim() ||
+          project.name.length > 80 ||
+          !Array.isArray(project.roleIds) ||
+          !project.roleIds.length ||
+          new Set(project.roleIds).size !== project.roleIds.length ||
+          project.roleIds.some(
+            (id) => !config.ranks.some((rank) => rank.id === id),
+          ),
+      ) ||
+      new Set(config.trackerProjects.map((project) => project.projectId))
+        .size !== config.trackerProjects.length)
+  )
+    throw new Error(
+      "Configure distinct Tracker projects with named staff role grants",
+    );
   if (
     config.activityGuildIds !== undefined &&
     (!config.office ||
@@ -271,6 +291,10 @@ export function validateConfig(config) {
         (forum) =>
           !snowflake(forum.channelId) ||
           !forum.projectId ||
+          (config.trackerProjects !== undefined &&
+            !config.trackerProjects.some(
+              (project) => project.projectId === forum.projectId,
+            )) ||
           (forum.assigneeTags !== undefined &&
             (!forum.assigneeTags ||
               typeof forum.assigneeTags !== "object" ||

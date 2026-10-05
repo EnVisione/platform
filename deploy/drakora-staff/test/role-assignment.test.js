@@ -95,12 +95,7 @@ function setup(t, members, settings = config) {
     get assignments() {
       return assignments;
     },
-    async input(
-      id,
-      rank,
-      specialists = [],
-      access = { dashboard: true, todo: true },
-    ) {
+    async input(id, rank, specialists = [], access = { dashboard: true }) {
       const { members } = await assignments.list(actor("20"), id);
       return { version: members[0].version, rank, specialists, access };
     },
@@ -238,9 +233,27 @@ test("queued ranks and access survive restart and wait until the member joins st
   await app.assignments.reconcile("42");
   assert.deepEqual(
     new Set(app.roster.get("1:42").roles),
-    new Set(["98", "23", "52", "10", "11"]),
+    new Set(["98", "23", "52", "10"]),
   );
   assert.equal(app.assignments.status("42").request.status, "applied");
+});
+
+test("Dashboard admission and role assignment work without a Todo role", async (t) => {
+  const settings = structuredClone(config);
+  delete settings.accessRoles.todo;
+  const app = setup(t, [member("1", "42", ["99"])], settings);
+  await app.assignments.assign(
+    actor("28"),
+    "42",
+    await app.input("42", "23", ["52"]),
+  );
+  const { members } = await app.assignments.list(actor("28"), "42");
+  assert.deepEqual(members[0].access, { dashboard: true });
+  assert.deepEqual(
+    new Set(app.roster.get("1:42").roles),
+    new Set(["99", "23", "52", "10"]),
+  );
+  assert.ok(app.changes.every((change) => change.role !== "11" && change.role));
 });
 
 test("individual onboarding grants preserve queued access and specialist roles before joining", async (t) => {
