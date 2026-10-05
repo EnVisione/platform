@@ -1358,6 +1358,13 @@ export function ticketService(
       ticket.ratedAt = now();
       audit(ticket, user, "rated", `Player rated the help ${rating}/5`);
       queueActivity(ticket, "rated", user);
+      if (ticket.ratingStaff?.id)
+        queue(ticket, "rating-notification", ticket.closureId, {
+          staffId: ticket.ratingStaff.id,
+          rating,
+          ratedAt: ticket.ratedAt,
+          closureId: ticket.closureId,
+        });
       autoDeleteRated(ticket);
     });
     announce(ticket);
@@ -1666,6 +1673,7 @@ export function ticketService(
           activity: 3,
           delete: 4,
           feedback: 5,
+          "rating-notification": 6,
         };
         let attempts = 0;
         for (const [key, job] of store
@@ -1691,7 +1699,9 @@ export function ticketService(
           }
           if (store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = get(job.ticketId);
-          if (job.kind === "feedback") {
+          if (job.kind === "rating-notification") {
+            if (job.failed) continue;
+          } else if (job.kind === "feedback") {
             const intent = store.get("ticket-feedback-send", key);
             const cleanup = intent?.route === "channel" && intent.channelId;
             if (
@@ -1737,6 +1747,13 @@ export function ticketService(
               if (result?.pending) continue;
             } else if (job.kind === "feedback") {
               const result = await transport.feedback(ticket, job, key);
+              if (result?.pending) continue;
+            } else if (job.kind === "rating-notification") {
+              const result = await transport.ratingNotification(
+                ticket,
+                job,
+                key,
+              );
               if (result?.pending) continue;
             } else if (["status", "activity", "delete"].includes(job.kind)) {
               if (
@@ -1828,7 +1845,8 @@ export function ticketService(
             job.after =
               now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));
             job.failure = error.code || "discord_unavailable";
-            if (job.kind === "feedback") job.failed = job.attempts >= 20;
+            if (["feedback", "rating-notification"].includes(job.kind))
+              job.failed = job.attempts >= 20;
             if (store.get("ticket-outbox", key)?.generation === job.generation)
               put("ticket-outbox", key, job);
             console.error(

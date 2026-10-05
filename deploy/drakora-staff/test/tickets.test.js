@@ -263,6 +263,9 @@ test("staff search finds first helpers, resolvers and previous closures without 
     async status() {
       return { closed: true };
     },
+    async ratingNotification() {
+      return { status: "delivered" };
+    },
     async feedback() {
       return { id: randomUUID() };
     },
@@ -1178,6 +1181,9 @@ test("closure retains the channel and Admin deletion preserves logs while reopen
       removed++;
       return { deleted: true };
     },
+    async ratingNotification() {
+      return { status: "delivered" };
+    },
     async feedback() {
       return { id: randomUUID() };
     },
@@ -1254,6 +1260,9 @@ test("Admin channel deletion waits for queued replies and blocks reopening until
     async deleteChannel() {
       removed = true;
       return { deleted: true };
+    },
+    async ratingNotification() {
+      return { status: "delivered" };
     },
     async feedback() {
       return { id: "902" };
@@ -1392,6 +1401,9 @@ test("reopening preserves private resolutions and ratings and reapplies quotas a
     },
     async status() {
       return { closed: true };
+    },
+    async ratingNotification() {
+      return { status: "delivered" };
     },
     async feedback() {
       return { id: randomUUID() };
@@ -1537,6 +1549,9 @@ test("staff support summaries preserve closure attribution, deduplicate resoluti
     },
     async deleteChannel() {
       return { deleted: true };
+    },
+    async ratingNotification() {
+      return { status: "delivered" };
     },
     async eraseTicket() {},
   });

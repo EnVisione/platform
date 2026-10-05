@@ -90,6 +90,32 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         }),
       );
   }
+  async function recoverRatingMessage(target, key, intent, persist) {
+    const footer = `Drakora support review · ${key}`;
+    for (let page = 0; page < 5; page++) {
+      const batch = await target.messages.fetch({
+        limit: 100,
+        ...(intent.before ? { before: intent.before } : {}),
+      });
+      const found = batch.find(
+        (message) =>
+          message.author.id === client.user.id &&
+          message.embeds?.some((embed) => embed.footer?.text === footer),
+      );
+      if (found) return found;
+      const oldest = [...batch.keys()].sort((a, b) =>
+        BigInt(a) < BigInt(b) ? -1 : 1,
+      )[0];
+      if (batch.size < 100 || BigInt(oldest) <= BigInt(intent.after)) {
+        delete intent.before;
+        persist();
+        return null;
+      }
+      intent.before = oldest;
+      persist();
+    }
+    return { pending: true };
+  }
   function overwrites(members, owner, category = "support") {
     const categories = Array.isArray(category) ? category : [category];
     const canReply = (user) =>
@@ -865,6 +891,102 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async assertMember(id) {
       await (await guild()).members.fetch(id);
     },
+    async ratingNotification(ticket, job, key) {
+      await ready();
+      const deliveryKind = "ticket-rating-delivery",
+        sendKind = "ticket-rating-send";
+      const delivered = service.store.get(deliveryKind, key);
+      if (delivered) return delivered;
+      const { staffId, rating, ratedAt, closureId } = job.notice;
+      let intent = service.store.get(sendKind, key);
+      const persist = () =>
+        service.store.set(sendKind, key, intent, Number.MAX_SAFE_INTEGER);
+      const finish = (status, sent) => {
+        const receipt = {
+          ticketId: ticket.id,
+          closureId,
+          staffId,
+          status,
+          ...(sent ? { channelId: intent.channelId, messageId: sent.id } : {}),
+          at: Date.now(),
+        };
+        service.store.transaction(() => {
+          service.store.set(
+            deliveryKind,
+            key,
+            receipt,
+            Number.MAX_SAFE_INTEGER,
+          );
+          if (sent || !intent?.attempted) service.store.delete(sendKind, key);
+        });
+        return receipt;
+      };
+      const recipient = await staffUser(staffId);
+      let authorized = Boolean(recipient);
+      try {
+        if (recipient) service.staff(recipient, ticket);
+      } catch (error) {
+        if (error.code !== "ticket_access_denied") throw error;
+        authorized = false;
+      }
+      if (!authorized && !intent) return finish("access_removed");
+      const footer = `Drakora support review · ${key}`;
+      try {
+        const target = await (await client.users.fetch(staffId)).createDM();
+        if (intent?.channelId && intent.channelId !== target.id)
+          throw new Error(
+            "Staff review DM destination changed during delivery",
+          );
+        if (intent) {
+          const found = await recoverRatingMessage(
+            target,
+            key,
+            intent,
+            persist,
+          );
+          if (found?.pending) return found;
+          if (found) return finish("delivered", found);
+        } else {
+          const latest = await target.messages.fetch({ limit: 1 });
+          intent = { channelId: target.id, after: latest.first()?.id || "0" };
+          persist();
+        }
+        if (!authorized) return finish("access_removed");
+        intent.attempted = true;
+        persist();
+        const sent = await target.send({
+          embeds: [
+            {
+              title: "New support review",
+              description: `You received a new **${rating}-star review** for your Drakora support.\n\n${"★".repeat(rating)}${"☆".repeat(5 - rating)} **${rating} / 5**`,
+              color: 0xd2bc8c,
+              footer: { text: footer },
+              timestamp: new Date(ratedAt).toISOString(),
+            },
+          ],
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 5,
+                  label: "View ticket",
+                  url: `${config.staffOrigin}/tickets/${ticket.id}`,
+                },
+              ],
+            },
+          ],
+          allowedMentions: { parse: [] },
+          nonce: createHash("sha256").update(key).digest("hex").slice(0, 25),
+          enforceNonce: true,
+        });
+        return finish("delivered", sent);
+      } catch (error) {
+        if (error.code !== 50007) throw error;
+        return finish("blocked");
+      }
+    },
     async feedback(ticket, job, key) {
       await ready();
       const delivered = service.store.get("ticket-feedback-delivery", key);
@@ -1120,11 +1242,43 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       )
         throw new Error("Ticket erasure channel ownership does not match");
       const copies = [];
+      for (const [key, intent] of service.store.entries("ticket-rating-send")) {
+        if (!key.startsWith(`${ticket.id}:`) || !intent.attempted) continue;
+        try {
+          const destination = await client.channels.fetch(intent.channelId);
+          if (!destination)
+            throw new Error(
+              "Staff review DM destination unavailable for erasure",
+            );
+          const found = await recoverRatingMessage(
+            destination,
+            key,
+            intent,
+            () =>
+              service.store.set(
+                "ticket-rating-send",
+                key,
+                intent,
+                Number.MAX_SAFE_INTEGER,
+              ),
+          );
+          if (found?.pending)
+            throw new Error(
+              "Staff review DM history capture is pending for erasure",
+            );
+          if (found)
+            copies.push({ channelId: intent.channelId, messageId: found.id });
+        } catch (error) {
+          if (error.code !== 10003) throw error;
+        }
+      }
       for (const kind of [
         "ticket-notice-delivery",
         "ticket-notice-send",
         "ticket-feedback-delivery",
         "ticket-feedback-send",
+        "ticket-rating-delivery",
+        "ticket-rating-send",
         "partnership-dm-send",
       ])
         for (const [key, value] of service.store.entries(kind))

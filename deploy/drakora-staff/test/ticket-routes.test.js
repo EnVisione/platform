@@ -25,6 +25,7 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   let staffIdentity = helper,
     signedIn = true,
     uploads = 0;
+  const reviewNotifications = [];
   const transport = {
     async assertMember() {},
     async create(ticket) {
@@ -32,6 +33,10 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     },
     async status() {
       return { deleted: true };
+    },
+    async ratingNotification(ticket, job) {
+      reviewNotifications.push({ ticketId: ticket.id, ...job.notice });
+      return { status: "delivered" };
     },
     async feedback() {
       return { id: randomUUID() };
@@ -405,6 +410,10 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
     403,
   );
   await service.pump();
+  assert.equal(reviewNotifications.length, 1);
+  assert.equal(reviewNotifications[0].ticketId, id);
+  assert.equal(reviewNotifications[0].staffId, "201");
+  assert.equal(reviewNotifications[0].rating, 5);
   assert.equal(
     (await call(`/help/api/tickets/${other.id}/reopen`, {})).status,
     404,

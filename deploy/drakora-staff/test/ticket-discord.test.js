@@ -31,23 +31,29 @@ function setupDiscord(t, notices = false, dedicatedRole = false) {
   const client = new EventEmitter();
   client.user = { id: "bot" };
   client.isReady = () => true;
-  const dms = [];
+  const dms = [],
+    staffDms = new Map(),
+    dmChannels = new Map();
   let dmChannel;
   client.users = {
-    async fetch() {
+    async fetch(id) {
       return {
         async createDM() {
-          if (!dmChannel) {
-            dmChannel = createChannel({ type: ChannelType.DM });
-            channels.delete(dmChannel.id);
-            const send = dmChannel.send;
-            dmChannel.send = async (data) => {
+          if (!dmChannels.has(id)) {
+            const target = createChannel({ type: ChannelType.DM });
+            channels.delete(target.id);
+            const deliveries = id === "100" ? dms : [];
+            if (id === "100") dmChannel = target;
+            else staffDms.set(id, deliveries);
+            dmChannels.set(id, target);
+            const send = target.send;
+            target.send = async (data) => {
               const result = await send(data);
-              dms.push(data);
+              deliveries.push(data);
               return result;
             };
           }
-          return dmChannel;
+          return dmChannels.get(id);
         },
         async send(data) {
           dms.push(data);
@@ -158,6 +164,9 @@ function setupDiscord(t, notices = false, dedicatedRole = false) {
           data,
           sentData: structuredClone(data),
           attachments: new Collection(),
+          async delete() {
+            messages.delete(message.id);
+          },
           async edit(data) {
             message.data = { ...message.data, ...data };
             if (data.embeds !== undefined) message.embeds = data.embeds;
@@ -370,7 +379,11 @@ function setupDiscord(t, notices = false, dedicatedRole = false) {
   };
   client.channels = {
     async fetch(id) {
-      const target = id === staffChannel?.id ? staffChannel : channels.get(id);
+      const target =
+        id === staffChannel?.id
+          ? staffChannel
+          : channels.get(id) ||
+            [...dmChannels.values()].find((dm) => dm.id === id);
       if (!target)
         throw Object.assign(new Error("Unknown channel"), { code: 10003 });
       return target;
@@ -394,6 +407,8 @@ function setupDiscord(t, notices = false, dedicatedRole = false) {
     staffChannel,
     user,
     dms,
+    staffDms,
+    dmChannels,
     createChannel,
     get dmChannel() {
       return dmChannel;
@@ -3260,6 +3275,11 @@ test("ratings from the channel and DM delete resolved tickets after capturing fo
       assert.equal(service.get(ticket.id).rating, 5);
       assert.equal(service.get(ticket.id).resolution.summary, "Solved");
       assert.equal(service.messages(ticket.id).length, 2);
+      const staffReview = app.staffDms.get("200");
+      assert.equal(staffReview.length, 1);
+      assert.match(staffReview[0].embeds[0].description, /5-star review/);
+      assert.match(staffReview[0].embeds[0].description, /★★★★★/);
+      assert.equal(app.staffDms.has("201"), false);
       await service.pump();
       assert.equal(
         service.store
@@ -3432,4 +3452,192 @@ test("Discord hierarchy and private request approval assign the requester and ke
   );
   assert.match(direct.data, /Claimed by Mod/);
   assert.equal(service.get(second.id).claimedBy.id, "203");
+});
+
+test("a new support rating privately notifies the credited staff member and its DM follows ticket erasure", async (t) => {
+  const app = setupDiscord(t, true, true);
+  const { service, transport, user, mainMembers, staffDms, dmChannels } = app;
+  mainMembers.get("201").roles.cache.set("80", {});
+  const ticket = await supportTicket(service, user, transport);
+  service.claim(await transport.staffUser("201"), ticket.id);
+  service.closeTicket(
+    await transport.staffUser("200"),
+    ticket.id,
+    { summary: "Solved", commands: "None" },
+    true,
+  );
+  await service.pump();
+  service.rate(user, ticket.id, 4, service.get(ticket.id).closureId);
+  await service.pump();
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, null);
+  assert.equal(staffDms.get("201").length, 1);
+  assert.equal(staffDms.has("200"), false);
+  const review = staffDms.get("201")[0];
+  assert.match(review.embeds[0].description, /4-star review/);
+  assert.match(review.embeds[0].description, /★★★★☆/);
+  assert.equal(
+    review.components[0].components[0].url,
+    `${app.config.staffOrigin}/tickets/${ticket.id}`,
+  );
+  assert.deepEqual(review.allowedMentions, { parse: [] });
+  for (const message of app.staffChannel.savedMessages.values())
+    assert.doesNotMatch(JSON.stringify(message.data), /4-star|4 \/ 5|★★★★/);
+  for (const message of app.dms)
+    assert.doesNotMatch(JSON.stringify(message), /4-star|4 \/ 5|★★★★/);
+  assert.equal(
+    service.store.entries("ticket-rating-delivery")[0][1].status,
+    "delivered",
+  );
+  await service.eraseInactive(ticket.id, Date.now());
+  assert.equal(dmChannels.get("201").savedMessages.size, 0);
+  assert.equal(app.dmChannel?.savedMessages.size || 0, 0);
+  assert.equal(service.store.entries("ticket-rating-delivery").length, 0);
+  assert.equal(service.store.entries("ticket-rating-send").length, 0);
+});
+
+test("staff review delivery recovers a lost response across transport restart without duplicate DMs", async (t) => {
+  const app = setupDiscord(t);
+  const { service, transport, client, user, config, policy } = app;
+  const ticket = await supportTicket(service, user, transport);
+  service.claim(await transport.staffUser("201"), ticket.id);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const dm = await (await client.users.fetch("201")).createDM();
+  dm.failAfterBotSend = true;
+  service.rate(user, ticket.id, 3);
+  await service.pump();
+  assert.equal(dm.savedMessages.size, 1);
+  const [key, job] = service.store
+    .entries("ticket-outbox")
+    .find(([, job]) => job.kind === "rating-notification");
+  assert.equal(job.attempts, 1);
+  await transport.close();
+  const restarted = ticketDiscord(config, service, client, policy);
+  t.after(() => restarted.close());
+  service.attach(restarted);
+  service.store.set(
+    "ticket-outbox",
+    key,
+    { ...job, after: 0 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await service.pump();
+  assert.equal(dm.savedMessages.size, 1);
+  assert.equal(
+    service.store.get("ticket-rating-delivery", key).status,
+    "delivered",
+  );
+  assert.equal(service.store.get("ticket-rating-send", key), undefined);
+  assert.equal(service.store.get("ticket-outbox", key), undefined);
+});
+
+test("pending staff review DMs preserve score and recipient across reopening and a different closure", async (t) => {
+  const app = setupDiscord(t);
+  const { service, transport, client, user, staffDms } = app;
+  const ticket = await supportTicket(service, user, transport);
+  service.claim(await transport.staffUser("201"), ticket.id);
+  service.closeTicket(
+    await transport.staffUser("200"),
+    ticket.id,
+    { summary: "Solved", commands: "None" },
+    true,
+  );
+  await service.pump();
+  const dm = await (await client.users.fetch("201")).createDM();
+  const send = dm.send;
+  dm.send = async () => {
+    throw Object.assign(new Error("Temporary failure"), { code: 503 });
+  };
+  service.rate(user, ticket.id, 4);
+  await service.pump();
+  assert.equal(service.get(ticket.id).channelId, null);
+  const [key, job] = service.store
+    .entries("ticket-outbox")
+    .find(([, job]) => job.kind === "rating-notification");
+  service.store.set(
+    "ticket-outbox",
+    key,
+    { ...job, after: Date.now() + 60000 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await service.reopen(user, ticket.id);
+  await service.pump();
+  service.claim(await transport.staffUser("200"), ticket.id);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  service.rate(user, ticket.id, 1);
+  await service.pump();
+  assert.match(staffDms.get("200")[0].embeds[0].description, /1-star review/);
+  dm.send = send;
+  service.store.set(
+    "ticket-outbox",
+    key,
+    { ...job, after: 0 },
+    Number.MAX_SAFE_INTEGER,
+  );
+  await service.pump();
+  assert.equal(staffDms.get("201").length, 1);
+  assert.match(staffDms.get("201")[0].embeds[0].description, /4-star review/);
+  assert.equal(service.store.get("ticket-rating-delivery", key).staffId, "201");
+});
+
+test("blocked staff DMs and revoked ticket access never expose scores in a channel or block deletion", async (t) => {
+  for (const reason of ["blocked", "access_removed"]) {
+    await t.test(reason, async (t) => {
+      const app = setupDiscord(t, true, true);
+      const { service, transport, user, client, mainMembers } = app;
+      mainMembers.get("201").roles.cache.set("80", {});
+      const ticket = await supportTicket(service, user, transport);
+      service.claim(await transport.staffUser("201"), ticket.id);
+      service.closeTicket(
+        await transport.staffUser("200"),
+        ticket.id,
+        { summary: "Solved", commands: "None" },
+        true,
+      );
+      await service.pump();
+      const dm = await (await client.users.fetch("201")).createDM();
+      if (reason === "blocked")
+        dm.send = async () => {
+          throw Object.assign(new Error("Cannot send messages to this user"), {
+            code: 50007,
+          });
+        };
+      else mainMembers.get("201").roles.cache.delete("80");
+      service.rate(user, ticket.id, 2);
+      await service.pump();
+      await service.pump();
+      assert.equal(service.get(ticket.id).channelId, null);
+      assert.equal(service.get(ticket.id).rating, 2);
+      assert.equal(dm.savedMessages.size, 0);
+      assert.equal(
+        service.store.entries("ticket-rating-delivery")[0][1].status,
+        reason,
+      );
+      assert.equal(service.store.entries("ticket-outbox").length, 0);
+      for (const message of app.staffChannel.savedMessages.values())
+        assert.doesNotMatch(JSON.stringify(message.data), /2-star|2 \/ 5|★★/);
+    });
+  }
+});
+
+test("ticket erasure recovers and deletes an uncertain staff rating DM without sending a replacement", async (t) => {
+  const app = setupDiscord(t);
+  const { service, transport, client, user } = app;
+  const ticket = await supportTicket(service, user, transport);
+  service.claim(await transport.staffUser("201"), ticket.id);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const dm = await (await client.users.fetch("201")).createDM();
+  dm.failAfterBotSend = true;
+  service.rate(user, ticket.id, 3);
+  await service.pump();
+  assert.equal(dm.savedMessages.size, 1);
+  assert.equal(service.store.entries("ticket-rating-delivery").length, 0);
+  assert.equal(service.store.entries("ticket-rating-send").length, 1);
+  await service.eraseInactive(ticket.id, Date.now());
+  assert.equal(dm.savedMessages.size, 0);
+  assert.equal(service.store.entries("ticket-rating-send").length, 0);
+  assert.equal(service.store.entries("ticket-outbox").length, 0);
 });
