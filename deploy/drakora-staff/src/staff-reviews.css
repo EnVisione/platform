@@ -27,6 +27,24 @@
 .review-tabs {
   padding: 16px 28px;
 }
+.staff-review-panel button,
+.review-tabs button,
+.account-review button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #45484e;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.staff-review-panel button:disabled,
+.review-tabs button:disabled,
+.account-review button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 .review-tabs button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-text);
