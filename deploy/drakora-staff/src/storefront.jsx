@@ -12,6 +12,7 @@ import {
   emptyCommandCatalog,
   storeCommands,
   storeRanks,
+  storeRanksForScope,
   storeScopes,
   storeBilling,
   storeProductKey,
@@ -100,7 +101,14 @@ function PlayerFace() {
 }
 
 function RankArtwork({ rank }) {
-  const crown = ["king", "duke", "earl"].includes(rank);
+  const crown = [
+    "emperor",
+    "king",
+    "archduke",
+    "prince",
+    "marquess",
+    "earl",
+  ].includes(rank);
   return (
     <svg
       className={`store-rank-art ${rank}`}
@@ -212,6 +220,8 @@ function RankComparison({
 }) {
   const coverage = storeScopes.find(({ id }) => id === scope);
   const period = storeBilling.find(({ id }) => id === billing);
+  const network = scope === "network";
+  const ranks = storeRanksForScope(scope);
   const rows = [
     {
       label: "Price",
@@ -225,6 +235,10 @@ function RankComparison({
     },
     { label: "Rank perks", value: () => "Not announced" },
     {
+      label: "Title choice",
+      value: (_product, rank) => rank.titles?.join(" or ") ?? rank.name,
+    },
+    {
       label: "Availability",
       value: (product) =>
         loading ? "Loading…" : product?.available ? "Available" : "Coming soon",
@@ -233,25 +247,35 @@ function RankComparison({
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
       <header className="store-comparison-heading">
-        <h1 id="store-compare-title">Compare ranks</h1>
+        <h1 id="store-compare-title">
+          Compare {network ? "network" : "server"} ranks
+        </h1>
         <p>
-          All seven ranks, side by side. Choose where you play and how you want
-          to pay.
+          {network
+            ? "Four premium tiers for the whole network. Emperor / Empress and King / Queen let you choose your title within the same tier."
+            : "Six lower-priced tiers for one modpack. Choose your modpack and compare its server ranks."}
         </p>
       </header>
       <div className="store-comparison-controls">
         <div
           className="store-compare-scopes"
           role="group"
-          aria-label="Rank coverage"
+          aria-label="Comparison type"
         >
-          {storeScopes.map((item) => (
+          {[
+            { id: "network", name: "Network ranks" },
+            { id: "modpack", name: "Server ranks" },
+          ].map((item) => (
             <button
               key={item.id}
               type="button"
-              className={scope === item.id ? "active" : ""}
-              aria-pressed={scope === item.id}
-              onClick={() => selectScope(item.id)}
+              className={network === (item.id === "network") ? "active" : ""}
+              aria-pressed={network === (item.id === "network")}
+              onClick={() =>
+                selectScope(
+                  item.id === "network" ? "network" : network ? "prom2" : scope,
+                )
+              }
             >
               {item.name}
             </button>
@@ -271,27 +295,52 @@ function RankComparison({
           ))}
         </div>
       </div>
+      {!network && (
+        <div
+          className="store-compare-scopes store-compare-modpacks"
+          role="group"
+          aria-label="Modpack"
+        >
+          {storeScopes
+            .filter(({ id }) => id !== "network")
+            .map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={scope === item.id ? "active" : ""}
+                aria-pressed={scope === item.id}
+                onClick={() => selectScope(item.id)}
+              >
+                {item.name}
+              </button>
+            ))}
+        </div>
+      )}
       <p className="store-compare-selection" aria-live="polite">
         {coverage.description} · {period.name}
       </p>
       <p id="store-compare-scroll" className="store-compare-scroll">
-        Scroll across to compare all seven ranks.
+        On smaller screens, scroll across to compare these{" "}
+        {network ? "four" : "six"} ranks.
       </p>
       <div
         className="store-comparison-scroll"
         role="region"
-        aria-label="Rank comparison"
+        aria-label={`${network ? "Network" : "Server"} rank comparison`}
         aria-describedby="store-compare-scroll"
         tabIndex={0}
       >
-        <table className="store-comparison-table" aria-busy={loading}>
+        <table
+          className={`store-comparison-table ${network ? "network" : "modpack"}`}
+          aria-busy={loading}
+        >
           <caption>
             {coverage.name} ranks · {period.name}
           </caption>
           <thead>
             <tr>
               <th scope="col">Rank</th>
-              {storeRanks.map((rank) => (
+              {ranks.map((rank) => (
                 <th scope="col" key={rank.id}>
                   <RankArtwork rank={rank.id} />
                   <span>{rank.name}</span>
@@ -303,16 +352,19 @@ function RankComparison({
             {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
-                {storeRanks.map((rank) => (
+                {ranks.map((rank) => (
                   <td key={rank.id}>
-                    {row.value(productFor({ rank: rank.id, scope, billing }))}
+                    {row.value(
+                      productFor({ rank: rank.id, scope, billing }),
+                      rank,
+                    )}
                   </td>
                 ))}
               </tr>
             ))}
             <tr>
               <th scope="row">Explore rank</th>
-              {storeRanks.map((rank) => (
+              {ranks.map((rank) => (
                 <td key={rank.id}>
                   <button
                     className="store-detail-button"
@@ -343,9 +395,14 @@ export function Storefront({
   commandsPage = false,
   storefrontHost = false,
 }) {
-  const [category, setCategory] = useState(
-    comparePage || commandsPage ? "network" : "home",
-  );
+  const [category, setCategory] = useState(() => {
+    const requested = new URLSearchParams(location.search).get("scope");
+    return comparePage && storeScopes.some(({ id }) => id === requested)
+      ? requested
+      : comparePage || commandsPage
+        ? "network"
+        : "home";
+  });
   const storeHome = storefrontHost ? "/" : "/store";
   const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
@@ -371,6 +428,7 @@ export function Storefront({
   const [usernameError, setUsernameError] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [details, setDetails] = useState(null);
+  const [titlePreferences, setTitlePreferences] = useState({});
   const [cart, setCart] = useState(null);
   const community = useStoreCommunity();
   const wallet = useStoreWallet();
@@ -473,8 +531,21 @@ export function Storefront({
     viewProduct({ rank });
   }
   function viewProduct(selection) {
-    setDetails({ ...selection, scope, billing });
+    const titles = storeItem(selection)?.titles;
+    setDetails({
+      ...selection,
+      scope,
+      billing,
+      ...(titles
+        ? { title: titlePreferences[selection.rank] ?? titles[0] }
+        : {}),
+    });
     setDrawer("product");
+  }
+  function selectTitle(title) {
+    if (!detailItem?.titles?.includes(title)) return;
+    setDetails({ ...details, title });
+    setTitlePreferences({ ...titlePreferences, [details.rank]: title });
   }
   function addToCart() {
     if (loading || catalogError || !detailProduct?.available) return;
@@ -746,12 +817,12 @@ export function Storefront({
                   )}
                   <p>
                     {homePage
-                      ? "A few of our planned ranks. Explore the categories for all seven tiers."
+                      ? "A few of our planned network ranks. Explore four network tiers or six server tiers for your modpack."
                       : commandsPage
                         ? `Choose a single command for ${currentScope.name}.`
                         : scope === "network"
-                          ? "Across both of our current modpacks."
-                          : currentScope.description}
+                          ? "Premium ranks across both current modpacks. Choose your title for Emperor / Empress or King / Queen."
+                          : "Lower-priced ranks for this modpack's worlds."}
                   </p>
                 </div>
                 <div
@@ -776,10 +847,10 @@ export function Storefront({
                 {(commandsPage
                   ? storeCommands
                   : homePage
-                    ? storeRanks.filter(({ id }) =>
-                        ["king", "duke", "knight"].includes(id),
+                    ? storeRanksForScope(scope).filter(({ id }) =>
+                        ["emperor", "king", "prince"].includes(id),
                       )
-                    : storeRanks
+                    : storeRanksForScope(scope)
                 ).map((item) => {
                   const selection = commandsPage
                     ? { command: item.id }
@@ -805,6 +876,11 @@ export function Storefront({
                       </button>
                       <div className="store-product-info">
                         <h3>{commandsPage ? item.invocation : item.name}</h3>
+                        {item.titles && (
+                          <p className="store-title-hint">
+                            Choose {item.titles.join(" or ")}
+                          </p>
+                        )}
                         {commandsPage && (
                           <p className="store-command-description">
                             {item.description}
@@ -851,8 +927,9 @@ export function Storefront({
                   ? "These are previews. Command behavior, prices and access terms will be confirmed before purchases open."
                   : "Prices and rank perks will be announced before purchases open."}{" "}
                 {!commandsPage && (
-                  <a href={compareHref}>
-                    Compare all ranks <PublicIcon name="arrow" />
+                  <a href={`${compareHref}?scope=${scope}`}>
+                    Compare {scope === "network" ? "network" : "server"} ranks{" "}
+                    <PublicIcon name="arrow" />
                   </a>
                 )}
               </p>
@@ -960,7 +1037,9 @@ export function Storefront({
           ) : drawer === "product" ? (
             <div className="store-product-details">
               <ProductArtwork selection={details} />
-              <h3>{detailItem.invocation ?? detailItem.name}</h3>
+              <h3>
+                {detailItem.invocation ?? details.title ?? detailItem.name}
+              </h3>
               {details.command && <p>{detailItem.description}</p>}
               <dl>
                 <div>
@@ -978,6 +1057,31 @@ export function Storefront({
                   </dd>
                 </div>
               </dl>
+              {detailItem.titles && (
+                <div className="store-title-choice">
+                  <div
+                    className="store-compare-scopes"
+                    role="group"
+                    aria-label="Preferred rank title"
+                  >
+                    {detailItem.titles.map((title) => (
+                      <button
+                        key={title}
+                        type="button"
+                        className={details.title === title ? "active" : ""}
+                        aria-pressed={details.title === title}
+                        onClick={() => selectTitle(title)}
+                      >
+                        {title}
+                      </button>
+                    ))}
+                  </div>
+                  <p>
+                    Choose your preferred title. Both titles belong to the same
+                    tier and share the same price.
+                  </p>
+                </div>
+              )}
               <strong className="store-detail-price">
                 {money(detailProduct)}
               </strong>
@@ -1005,7 +1109,7 @@ export function Storefront({
               <div className="store-cart-item">
                 <ProductArtwork selection={cart} />
                 <div>
-                  <h3>{cartItem.invocation ?? cartItem.name}</h3>
+                  <h3>{cartItem.invocation ?? cart.title ?? cartItem.name}</h3>
                   <p>
                     {storeScopes.find(({ id }) => id === cart.scope).name} ·{" "}
                     {cart.billing === "monthly" ? "Monthly" : "Lifetime"}

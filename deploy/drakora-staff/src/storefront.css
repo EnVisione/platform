@@ -376,6 +376,9 @@
   color: var(--gold);
   background: #29221b;
 }
+.store-compare-modpacks {
+  margin-top: 12px;
+}
 .store-compare-selection,
 .store-compare-scroll {
   font-size: 12px;
@@ -407,6 +410,9 @@
   border-spacing: 0;
   font-size: 12px;
   line-height: 1.6;
+}
+.store-comparison-table.network {
+  min-width: 650px;
 }
 .store-comparison-table caption {
   position: absolute;
@@ -495,16 +501,18 @@
   height: 90px;
   color: var(--gold);
 }
-.store-rank-art.duke {
+.store-rank-art.archduke,
+.store-rank-art.prince {
   color: #c3ab94;
 }
 .store-rank-art.earl,
-.store-rank-art.captain {
+.store-rank-art.marquess,
+.store-rank-art.viscount {
   color: #b69d7e;
 }
 .store-rank-art.knight,
-.store-rank-art.sergeant,
-.store-rank-art.squires {
+.store-rank-art.baron,
+.store-rank-art.lord {
   color: #a6a297;
 }
 .storefront .store-product-info h3 {
@@ -970,6 +978,15 @@
   gap: 12px;
   font-size: 13px;
   margin: 18px 0;
+}
+.store-title-hint,
+.store-title-choice p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #bdbdbd;
+}
+.store-title-choice {
+  margin-top: 24px;
 }
 .store-product-details dd {
   margin: 0;

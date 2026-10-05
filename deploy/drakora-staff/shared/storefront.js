@@ -1,11 +1,24 @@
 export const storeRanks = [
-  { id: "king", name: "King" },
-  { id: "duke", name: "Duke" },
-  { id: "earl", name: "Earl" },
-  { id: "captain", name: "Captain" },
-  { id: "knight", name: "Knight" },
-  { id: "sergeant", name: "Sergeant" },
-  { id: "squires", name: "Squires" },
+  {
+    id: "emperor",
+    name: "Emperor / Empress",
+    coverage: "network",
+    titles: ["Emperor", "Empress"],
+  },
+  {
+    id: "king",
+    name: "King / Queen",
+    coverage: "network",
+    titles: ["King", "Queen"],
+  },
+  { id: "archduke", name: "Archduke", coverage: "network" },
+  { id: "prince", name: "Prince", coverage: "network" },
+  { id: "marquess", name: "Marquess", coverage: "modpack" },
+  { id: "earl", name: "Earl", coverage: "modpack" },
+  { id: "viscount", name: "Viscount", coverage: "modpack" },
+  { id: "baron", name: "Baron", coverage: "modpack" },
+  { id: "knight", name: "Knight", coverage: "modpack" },
+  { id: "lord", name: "Lord", coverage: "modpack" },
 ];
 
 export const storeScopes = [
@@ -76,12 +89,24 @@ export function validStoreSelection(selection) {
   return Boolean(
     selection &&
       ((selection.command === undefined &&
-        storeRanks.some(({ id }) => id === selection.rank)) ||
+        storeRanksForScope(selection.scope).some(
+          ({ id, titles }) =>
+            id === selection.rank &&
+            (selection.title === undefined ||
+              titles?.includes(selection.title)),
+        )) ||
         (selection.rank === undefined &&
+          selection.title === undefined &&
           storeCommands.some(({ id }) => id === selection.command))) &&
       storeScopes.some(({ id }) => id === selection.scope) &&
       storeBilling.some(({ id }) => id === selection.billing),
   );
+}
+
+export function storeRanksForScope(scope) {
+  if (!storeScopes.some(({ id }) => id === scope)) return [];
+  const coverage = scope === "network" ? "network" : "modpack";
+  return storeRanks.filter((rank) => rank.coverage === coverage);
 }
 
 export function storeProductKey({ rank, command, scope, billing }) {
@@ -90,7 +115,7 @@ export function storeProductKey({ rank, command, scope, billing }) {
 
 export function emptyStoreCatalog() {
   return storeScopes.flatMap(({ id: scope }) =>
-    storeRanks.flatMap(({ id: rank, name }) =>
+    storeRanksForScope(scope).flatMap(({ id: rank, name }) =>
       storeBilling.map(({ id: billing }) => ({
         rank,
         name,
