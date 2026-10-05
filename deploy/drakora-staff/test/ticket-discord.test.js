@@ -9,12 +9,16 @@ import { ticketDiscord } from "../server/ticket-discord.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
-function setupDiscord(t, notices = false) {
+function setupDiscord(t, notices = false, dedicatedRole = false) {
   const config = {
     ...fixture,
     staffOrigin: "https://staff.example.invalid",
     applications: { publicOrigin: "https://example.invalid" },
-    tickets: { guildId: "2", archiveCategoryId: "archive" },
+    tickets: {
+      guildId: "2",
+      archiveCategoryId: "archive",
+      ...(dedicatedRole ? { staffRoleId: "80" } : {}),
+    },
     roleSync: {
       roles: fixture.ranks
         .filter((role) => role.dashboard)
@@ -269,7 +273,20 @@ function setupDiscord(t, notices = false) {
       },
     },
     members: {
+      get cache() {
+        return dedicatedRole ? mainMembers : undefined;
+      },
       async fetch(query) {
+        if (dedicatedRole) {
+          if (!query) return mainMembers;
+          const id = typeof query === "string" ? query : query.user;
+          if (id === user.id)
+            return { id, user, roles: { cache: new Collection() } };
+          const member = mainMembers.get(id);
+          if (!member)
+            throw Object.assign(new Error("Unknown member"), { code: 10007 });
+          return member;
+        }
         if (!query)
           return new Collection([[user.id, { user }], ...staffMembers]);
         return { user };
@@ -329,6 +346,15 @@ function setupDiscord(t, notices = false) {
       },
     },
   };
+  const mainMembers = new Collection(
+    [...staffMembers].map(([id, member]) => [
+      id,
+      {
+        ...member,
+        roles: { cache: new Collection(id === "200" ? [["80", {}]] : []) },
+      },
+    ]),
+  );
   const staffChannel = notices
     ? createChannel({ name: "staff-tickets", type: ChannelType.GuildText })
     : undefined;
@@ -364,6 +390,7 @@ function setupDiscord(t, notices = false) {
     client,
     channels,
     staffMembers,
+    mainMembers,
     staffChannel,
     user,
     dms,
@@ -376,6 +403,64 @@ function setupDiscord(t, notices = false) {
     },
   };
 }
+
+test("main-server Tickets membership controls channel and private-thread access independently of rank", async (t) => {
+  const { transport, service, mainMembers, channels, user } = setupDiscord(
+    t,
+    false,
+    true,
+  );
+  await transport.recover();
+  const ticket = service.create(user, {
+    requestId: randomUUID(),
+    ign: "Player",
+    type: "general",
+    location: "Void",
+    description: "A detailed ticket for main-server access verification.",
+  });
+  await service.pump();
+  await service.pump();
+  const channel = channels.get(service.get(ticket.id).channelId);
+  const thread = channels.get(
+    service.store.get("ticket-notes-discord", ticket.id).threadId,
+  );
+  assert.equal(
+    channel.overwrites.some((entry) => entry.id === "200"),
+    true,
+  );
+  assert.equal(
+    channel.overwrites.some((entry) => entry.id === "201"),
+    false,
+  );
+  assert.equal((await thread.members.fetch()).has("200"), true);
+  assert.equal((await thread.members.fetch()).has("201"), false);
+  assert.equal(
+    (await transport.staffUser("201")).capabilities["tickets.view"],
+    false,
+  );
+  mainMembers.get("201").roles.cache.set("80", {});
+  await transport.refreshPermissions();
+  assert.equal(
+    channel.overwrites.some((entry) => entry.id === "201"),
+    true,
+  );
+  assert.equal((await thread.members.fetch()).has("201"), true);
+  assert.equal(
+    (await transport.staffUser("201")).capabilities["tickets.claim"],
+    true,
+  );
+  mainMembers.get("200").roles.cache.delete("80");
+  await transport.refreshPermissions();
+  assert.equal(
+    channel.overwrites.some((entry) => entry.id === "200"),
+    false,
+  );
+  assert.equal((await thread.members.fetch()).has("200"), false);
+  assert.equal(
+    (await transport.staffUser("200")).capabilities["tickets.delete"],
+    false,
+  );
+});
 
 test("ticket opening creates private threads directly under regular tickets and excludes partnerships", async (t) => {
   const { service, transport, channels, user, config } = setupDiscord(t);

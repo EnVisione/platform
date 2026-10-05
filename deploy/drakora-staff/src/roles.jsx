@@ -20,7 +20,9 @@ const messages = {
     "This account could not be found in either Drakora server.",
   role_permission_dependency: "Enable the required permissions before saving.",
   ticket_category_protected:
-    "Billing is limited to Founders. Partnerships, staff reports and the partners inbox are limited to Managers and Founders.",
+    "Partnerships and the partners inbox are limited to Managers and Founders.",
+  ticket_role_required:
+    "General ticket permissions belong to the main-server Tickets role.",
 };
 async function request(path, options = {}) {
   const response = await fetch(`/api/roles${path}`, options);
@@ -81,7 +83,9 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const ranks = data.roles.filter((role) => role.id && !role.specialist);
+  const ranks = data.roles.filter(
+    (role) => role.id && !role.specialist && !role.ticket,
+  );
   const teams = data.roles.filter((role) => role.id && role.specialist);
   useEffect(() => {
     const controller = new AbortController();
@@ -643,6 +647,12 @@ export function Roles({ csrf, userId }) {
   const role = data?.roles.find((role) => role.id === selected);
   const values =
     draft.find((entry) => entry.id === selected)?.permissions ?? {};
+  const visiblePermissions =
+    data?.permissions.filter(
+      (permission) =>
+        !permission.key.startsWith("office.") &&
+        (!permission.roleIds || permission.roleIds.includes(selected)),
+    ) ?? [];
   return (
     <section className="roles-page" aria-labelledby="roles-title">
       <div className="roles-heading">
@@ -705,6 +715,8 @@ export function Roles({ csrf, userId }) {
               Turning a permission off for one role does not remove it if
               another role grants it. Enabling a permission also enables the
               access it requires.
+              {data.ticketRole &&
+                " General ticket access requires Tickets in the main Drakora server. Billing and staff reports also require a rank grant below. Removing Tickets removes all staff ticket access. Channel deletion always requires Admin or higher."}
             </p>
             <div className="role-permission-layout">
               <nav className="role-picker" aria-label="Staff roles">
@@ -734,9 +746,11 @@ export function Roles({ csrf, userId }) {
                         <small>
                           {!item.id
                             ? "Not configured"
-                            : discord?.assignable
-                              ? "Discord role ready"
-                              : "Bot hierarchy may block assignment"}
+                            : item.ticket
+                              ? "Main server only · Assign in Discord"
+                              : discord?.assignable
+                                ? "Discord role ready"
+                                : "Bot hierarchy may block assignment"}
                         </small>
                       </span>
                     </button>
@@ -753,11 +767,7 @@ export function Roles({ csrf, userId }) {
                   )}
                   {[
                     ...new Set(
-                      data.permissions
-                        .filter(
-                          (permission) => !permission.key.startsWith("office."),
-                        )
-                        .map((permission) => permission.group),
+                      visiblePermissions.map((permission) => permission.group),
                     ),
                   ].map((group) => (
                     <fieldset
@@ -765,7 +775,7 @@ export function Roles({ csrf, userId }) {
                       disabled={busy || !data.canEdit || !role.editable}
                     >
                       <legend>{group}</legend>
-                      {data.permissions
+                      {visiblePermissions
                         .filter(
                           (permission) =>
                             permission.group === group &&

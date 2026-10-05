@@ -7,6 +7,7 @@ import {
   staffPermissionCatalog,
   permissionDependencies,
   protectedFounderPermissions,
+  ticketPermissionScope,
 } from "../shared/staff-permissions.js";
 
 export function staffRoleCatalog(config) {
@@ -34,11 +35,41 @@ export function staffRoleCatalog(config) {
 
 export function rolePermissions(config, store) {
   const roles = staffRoleCatalog(config);
-  const staffPermissions = staffPermissionCatalog(config.mail?.identities);
+  const ticketRole = config.tickets?.staffRoleId;
+  if (ticketRole)
+    roles.push({
+      id: ticketRole,
+      name: "Tickets",
+      label: "Tickets",
+      ticket: true,
+    });
+  const staffPermissions = staffPermissionCatalog(
+    config.mail?.identities,
+    Boolean(ticketRole),
+  );
+  const editorPermissions = ticketRole
+    ? staffPermissions.map((permission) => ({
+        ...permission,
+        roleIds: roles
+          .filter((role) =>
+            role.ticket
+              ? ticketPermissionScope(permission.key) === "tickets"
+              : ticketPermissionScope(permission.key) !== "tickets",
+          )
+          .map((role) => role.id),
+        requires: permission.requires.filter((key) =>
+          ticketPermissionScope(permission.key) === "rank"
+            ? ticketPermissionScope(key) !== "tickets"
+            : true,
+        ),
+      }))
+    : staffPermissions;
   const keys = staffPermissions.map((permission) => permission.key);
   const managers = ["Founder", "Manager"];
   const admins = [...managers, "Admin"];
   const reviewers = [...admins, "Sr Moderator", "Moderator", "Jr Moderator"];
+  const editableCategory = (key) =>
+    Boolean(ticketRole && /^tickets\.category\.(billing|staff)\./.test(key));
   let state = store.get("role-permissions", "current") ?? {
     revision: 0,
     overrides: {},
@@ -101,6 +132,15 @@ export function rolePermissions(config, store) {
           enabled = enabled && communityRankNames.includes(role.name);
         if (key === "tickets.macros.manage")
           enabled = admins.includes(role.name);
+        if (ticketRole) {
+          if (role.ticket)
+            enabled =
+              key === "dashboard.view" ||
+              ticketPermissionScope(key) === "tickets";
+          else if (ticketPermissionScope(key) === "tickets") enabled = false;
+          else if (/^tickets\.category\.(billing|staff)\./.test(key))
+            enabled = managers.includes(role.name);
+        }
         return [key, enabled];
       }),
     );
@@ -139,9 +179,11 @@ export function rolePermissions(config, store) {
     (key.startsWith("tickets.category.") && key.endsWith(".takeover"));
   const adminOnly = deletion;
   const restricted = (key, role) =>
-    (key.startsWith("tickets.category.billing.") && role.name !== "Founder") ||
+    (!ticketRole &&
+      key.startsWith("tickets.category.billing.") &&
+      role.name !== "Founder") ||
     ((key.startsWith("tickets.category.partnership.") ||
-      key.startsWith("tickets.category.staff.") ||
+      (!ticketRole && key.startsWith("tickets.category.staff.")) ||
       key.startsWith("mail.inbox.partners@drakora.org.")) &&
       !managers.includes(role.name));
   if (!state.ticketTakeoverVersion) {
@@ -175,6 +217,34 @@ export function rolePermissions(config, store) {
       });
     });
   }
+  if (ticketRole && state.ticketRoleVersion !== 1) {
+    const overrides = structuredClone(state.overrides);
+    for (const role of roles.filter((role) => role.id && !role.ticket)) {
+      overrides[role.id] = { ...overrides[role.id] };
+      for (const key of keys) {
+        if (ticketPermissionScope(key) === "tickets")
+          overrides[role.id][key] = false;
+        if (/^tickets\.category\.(billing|staff)\./.test(key))
+          overrides[role.id][key] = managers.includes(role.name);
+      }
+    }
+    state = {
+      ...state,
+      overrides,
+      ticketRoleVersion: 1,
+      revision: state.revision + 1,
+      updatedAt: Date.now(),
+      updatedBy: { id: "system", name: "System" },
+    };
+    store.transaction(() => {
+      store.set("role-permissions", "current", state, Number.MAX_SAFE_INTEGER);
+      audit(state.updatedBy, "permissions", {
+        revision: state.revision,
+        reason:
+          "General ticket access moved to the main-server Tickets role; billing and staff reports default to Manager and Founder",
+      });
+    });
+  }
   const rank = (user) => {
     const index = communityRankNames.findIndex((name) =>
       roles.some(
@@ -190,9 +260,16 @@ export function rolePermissions(config, store) {
         ([key, value]) => [
           key,
           value &&
+            (!ticketRole ||
+              (role.ticket
+                ? key === "dashboard.view" ||
+                  ticketPermissionScope(key) === "tickets"
+                : ticketPermissionScope(key) !== "tickets")) &&
             !restricted(key, role) &&
-            (!takeover(key) || communityRankNames.includes(role.name)) &&
-            (!adminOnly(key) || admins.includes(role.name)),
+            (!takeover(key) ||
+              ticketRole ||
+              communityRankNames.includes(role.name)) &&
+            (!adminOnly(key) || role.ticket || admins.includes(role.name)),
         ],
       ),
     );
@@ -211,7 +288,7 @@ export function rolePermissions(config, store) {
   function apply(user) {
     const base = permissions(config, user.roles);
     const assigned = roles.filter(
-      (role) => role.id && user.roles?.includes(role.id),
+      (role) => role.id && !role.ticket && user.roles?.includes(role.id),
     );
     const assignedValues = assigned.map(values);
     const fallback = defaults({ name: "Staff", id: null });
@@ -228,6 +305,16 @@ export function rolePermissions(config, store) {
         granted[key] = false;
     if (isFounder(user))
       for (const key of protectedFounderPermissions) granted[key] = true;
+    if (ticketRole) {
+      const ticketValues = values(roles.find((role) => role.ticket));
+      for (const key of keys) {
+        const scope = ticketPermissionScope(key);
+        if (scope === "tickets")
+          granted[key] = user.ticketRole === true && ticketValues[key];
+        if (scope === "rank" && user.ticketRole !== true) granted[key] = false;
+        if (deletion(key) && !isAdmin(user)) granted[key] = false;
+      }
+    }
     if (!base.dashboard) granted["dashboard.view"] = false;
     if (!base.todo) granted["huly.access"] = false;
     const capabilities = permissionDependencies(granted, staffPermissions);
@@ -252,17 +339,33 @@ export function rolePermissions(config, store) {
     const current = authorize(user, "roles.view");
     return {
       revision: state.revision,
-      permissions: staffPermissions,
+      permissions: editorPermissions,
+      ticketRole: ticketRole
+        ? { id: ticketRole, guildId: config.tickets.guildId }
+        : null,
       roles: roles.map((role) => ({
         ...role,
-        permissions: permissionDependencies(values(role), staffPermissions),
+        permissions: permissionDependencies(values(role), editorPermissions),
         editable: Boolean(
-          role.id && (role.name !== "Founder" || isFounder(current)),
+          role.id &&
+          (role.name !== "Founder" || isFounder(current) || ticketRole),
         ),
         locked: [
+          ...(ticketRole
+            ? keys.filter((key) =>
+                role.ticket
+                  ? ticketPermissionScope(key) !== "tickets"
+                  : ticketPermissionScope(key) === "tickets",
+              )
+            : []),
           ...keys.filter((key) => restricted(key, role)),
-          ...(!admins.includes(role.name) ? keys.filter(adminOnly) : []),
-          ...(!isFounder(current)
+          ...(ticketRole && role.name === "Founder" && !isFounder(current)
+            ? keys.filter((key) => !editableCategory(key))
+            : []),
+          ...(!role.ticket && !admins.includes(role.name)
+            ? keys.filter(adminOnly)
+            : []),
+          ...(!ticketRole && !isFounder(current)
             ? keys.filter((key) => key.startsWith("tickets.category.billing."))
             : []),
           ...(role.name === "Founder"
@@ -301,11 +404,25 @@ export function rolePermissions(config, store) {
         keys.some((key) => typeof entry.permissions[key] !== "boolean")
       )
         throw new AuthError("invalid_role_permissions", 400);
-      const previous = permissionDependencies(values(role), staffPermissions);
+      const previous = permissionDependencies(values(role), editorPermissions);
+      if (
+        ticketRole &&
+        keys.some(
+          (key) =>
+            (role.ticket
+              ? ticketPermissionScope(key) !== "tickets"
+              : ticketPermissionScope(key) === "tickets") &&
+            entry.permissions[key] !== previous[key],
+        )
+      )
+        throw new AuthError("ticket_role_required", 400);
       if (
         role.name === "Founder" &&
         !isFounder(current) &&
-        keys.some((key) => entry.permissions[key] !== previous[key])
+        keys.some(
+          (key) =>
+            !editableCategory(key) && entry.permissions[key] !== previous[key],
+        )
       )
         throw new AuthError("founder_role_required");
       if (
@@ -319,11 +436,13 @@ export function rolePermissions(config, store) {
       )
         throw new AuthError("role_management_protected", 400);
       if (
+        !role.ticket &&
         !admins.includes(role.name) &&
         keys.some((key) => deletion(key) && entry.permissions[key])
       )
         throw new AuthError("ticket_deletion_protected", 400);
       if (
+        !ticketRole &&
         !communityRankNames.includes(role.name) &&
         keys.some((key) => takeover(key) && entry.permissions[key])
       )
@@ -332,13 +451,14 @@ export function rolePermissions(config, store) {
         keys.some(
           (key) =>
             entry.permissions[key] &&
-            staffPermissions
+            editorPermissions
               .find((permission) => permission.key === key)
               .requires.some((dependency) => !entry.permissions[dependency]),
         )
       )
         throw new AuthError("role_permission_dependency", 400);
       if (
+        !ticketRole &&
         !isFounder(current) &&
         keys.some(
           (key) =>
@@ -355,6 +475,7 @@ export function rolePermissions(config, store) {
       revision: state.revision + 1,
       ticketVisibilityVersion: 1,
       ticketTakeoverVersion: 1,
+      ticketRoleVersion: state.ticketRoleVersion,
       overrides,
       updatedAt: Date.now(),
       updatedBy: { id: user.id, name: user.name },

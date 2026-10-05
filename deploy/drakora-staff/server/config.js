@@ -434,6 +434,13 @@ export function validateConfig(config) {
       !config.roleSync ||
       !snowflake(settings.guildId) ||
       settings.guildId !== config.roleSync.guildId ||
+      !snowflake(settings.staffRoleId) ||
+      [settings.guildId, config.guildId].includes(settings.staffRoleId) ||
+      config.ranks.some((rank) => rank.id === settings.staffRoleId) ||
+      Object.values(config.accessRoles).includes(settings.staffRoleId) ||
+      config.roleSync.roles.some((role) =>
+        [role.staffId, role.mainId].includes(settings.staffRoleId),
+      ) ||
       !snowflake(settings.archiveCategoryId) ||
       (settings.staffChannelId !== undefined &&
         !snowflake(settings.staffChannelId)) ||
@@ -445,7 +452,7 @@ export function validateConfig(config) {
       settings.databaseKey === config.applications.databaseKey
     )
       throw new Error(
-        "Configure a separate ticket database key, community guild, archive category, optional staff notice channel and feedback channel, and disabled Minecraft ticket integration",
+        "Configure a separate ticket database key, community guild, dedicated main-server ticket staff role, archive category, optional staff notice channel and feedback channel, and disabled Minecraft ticket integration",
       );
   }
   if (config.honeypot !== undefined) {

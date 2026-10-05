@@ -429,10 +429,24 @@ export function discordOffice(config, store, dependencies = {}) {
     roleSync,
     emailAlerts,
     roleAdministration: discordRoleAdministration(config, client),
-    staffAvailable: () => ready && Boolean(guild?.available),
+    staffAvailable: () =>
+      ready &&
+      Boolean(guild?.available) &&
+      (!config.tickets?.staffRoleId ||
+        Boolean(client.guilds.cache.get(config.tickets.guildId)?.available)),
     async staffMember(id) {
       try {
         return await client.rest.get(Routes.guildMember(config.guildId, id));
+      } catch (error) {
+        if (error.code === 10007) return undefined;
+        throw new AuthError("discord_unavailable", 503);
+      }
+    },
+    async ticketMember(id) {
+      try {
+        return await client.rest.get(
+          Routes.guildMember(config.tickets.guildId, id),
+        );
       } catch (error) {
         if (error.code === 10007) return undefined;
         throw new AuthError("discord_unavailable", 503);

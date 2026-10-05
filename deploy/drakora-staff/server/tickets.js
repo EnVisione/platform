@@ -1017,7 +1017,7 @@ export function ticketService(
   function takeoverTarget(user, id, previousStaffId) {
     const ticket = get(id);
     staff(user, ticket, "tickets.takeover");
-    if (rolePolicy.rank(user) === null)
+    if (!config.tickets?.staffRoleId && rolePolicy.rank(user) === null)
       throw new AuthError("ticket_access_denied");
     if (!["pending", "claimed"].includes(ticket.status))
       throw new AuthError("ticket_closed", 409);
@@ -1112,7 +1112,7 @@ export function ticketService(
       throw new AuthError("ticket_takeover_request_expired", 409);
     if (approve) {
       staff(requester, ticket, "tickets.takeover");
-      if (rolePolicy.rank(requester) === null)
+      if (!config.tickets?.staffRoleId && rolePolicy.rank(requester) === null)
         throw new AuthError("ticket_takeover_requester_unavailable", 409);
     }
     store.transaction(() => {

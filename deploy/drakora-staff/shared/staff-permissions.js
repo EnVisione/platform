@@ -227,7 +227,13 @@ export const protectedFounderPermissions = [
 export const inboxPermission = (address, action = "view") =>
   `mail.inbox.${address.toLowerCase()}.${action}`;
 
-export function staffPermissionCatalog(identities = []) {
+export function ticketPermissionScope(key) {
+  if (/^tickets\.category\.(billing|staff|partnership)\./.test(key))
+    return "rank";
+  return key.startsWith("tickets.") || key === "logs.view" ? "tickets" : null;
+}
+
+export function staffPermissionCatalog(identities = [], ticketRole = false) {
   const categoryPermissions = ticketCategories.flatMap(
     ({ id: category, name }) =>
       (category === "partnership"
@@ -242,8 +248,13 @@ export function staffPermissionCatalog(identities = []) {
               ? "View partnership requests"
               : "Accept or deny partnership requests"
             : `${{ view: "View", reply: "Reply to", claim: "Claim", takeover: "Take over", close: "Resolve", delete: "Delete channels for", decide: "Accept or deny" }[action]} ${name.toLowerCase()} tickets`,
-        description:
-          category === "billing"
+        description: ticketRole
+          ? ["billing", "staff"].includes(category)
+            ? "Requires the main-server Tickets role and this rank grant. Defaults to Manager and Founder; Managers can change access for any rank."
+            : category === "partnership"
+              ? "Requires the main-server Tickets role and Manager or Founder access."
+              : "Requires the main-server Tickets role. Staff ranks do not grant general ticket access."
+          : category === "billing"
             ? "Billing access is limited to Founders. Only a Founder can change these grants."
             : ["partnership", "staff"].includes(category)
               ? "Access is limited to Managers and Founders, including messages, files, history and transcripts."

@@ -230,6 +230,7 @@ test("staff notice configuration is optional and rejects malformed channel ident
     },
     tickets: {
       guildId: "2",
+      staffRoleId: "80",
       archiveCategoryId: "8",
       databaseKey: randomBytes(32).toString("base64"),
       minecraftEnabled: false,

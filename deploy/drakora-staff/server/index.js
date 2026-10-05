@@ -128,6 +128,7 @@ const discord = discordClient(
   config.office
     ? {
         member: (id) => office.staffMember(id),
+        ticketMember: (id) => office.ticketMember(id),
         available: () => office.staffAvailable(),
       }
     : undefined,
@@ -177,10 +178,13 @@ const partnerships =
 office?.onAccessChanged((packet) => {
   const access = discord.observe(packet);
   if (access) trackerAccess?.changed();
-  if (!access?.revoked) return;
-  for (const socket of sockets)
-    if (socket.userId === access.id) socket.destroy();
-  tickets?.events.emit("staff-access-revoked", access.id);
+  if (access?.revoked)
+    for (const socket of sockets)
+      if (socket.userId === access.id) socket.destroy();
+  if (access?.revoked || access?.ticketRevoked)
+    tickets?.events.emit("staff-access-revoked", access.id);
+  for (const id of access?.ticketRevokedIds ?? [])
+    tickets?.events.emit("staff-access-revoked", id);
 });
 const overview = overviewService(config, {
   applications,

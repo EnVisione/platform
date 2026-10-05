@@ -85,7 +85,7 @@ export function discordRoleAdministration(config, client) {
 export function roleAssignments(config, store, policy, transport, sync) {
   const locks = new Map();
   let stopped = false;
-  const managed = policy.roles.filter((role) => role.id);
+  const managed = policy.roles.filter((role) => role.id && !role.ticket);
   const mappedIds = new Set(
     (config.roleSync?.roles ?? []).map((role) => role.staffId),
   );

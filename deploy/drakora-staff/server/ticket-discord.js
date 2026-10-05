@@ -52,9 +52,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     try {
       const member = await staffGuild.members.fetch({ user: id, force: true });
       if (member.pending || member.user.bot) return null;
+      const mainMember = settings.staffRoleId
+        ? await (await guild()).members.fetch({ user: id, force: true })
+        : null;
       return rolePolicy.apply({
         ...actor(member.user, member),
         roles: [...member.roles.cache.keys()],
+        ticketRole: Boolean(
+          mainMember &&
+          !mainMember.pending &&
+          mainMember.roles.cache.has(settings.staffRoleId),
+        ),
       });
     } catch (error) {
       if (error.code === 10007) return null;
@@ -64,12 +72,21 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   async function staffMembers() {
     const staffGuild = await client.guilds.fetch(config.guildId);
     const members = await discordMembers(client, staffGuild);
+    const mainMembers = settings.staffRoleId
+      ? await discordMembers(client, await guild())
+      : null;
     return [...members.values()]
       .filter((member) => !member.pending && !member.user.bot)
       .map((member) =>
         rolePolicy.apply({
           id: member.id || member.user.id,
           roles: [...member.roles.cache.keys()],
+          ticketRole: Boolean(
+            mainMembers
+              ?.get(member.id)
+              ?.roles.cache.has(settings.staffRoleId) &&
+            !mainMembers.get(member.id).pending,
+          ),
         }),
       );
   }
@@ -2098,7 +2115,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         action === "close" &&
         (!owner ||
           (staffIdentity?.capabilities["tickets.close"] &&
-            (ticket.type !== "staff" || rolePolicy.isManager(staffIdentity))))
+            staffIdentity.capabilities[
+              `tickets.category.${ticketCategory(ticket)}.close`
+            ]))
       ) {
         service.staff(user, ticket, "tickets.close");
         if (ticket.status === "closed")
@@ -2331,12 +2350,16 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     );
   const handleRaw = (event) => {
     if (
-      event.d?.guild_id === config.guildId &&
-      [
-        "GUILD_MEMBER_ADD",
-        "GUILD_MEMBER_UPDATE",
-        "GUILD_MEMBER_REMOVE",
-      ].includes(event.t)
+      ([config.guildId, settings.guildId].includes(event.d?.guild_id) &&
+        [
+          "GUILD_MEMBER_ADD",
+          "GUILD_MEMBER_UPDATE",
+          "GUILD_MEMBER_REMOVE",
+        ].includes(event.t)) ||
+      (settings.staffRoleId &&
+        event.t === "GUILD_ROLE_DELETE" &&
+        event.d?.guild_id === settings.guildId &&
+        event.d.role_id === settings.staffRoleId)
     ) {
       save("permissions-pending", { generation: randomUUID() });
       void refreshPermissions().catch(() =>
