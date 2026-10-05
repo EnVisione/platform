@@ -369,42 +369,14 @@
   font-size: 13px;
   line-height: 1.7;
 }
-.store-comparison-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 20px;
-}
-.store-compare-scopes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.store-compare-scopes button {
-  padding: 12px;
-  background: #161616;
-  color: #bdbdbd;
-  font-size: 12px;
-  border-radius: 3px;
-}
-.store-compare-scopes button.active {
-  color: var(--gold);
-  background: #29221b;
-}
-.store-compare-modpacks {
-  margin-top: 12px;
-}
-.store-compare-selection,
-.store-compare-scroll {
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 16px 0 8px;
+.store-comparison-heading p + p {
+  margin-top: 8px;
 }
 .store-compare-scroll {
   color: #999;
-  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 16px 0;
 }
 .store-comparison-scroll {
   overflow-x: auto;
@@ -467,10 +439,6 @@
   height: 46px;
   display: block;
   margin: 0 auto 12px;
-}
-.store-comparison-table tbody tr:first-child td {
-  color: var(--gold);
-  font-weight: 600;
 }
 .store-comparison-table .store-detail-button {
   white-space: nowrap;

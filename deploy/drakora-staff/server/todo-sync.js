@@ -662,7 +662,7 @@ export function discordTodoSync(
             const source = sourceValues(thread, channel, mapping);
             const titleState = store.get("discord-todo-title", thread.id);
             source.title = sourceTitle(thread, titleState);
-            const imported = !issue;
+            const imported = !issue || record?.imported === true;
             issue ??= await createIssue(
               client,
               project,
@@ -682,88 +682,101 @@ export function discordTodoSync(
                 field.attributeOf,
                 { [field.name]: url },
               );
-            const target = {
-              title: issue.title,
-              status: nameByStatus.get(issue.status),
-              assignee: issue.assignee ?? null,
-            };
-            const next = {};
-            const updates = {};
-            for (const key of ["title", "status", "assignee"]) {
-              if (source[key] === undefined || target[key] === undefined)
-                throw new Error(
-                  "Tracker or Discord task has an ambiguous workflow or assignee",
-                );
-              const legacy =
-                key === "title"
-                  ? record?.title
-                  : key === "status"
-                    ? statusNames[record?.statusKey]
-                    : undefined;
-              const previous = record?.discord ? record.discord[key] : legacy;
-              const discordChanged =
-                previous !== undefined && previous !== source[key];
-              next[key] =
-                imported ||
-                discordChanged ||
-                (!record?.discord &&
-                  key === "assignee" &&
-                  source.assignee !== null)
-                  ? source[key]
-                  : target[key];
-              if (target[key] !== next[key])
-                updates[key] =
-                  key === "status" ? statusByName.get(next[key]) : next[key];
-            }
-            if (!tagNames[next.status])
-              throw new Error(
-                "Tracker status is not supported by the Discord forum workflow",
-              );
-            const tags = await tagsForValues(
-              thread,
-              channel,
-              mapping,
-              next,
-              people,
-            );
-            const threadUpdate = {};
-            const display = displayTitle(next.title, issue, voidIssues);
-            if (display.name !== thread.name) {
-              prepareTitle(thread, display, titleState, source.title);
-              threadUpdate.name = display.name;
-            }
-            if (
-              JSON.stringify(tags.toSorted()) !==
-              JSON.stringify((thread.applied_tags ?? []).toSorted())
-            )
-              threadUpdate.applied_tags = tags;
-            if (Object.keys(threadUpdate).length) {
-              const changed = await threadDiscord(`/channels/${thread.id}`, {
-                method: "PATCH",
-                body: threadUpdate,
-              });
-              thread = { ...thread, ...changed };
-            }
-            if (Object.keys(updates).length)
-              await client.updateDoc(
-                issueClass,
-                issue.space,
-                issue._id,
-                updates,
-              );
-            record = {
-              issueId: issue._id,
-              forumId: channel.id,
-              discord: next,
-            };
-            store.set("discord-todo", thread.id, record, expiry);
             store.set(
-              "discord-todo-title",
+              "discord-todo",
               thread.id,
-              { current: display },
+              {
+                ...record,
+                issueId: issue._id,
+                forumId: channel.id,
+                ...(imported ? { imported: true } : {}),
+              },
               expiry,
             );
             store.set("huly-todo", issue._id, { threadId: thread.id }, expiry);
+            await attempt(async () => {
+              const target = {
+                title: issue.title,
+                status: nameByStatus.get(issue.status),
+                assignee: issue.assignee ?? null,
+              };
+              const next = {};
+              const updates = {};
+              for (const key of ["title", "status", "assignee"]) {
+                if (source[key] === undefined || target[key] === undefined)
+                  throw new Error(
+                    "Tracker or Discord task has an ambiguous workflow or assignee",
+                  );
+                const legacy =
+                  key === "title"
+                    ? record?.title
+                    : key === "status"
+                      ? statusNames[record?.statusKey]
+                      : undefined;
+                const previous = record?.discord ? record.discord[key] : legacy;
+                const discordChanged =
+                  previous !== undefined && previous !== source[key];
+                next[key] =
+                  imported ||
+                  discordChanged ||
+                  (!record?.discord &&
+                    key === "assignee" &&
+                    source.assignee !== null)
+                    ? source[key]
+                    : target[key];
+                if (target[key] !== next[key])
+                  updates[key] =
+                    key === "status" ? statusByName.get(next[key]) : next[key];
+              }
+              if (!tagNames[next.status])
+                throw new Error(
+                  "Tracker status is not supported by the Discord forum workflow",
+                );
+              const tags = await tagsForValues(
+                thread,
+                channel,
+                mapping,
+                next,
+                people,
+              );
+              const threadUpdate = {};
+              const display = displayTitle(next.title, issue, voidIssues);
+              if (display.name !== thread.name) {
+                prepareTitle(thread, display, titleState, source.title);
+                threadUpdate.name = display.name;
+              }
+              if (
+                JSON.stringify(tags.toSorted()) !==
+                JSON.stringify((thread.applied_tags ?? []).toSorted())
+              )
+                threadUpdate.applied_tags = tags;
+              if (Object.keys(threadUpdate).length) {
+                const changed = await threadDiscord(`/channels/${thread.id}`, {
+                  method: "PATCH",
+                  body: threadUpdate,
+                });
+                thread = { ...thread, ...changed };
+              }
+              if (Object.keys(updates).length)
+                await client.updateDoc(
+                  issueClass,
+                  issue.space,
+                  issue._id,
+                  updates,
+                );
+              record = {
+                issueId: issue._id,
+                forumId: channel.id,
+                discord: next,
+              };
+              store.set("discord-todo", thread.id, record, expiry);
+              store.set(
+                "discord-todo-title",
+                thread.id,
+                { current: display },
+                expiry,
+              );
+            });
             await syncComments({
               client,
               authorClient,

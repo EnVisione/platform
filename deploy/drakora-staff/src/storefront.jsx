@@ -192,37 +192,10 @@ function StoreDrawer({ title, onClose, children }) {
   );
 }
 
-function RankComparison({
-  scope,
-  billing,
-  loading,
-  productFor,
-  viewRank,
-  selectScope,
-  selectBilling,
-}) {
+function RankComparison({ scope, viewRank }) {
   const coverage = storeScopes.find(({ id }) => id === scope);
-  const period = storeBilling.find(({ id }) => id === billing);
   const network = scope === "network";
   const ranks = storeRanksForScope(scope);
-  const rows = [
-    {
-      label: "Price",
-      value: (product) => (loading ? "Loading…" : money(product)),
-    },
-    { label: "Where it applies", value: () => coverage.name },
-    {
-      label: "Payment",
-      value: () =>
-        billing === "monthly" ? "Monthly subscription" : "One payment",
-    },
-    { label: "Rank perks", value: () => "Not announced" },
-    {
-      label: "Availability",
-      value: (product) =>
-        loading ? "Loading…" : product?.available ? "Available" : "Coming soon",
-    },
-  ];
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
       <header className="store-comparison-heading">
@@ -231,73 +204,14 @@ function RankComparison({
         </h1>
         <p>
           {network
-            ? "Four premium tiers for the whole network. Compare their coverage and payment options."
-            : "Six lower-priced tiers for one modpack. Choose your modpack and compare its server ranks."}
+            ? `All four ranks cover ${coverage.description}.`
+            : `All six ranks apply to ${coverage.name} only.`}
+        </p>
+        <p>
+          Monthly and lifetime options share the same perks. Prices and perks
+          will be announced before purchases open.
         </p>
       </header>
-      <div className="store-comparison-controls">
-        <div
-          className="store-compare-scopes"
-          role="group"
-          aria-label="Comparison type"
-        >
-          {[
-            { id: "network", name: "Network ranks" },
-            { id: "modpack", name: "Server ranks" },
-          ].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={network === (item.id === "network") ? "active" : ""}
-              aria-pressed={network === (item.id === "network")}
-              onClick={() =>
-                selectScope(
-                  item.id === "network" ? "network" : network ? "prom2" : scope,
-                )
-              }
-            >
-              {item.name}
-            </button>
-          ))}
-        </div>
-        <div className="store-billing" role="group" aria-label="Payment period">
-          {storeBilling.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={billing === item.id ? "active" : ""}
-              aria-pressed={billing === item.id}
-              onClick={() => selectBilling(item.id)}
-            >
-              {item.name}
-            </button>
-          ))}
-        </div>
-      </div>
-      {!network && (
-        <div
-          className="store-compare-scopes store-compare-modpacks"
-          role="group"
-          aria-label="Modpack"
-        >
-          {storeScopes
-            .filter(({ id }) => id !== "network")
-            .map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={scope === item.id ? "active" : ""}
-                aria-pressed={scope === item.id}
-                onClick={() => selectScope(item.id)}
-              >
-                {item.name}
-              </button>
-            ))}
-        </div>
-      )}
-      <p className="store-compare-selection" aria-live="polite">
-        {coverage.description} · {period.name}
-      </p>
       <p id="store-compare-scroll" className="store-compare-scroll">
         On smaller screens, scroll across to compare these{" "}
         {network ? "four" : "six"} ranks.
@@ -311,11 +225,8 @@ function RankComparison({
       >
         <table
           className={`store-comparison-table ${network ? "network" : "modpack"}`}
-          aria-busy={loading}
         >
-          <caption>
-            {coverage.name} ranks · {period.name}
-          </caption>
+          <caption>{coverage.name} ranks</caption>
           <thead>
             <tr>
               <th scope="col">Rank</th>
@@ -328,16 +239,6 @@ function RankComparison({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.label}>
-                <th scope="row">{row.label}</th>
-                {ranks.map((rank) => (
-                  <td key={rank.id}>
-                    {row.value(productFor({ rank: rank.id, scope, billing }))}
-                  </td>
-                ))}
-              </tr>
-            ))}
             <tr>
               <th scope="row">Explore rank</th>
               {ranks.map((rank) => (
@@ -356,9 +257,6 @@ function RankComparison({
           </tbody>
         </table>
       </div>
-      <p className="store-catalog-note">
-        Prices and rank perks will be announced before purchases open.
-      </p>
     </section>
   );
 }
@@ -754,15 +652,7 @@ export function Storefront({
             </div>
           )}
           {comparePage ? (
-            <RankComparison
-              scope={scope}
-              billing={billing}
-              loading={loading}
-              productFor={productFor}
-              viewRank={viewRank}
-              selectScope={selectCategory}
-              selectBilling={setBilling}
-            />
+            <RankComparison scope={scope} viewRank={viewRank} />
           ) : (
             <section
               className="store-catalog"

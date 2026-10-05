@@ -1307,6 +1307,69 @@ test("tag updates do not resend titles and one throttled post does not block ano
   );
 });
 
+test("ambiguous tags preserve links and synchronize comments both ways", async (t) => {
+  for (const [name, tags] of [
+    ["assignees", ["32", "33"]],
+    ["workflow", ["30", "31"]],
+  ]) {
+    await t.test(name, async (t) => {
+      const s = fixture(t);
+      s.thread.applied_tags = [...tags];
+      s.discordComment();
+      await assert.rejects(s.sync.sync(), /ambiguous/);
+      const issueId = s.issues[0]._id;
+      assert.equal(s.store.get("discord-todo", "100").issueId, issueId);
+      assert.equal(s.store.get("huly-todo", issueId).threadId, "100");
+      assert.equal(s.comments.length, 1);
+      assert.equal(s.comments[0].message, commentMarkup("Discord reply"));
+      assert.equal(s.comments[0].createdAccount, "envy-account");
+      assert.deepEqual(s.thread.applied_tags, tags);
+      assert.equal(s.issues[0].assignee, null);
+      assert.equal(s.issues[0].status, "pending");
+
+      s.nativeComment();
+      await assert.rejects(s.sync.sync(), /ambiguous/);
+      const reply = [...s.messages.values()].find(
+        (message) => message.webhook_id,
+      );
+      assert.equal(reply.content, "Tracker reply");
+      s.discordComment("110", "Edited Discord reply");
+      const native = s.comments.find(
+        (comment) => comment._id === "native-comment",
+      );
+      native.message = commentMarkup("Edited Tracker reply");
+      await assert.rejects(s.sync.sync(), /ambiguous/);
+      assert.equal(
+        s.comments.find((comment) => comment._id !== native._id).message,
+        commentMarkup("Edited Discord reply"),
+      );
+      assert.equal(s.messages.get(reply.id).content, "Edited Tracker reply");
+
+      const restarted = await s.restart();
+      await assert.rejects(restarted.sync(), /ambiguous/);
+      assert.equal(s.issues.length, 1);
+      assert.equal(s.comments.length, 2);
+      assert.equal(s.messages.size, 3);
+      s.messages.delete("110");
+      s.comments.splice(s.comments.indexOf(native), 1);
+      await assert.rejects(restarted.sync(), /ambiguous/);
+      assert.equal(s.comments.length, 0);
+      assert.equal(s.messages.size, 1);
+      assert.deepEqual(s.thread.applied_tags, tags);
+      s.thread.applied_tags = [name === "workflow" ? "31" : "32"];
+      await restarted.sync();
+      assert.equal(s.issues.length, 1);
+      assert.equal(s.comments.length, 0);
+      assert.equal(
+        s.issues[0].status,
+        name === "workflow" ? "completed" : "pending",
+      );
+      assert.equal(s.issues[0].assignee, name === "assignees" ? "envy" : null);
+      assert.equal(s.store.get("discord-todo", "100").imported, undefined);
+    });
+  }
+});
+
 test("ambiguous assignee tags hold the task and long Tracker titles do not trigger loops", async (t) => {
   const s = fixture(t);
   await s.sync.sync();
