@@ -85,12 +85,12 @@ function savedUsername() {
 
 function RankArtwork({ rank }) {
   const crown = [
-    "emperor",
-    "king",
-    "archduke",
-    "prince",
-    "marquess",
-    "earl",
+    "ruler",
+    "monarch",
+    "sovereign",
+    "regent",
+    "harbinger",
+    "dovahkiin",
   ].includes(rank);
   return (
     <svg
@@ -218,10 +218,6 @@ function RankComparison({
     },
     { label: "Rank perks", value: () => "Not announced" },
     {
-      label: "Title choice",
-      value: (_product, rank) => rank.titles?.join(" or ") ?? rank.name,
-    },
-    {
       label: "Availability",
       value: (product) =>
         loading ? "Loading…" : product?.available ? "Available" : "Coming soon",
@@ -235,7 +231,7 @@ function RankComparison({
         </h1>
         <p>
           {network
-            ? "Four premium tiers for the whole network. Emperor / Empress and King / Queen let you choose your title within the same tier."
+            ? "Four premium tiers for the whole network. Compare their coverage and payment options."
             : "Six lower-priced tiers for one modpack. Choose your modpack and compare its server ranks."}
         </p>
       </header>
@@ -337,10 +333,7 @@ function RankComparison({
                 <th scope="row">{row.label}</th>
                 {ranks.map((rank) => (
                   <td key={rank.id}>
-                    {row.value(
-                      productFor({ rank: rank.id, scope, billing }),
-                      rank,
-                    )}
+                    {row.value(productFor({ rank: rank.id, scope, billing }))}
                   </td>
                 ))}
               </tr>
@@ -411,7 +404,6 @@ export function Storefront({
   const [usernameError, setUsernameError] = useState("");
   const [drawer, setDrawer] = useState(null);
   const [details, setDetails] = useState(null);
-  const [titlePreferences, setTitlePreferences] = useState({});
   const [cart, setCart] = useState(null);
   const community = useStoreCommunity();
   const wallet = useStoreWallet();
@@ -514,21 +506,12 @@ export function Storefront({
     viewProduct({ rank });
   }
   function viewProduct(selection) {
-    const titles = storeItem(selection)?.titles;
     setDetails({
       ...selection,
       scope,
       billing,
-      ...(titles
-        ? { title: titlePreferences[selection.rank] ?? titles[0] }
-        : {}),
     });
     setDrawer("product");
-  }
-  function selectTitle(title) {
-    if (!detailItem?.titles?.includes(title)) return;
-    setDetails({ ...details, title });
-    setTitlePreferences({ ...titlePreferences, [details.rank]: title });
   }
   function addToCart() {
     if (loading || catalogError || !detailProduct?.available) return;
@@ -804,7 +787,7 @@ export function Storefront({
                       : commandsPage
                         ? `Choose a single command for ${currentScope.name}.`
                         : scope === "network"
-                          ? "Premium ranks across both current modpacks. Choose your title for Emperor / Empress or King / Queen."
+                          ? "Premium ranks across both current modpacks."
                           : "Lower-priced ranks for this modpack's worlds."}
                   </p>
                 </div>
@@ -831,7 +814,7 @@ export function Storefront({
                   ? storeCommands
                   : homePage
                     ? storeRanksForScope(scope).filter(({ id }) =>
-                        ["emperor", "king", "prince"].includes(id),
+                        ["ruler", "monarch", "regent"].includes(id),
                       )
                     : storeRanksForScope(scope)
                 ).map((item) => {
@@ -859,11 +842,6 @@ export function Storefront({
                       </button>
                       <div className="store-product-info">
                         <h3>{commandsPage ? item.invocation : item.name}</h3>
-                        {item.titles && (
-                          <p className="store-title-hint">
-                            Choose {item.titles.join(" or ")}
-                          </p>
-                        )}
                         {commandsPage && (
                           <p className="store-command-description">
                             {item.description}
@@ -1020,9 +998,7 @@ export function Storefront({
           ) : drawer === "product" ? (
             <div className="store-product-details">
               <ProductArtwork selection={details} />
-              <h3>
-                {detailItem.invocation ?? details.title ?? detailItem.name}
-              </h3>
+              <h3>{detailItem.invocation ?? detailItem.name}</h3>
               {details.command && <p>{detailItem.description}</p>}
               <dl>
                 <div>
@@ -1040,31 +1016,6 @@ export function Storefront({
                   </dd>
                 </div>
               </dl>
-              {detailItem.titles && (
-                <div className="store-title-choice">
-                  <div
-                    className="store-compare-scopes"
-                    role="group"
-                    aria-label="Preferred rank title"
-                  >
-                    {detailItem.titles.map((title) => (
-                      <button
-                        key={title}
-                        type="button"
-                        className={details.title === title ? "active" : ""}
-                        aria-pressed={details.title === title}
-                        onClick={() => selectTitle(title)}
-                      >
-                        {title}
-                      </button>
-                    ))}
-                  </div>
-                  <p>
-                    Choose your preferred title. Both titles belong to the same
-                    tier and share the same price.
-                  </p>
-                </div>
-              )}
               <strong className="store-detail-price">
                 {money(detailProduct)}
               </strong>
@@ -1092,7 +1043,7 @@ export function Storefront({
               <div className="store-cart-item">
                 <ProductArtwork selection={cart} />
                 <div>
-                  <h3>{cartItem.invocation ?? cart.title ?? cartItem.name}</h3>
+                  <h3>{cartItem.invocation ?? cartItem.name}</h3>
                   <p>
                     {storeScopes.find(({ id }) => id === cart.scope).name} ·{" "}
                     {cart.billing === "monthly" ? "Monthly" : "Lifetime"}

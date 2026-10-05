@@ -12,7 +12,6 @@ import {
   emptyCommandCatalog,
   validStoreSelection,
   storeProductKey,
-  storeRanks,
 } from "../shared/storefront.js";
 
 const apiOrigin = "https://headless.tebex.io";
@@ -76,7 +75,6 @@ export function validateStorefront(config) {
       : undefined;
     if (
       !key ||
-      product.title !== undefined ||
       (settings.products.includes(product)
         ? product.rank === undefined
         : product.command === undefined) ||
@@ -204,7 +202,6 @@ export function storefrontService(settings = {}, fetcher = fetch) {
       const mapping = mappings.find(
         (product) => storeProductKey(product) === storeProductKey(input),
       );
-      const rank = storeRanks.find(({ id }) => id === input.rank);
       const basket = (
         await api("/baskets", {
           username: input.username,
@@ -212,14 +209,6 @@ export function storefrontService(settings = {}, fetcher = fetch) {
           complete_url: `${origin}/store/thank-you`,
           cancel_url: `${origin}/store${input.command ? "/commands" : ""}`,
           complete_auto_redirect: true,
-          ...(rank?.titles
-            ? {
-                custom: {
-                  rank: rank.id,
-                  rank_title: input.title ?? rank.titles[0],
-                },
-              }
-            : {}),
         })
       ).data;
       if (!validIdent(basket?.ident)) throw failure("store_unavailable");

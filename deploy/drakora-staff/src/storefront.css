@@ -518,18 +518,18 @@
   height: 90px;
   color: var(--gold);
 }
-.store-rank-art.archduke,
-.store-rank-art.prince {
+.store-rank-art.sovereign,
+.store-rank-art.regent {
   color: #c3ab94;
 }
-.store-rank-art.earl,
-.store-rank-art.marquess,
-.store-rank-art.viscount {
+.store-rank-art.harbinger,
+.store-rank-art.dovahkiin,
+.store-rank-art.dragonborn {
   color: #b69d7e;
 }
-.store-rank-art.knight,
-.store-rank-art.baron,
-.store-rank-art.lord {
+.store-rank-art.thane,
+.store-rank-art.warden,
+.store-rank-art.adventurer {
   color: #a6a297;
 }
 .storefront .store-product-info h3 {
@@ -1025,15 +1025,6 @@
   gap: 12px;
   font-size: 13px;
   margin: 18px 0;
-}
-.store-title-hint,
-.store-title-choice p {
-  font-size: 12px;
-  line-height: 1.7;
-  color: #bdbdbd;
-}
-.store-title-choice {
-  margin-top: 24px;
 }
 .store-product-details dd {
   margin: 0;

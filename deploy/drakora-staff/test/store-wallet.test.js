@@ -269,7 +269,7 @@ test("checkout applies only the server selected card to the Tebex basket", async
       allowPurchases: true,
       products: [
         {
-          rank: "king",
+          rank: "monarch",
           scope: "network",
           billing: "lifetime",
           packageId: 1,
@@ -302,7 +302,7 @@ test("checkout applies only the server selected card to the Tebex basket", async
   );
   const result = await service.checkout(
     {
-      rank: "king",
+      rank: "monarch",
       scope: "network",
       billing: "lifetime",
       username: "PlayerOne",

@@ -15,7 +15,7 @@ import {
 } from "../server/storefront.js";
 
 const mapping = {
-  rank: "king",
+  rank: "monarch",
   scope: "network",
   billing: "monthly",
   packageId: 101,
@@ -35,7 +35,7 @@ const remoteProduct = {
   currency: "USD",
 };
 const request = {
-  rank: "king",
+  rank: "monarch",
   scope: "network",
   billing: "monthly",
   username: "Test_Player",
@@ -49,12 +49,12 @@ test("coming-soon catalog separates four network tiers and six modpack tiers wit
   const catalog = emptyStoreCatalog();
   assert.deepEqual(
     storeRanksForScope("network").map(({ name }) => name),
-    ["Emperor / Empress", "King / Queen", "Archduke", "Prince"],
+    ["Ruler", "Monarch", "Sovereign", "Regent"],
   );
   for (const scope of ["prom2", "restless-horizons"])
     assert.deepEqual(
       storeRanksForScope(scope).map(({ name }) => name),
-      ["Marquess", "Earl", "Viscount", "Baron", "Knight", "Lord"],
+      ["Harbinger", "Dovahkiin", "Dragonborn", "Warden", "Thane", "Adventurer"],
     );
   assert.equal(catalog.length, 32);
   assert.equal(new Set(catalog.map(storeProductKey)).size, 32);
@@ -100,55 +100,30 @@ test("coming-soon catalog separates four network tiers and six modpack tiers wit
   );
 });
 
-test("rank scope and title choices cannot change product identity or cross category boundaries", async () => {
+test("rank selections reject other categories, retired ranks and alternate titles", () => {
   for (const selection of emptyStoreCatalog())
     assert.equal(validStoreSelection(selection), true);
   for (const selection of [
     { ...request, scope: "prom2" },
-    { ...request, rank: "marquess" },
-    { ...request, rank: "duke" },
-    { ...request, title: "Empress" },
-    { ...request, rank: "prince", title: "Princess" },
-    { command: "hat", scope: "network", billing: "monthly", title: "Queen" },
+    { ...request, rank: "harbinger" },
+    { ...request, title: "Monarch" },
+    { command: "hat", scope: "network", billing: "monthly", title: "Monarch" },
   ])
     assert.equal(validStoreSelection(selection), false);
-  for (const [rank, titles] of [
-    ["king", ["King", "Queen"]],
-    ["emperor", ["Emperor", "Empress"]],
-  ]) {
-    const calls = [];
-    const ident = "titles-12345678901234567890";
-    const service = storefrontService(
-      { ...settings, products: [{ ...mapping, rank }] },
-      async (url, options) => {
-        calls.push({ url, options });
-        if (options.method === "GET") return reply([remoteProduct]);
-        if (url.endsWith("/baskets")) return reply({ ident });
-        return reply({
-          packages: [{ id: 101, type: "subscription" }],
-          links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
-        });
-      },
-    );
-    for (const title of titles) {
-      const selection = { ...request, rank, title };
-      assert.equal(validStoreSelection(selection), true);
-      assert.equal(
-        storeProductKey(selection),
-        storeProductKey({ ...request, rank }),
-      );
-      calls.length = 0;
-      await service.checkout(selection, "192.0.2.5", settings.origin);
-      assert.deepEqual(JSON.parse(calls[1].options.body).custom, {
-        rank,
-        rank_title: title,
-      });
-      assert.deepEqual(JSON.parse(calls[2].options.body), {
-        package_id: "101",
-        quantity: 1,
-      });
-    }
-  }
+  for (const rank of [
+    "emperor",
+    "king",
+    "archduke",
+    "prince",
+    "marquess",
+    "earl",
+    "viscount",
+    "baron",
+    "knight",
+    "lord",
+  ])
+    for (const scope of ["network", "prom2", "restless-horizons"])
+      assert.equal(validStoreSelection({ ...request, rank, scope }), false);
 });
 
 test("configuration rejects overlapping hosts, duplicate packages, unverified delivery and non-monthly subscription mappings", () => {
@@ -167,8 +142,8 @@ test("configuration rejects overlapping hosts, duplicate packages, unverified de
     { ...settings, products: [{ ...mapping, deliveryVerified: false }] },
     { ...settings, products: [{ ...mapping, interval: "P1Y" }] },
     { ...settings, products: [{ ...mapping, rank: "founder" }] },
-    { ...settings, products: [{ ...mapping, rank: "earl" }] },
-    { ...settings, products: [{ ...mapping, title: "Queen" }] },
+    { ...settings, products: [{ ...mapping, rank: "dovahkiin" }] },
+    { ...settings, products: [{ ...mapping, title: "Monarch" }] },
   ])
     assert.throws(() => validateStorefront({ ...base, storefront }));
 });
@@ -219,8 +194,8 @@ test("checkout uses the configured package and customer IP, ignores client price
   for (const input of [
     { ...request, scope: "unknown" },
     { ...request, scope: "prom2" },
-    { ...request, rank: "earl" },
-    { ...request, title: "Empress" },
+    { ...request, rank: "dovahkiin" },
+    { ...request, title: "Monarch" },
     { ...request, username: "a<script>" },
   ])
     await assert.rejects(
@@ -242,7 +217,7 @@ test("checkout uses the configured package and customer IP, ignores client price
     package_id: "101",
     quantity: 1,
   });
-  assert.deepEqual(basket.custom, { rank: "king", rank_title: "King" });
+  assert.equal(basket.custom, undefined);
   assert.equal(
     calls[2].url,
     `https://headless.tebex.io/api/baskets/${ident}/packages`,
@@ -462,7 +437,7 @@ test("an individual command checkout adds only its verified package and preserve
   );
   for (const input of [
     { ...selected, command: "ban" },
-    { ...selected, rank: "king" },
+    { ...selected, rank: "monarch" },
     { ...selected, username: "<script>" },
   ])
     await assert.rejects(
