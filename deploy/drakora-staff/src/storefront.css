@@ -989,6 +989,28 @@
   height: 150px;
   margin: 0 auto 32px;
 }
+.store-server-choice label {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--gold);
+  font-weight: 600;
+}
+.store-server-choice select {
+  border: 0;
+  outline: none;
+  font: inherit;
+  width: 100%;
+  padding: 15px;
+  background: #252525;
+  color: #f2f3f5;
+  border-radius: 4px;
+}
+.store-server-choice select:focus-visible {
+  background: #32302b;
+}
+.store-server-choice p {
+  color: #aaa;
+}
 .store-product-details dl > div {
   display: flex;
   justify-content: space-between;

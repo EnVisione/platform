@@ -244,6 +244,65 @@ test("checkout refreshes cached availability before making a basket", async () =
   assert.equal(count, 2);
 });
 
+test("server ranks require a server and checkout uses that server's package", async () => {
+  const mappings = [
+    { ...mapping, rank: "harbinger", scope: "prom2", packageId: 102 },
+    {
+      ...mapping,
+      rank: "harbinger",
+      scope: "restless-horizons",
+      packageId: 103,
+    },
+  ];
+  const calls = [];
+  const ident = "server-12345678901234567890";
+  const service = storefrontService(
+    { ...settings, products: mappings },
+    async (url, options) => {
+      calls.push({ url, options });
+      if (options.method === "GET")
+        return reply(
+          mappings.map(({ packageId }) => ({
+            ...remoteProduct,
+            id: packageId,
+          })),
+        );
+      if (url.endsWith("/baskets")) return reply({ ident });
+      return reply({
+        packages: [
+          {
+            id: Number(JSON.parse(options.body).package_id),
+            type: "subscription",
+          },
+        ],
+        links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
+      });
+    },
+  );
+  for (const scope of [undefined, "", "server", "network", "unknown"])
+    await assert.rejects(
+      service.checkout(
+        { ...request, rank: "harbinger", scope },
+        "192.0.2.5",
+        settings.origin,
+      ),
+      { code: "invalid_store_selection" },
+    );
+  assert.equal(calls.length, 0);
+  for (const { scope, packageId } of mappings) {
+    calls.length = 0;
+    await service.checkout(
+      { ...request, rank: "harbinger", scope, packageId: 999 },
+      "192.0.2.5",
+      settings.origin,
+    );
+    assert.deepEqual(JSON.parse(calls[2].options.body), {
+      package_id: String(packageId),
+      quantity: 1,
+    });
+  }
+});
+
 test("lifetime checkout verifies a single payment and rejects unsafe checkout links", async () => {
   const lifetime = { ...mapping, billing: "lifetime", interval: undefined };
   for (const checkout of [

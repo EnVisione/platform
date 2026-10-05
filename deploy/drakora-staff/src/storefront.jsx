@@ -17,6 +17,7 @@ import {
   storeScopes,
   storeBilling,
   storeProductKey,
+  validStoreSelection,
 } from "../shared/storefront.js";
 import logo from "./assets/drakora-logo.png";
 import "./storefront.css";
@@ -148,6 +149,16 @@ const storeItem = (selection) =>
     ? storeCommands.find(({ id }) => id === selection.command)
     : storeRanks.find(({ id }) => id === selection.rank);
 const initialCatalog = () => [...emptyStoreCatalog(), ...emptyCommandCatalog()];
+const rankCategories = [
+  { id: "network", name: "Network ranks" },
+  { id: "server", name: "Server-specific ranks" },
+];
+const serverScopes = storeScopes.filter(({ id }) => id !== "network");
+const ranksForCategory = (category) =>
+  storeRanks.filter(
+    ({ coverage }) =>
+      coverage === (category === "server" ? "modpack" : "network"),
+  );
 
 function StoreDrawer({ title, onClose, children }) {
   const dialog = useRef(null);
@@ -155,7 +166,7 @@ function StoreDrawer({ title, onClose, children }) {
     const trigger = document.activeElement;
     const element = dialog.current;
     element.showModal();
-    element.querySelector("input")?.focus();
+    element.querySelector("input, select")?.focus();
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -192,10 +203,9 @@ function StoreDrawer({ title, onClose, children }) {
   );
 }
 
-function RankComparison({ scope, viewRank }) {
-  const coverage = storeScopes.find(({ id }) => id === scope);
-  const network = scope === "network";
-  const ranks = storeRanksForScope(scope);
+function RankComparison({ category, viewRank }) {
+  const network = category === "network";
+  const ranks = ranksForCategory(category);
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
       <header className="store-comparison-heading">
@@ -204,8 +214,8 @@ function RankComparison({ scope, viewRank }) {
         </h1>
         <p>
           {network
-            ? `All four ranks cover ${coverage.description}.`
-            : `All six ranks apply to ${coverage.name} only.`}
+            ? "All four ranks cover Prominence II and Restless Horizons."
+            : "All six ranks apply to one modpack. Choose your server before adding a rank to your cart."}
         </p>
         <p>
           Monthly and lifetime options share the same perks. Prices and perks
@@ -226,7 +236,7 @@ function RankComparison({ scope, viewRank }) {
         <table
           className={`store-comparison-table ${network ? "network" : "modpack"}`}
         >
-          <caption>{coverage.name} ranks</caption>
+          <caption>{network ? "Network" : "Server-specific"} ranks</caption>
           <thead>
             <tr>
               <th scope="col">Rank</th>
@@ -271,8 +281,10 @@ export function Storefront({
 }) {
   const [category, setCategory] = useState(() => {
     const requested = new URLSearchParams(location.search).get("scope");
-    return comparePage && storeScopes.some(({ id }) => id === requested)
-      ? requested
+    return comparePage &&
+      (requested === "server" ||
+        serverScopes.some(({ id }) => id === requested))
+      ? "server"
       : comparePage || commandsPage
         ? "network"
         : "home";
@@ -281,6 +293,7 @@ export function Storefront({
   const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
   const scope = category === "home" ? "network" : category;
+  const serverRanks = !commandsPage && category === "server";
   const homePage = !comparePage && !commandsPage && category === "home";
   const [giftRequested, setGiftRequested] = useState(
     () => location.hash === "#store-gift-cards",
@@ -351,6 +364,7 @@ export function Storefront({
   const cartProduct = productFor(cart);
   const detailProduct = productFor(details);
   const detailItem = details && storeItem(details);
+  const detailNeedsServer = detailItem?.coverage === "modpack";
   const cartItem = cart && storeItem(cart);
   const currentScope = storeScopes.find(({ id }) => id === scope);
   const purchaseReady = !loading && !catalogError && cartProduct?.available;
@@ -404,15 +418,22 @@ export function Storefront({
     viewProduct({ rank });
   }
   function viewProduct(selection) {
+    const rank = selection.rank && storeItem(selection);
     setDetails({
       ...selection,
-      scope,
+      scope: rank ? (rank.coverage === "network" ? "network" : "") : scope,
       billing,
     });
     setDrawer("product");
   }
   function addToCart() {
-    if (loading || catalogError || !detailProduct?.available) return;
+    if (
+      loading ||
+      catalogError ||
+      !validStoreSelection(details) ||
+      !detailProduct?.available
+    )
+      return;
     setCart(details);
     setError("");
     setCheckoutUrl("");
@@ -589,7 +610,7 @@ export function Storefront({
             <span className="store-nav-label">
               {commandsPage ? "COMMAND COVERAGE" : "RANKS"}
             </span>
-            {storeScopes.map((item) => (
+            {(commandsPage ? storeScopes : rankCategories).map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -604,12 +625,7 @@ export function Storefront({
                 }
                 onClick={() => selectCategory(item.id)}
               >
-                <PublicIcon name="servers" />{" "}
-                {item.id === "network"
-                  ? commandsPage
-                    ? "Whole network"
-                    : "Network ranks"
-                  : item.name}
+                <PublicIcon name="servers" /> {item.name}
               </button>
             ))}
           </nav>
@@ -652,7 +668,7 @@ export function Storefront({
             </div>
           )}
           {comparePage ? (
-            <RankComparison scope={scope} viewRank={viewRank} />
+            <RankComparison category={category} viewRank={viewRank} />
           ) : (
             <section
               className="store-catalog"
@@ -668,7 +684,7 @@ export function Storefront({
                         ? "Featured ranks"
                         : scope === "network"
                           ? "Network ranks"
-                          : `${currentScope.name} ranks`}
+                          : "Server-specific ranks"}
                     </h2>
                   )}
                   <p>
@@ -678,7 +694,7 @@ export function Storefront({
                         ? `Choose a single command for ${currentScope.name}.`
                         : scope === "network"
                           ? "Premium ranks across both current modpacks."
-                          : "Lower-priced ranks for this modpack's worlds."}
+                          : "Lower-priced ranks for one modpack. Choose your server before adding a rank to your cart."}
                   </p>
                 </div>
                 <div
@@ -706,7 +722,7 @@ export function Storefront({
                     ? storeRanksForScope(scope).filter(({ id }) =>
                         ["ruler", "monarch", "regent"].includes(id),
                       )
-                    : storeRanksForScope(scope)
+                    : ranksForCategory(category)
                 ).map((item) => {
                   const selection = commandsPage
                     ? { command: item.id }
@@ -716,6 +732,13 @@ export function Storefront({
                     scope,
                     billing,
                   });
+                  const available = serverRanks
+                    ? serverScopes.some(
+                        ({ id }) =>
+                          productFor({ ...selection, scope: id, billing })
+                            ?.available,
+                      )
+                    : product?.available;
                   return (
                     <article className="package" key={item.id}>
                       <button
@@ -738,7 +761,11 @@ export function Storefront({
                           </p>
                         )}
                         <span>
-                          {loading ? "Loading…" : money(product)}
+                          {loading
+                            ? "Loading…"
+                            : serverRanks && available
+                              ? "Choose server for price"
+                              : money(product)}
                           {product?.price != null && (
                             <small>
                               {billing === "monthly" ? " / month" : " once"}
@@ -758,15 +785,19 @@ export function Storefront({
                           className="store-button"
                           type="button"
                           disabled={
-                            loading || catalogError || !product?.available
+                            loading ||
+                            catalogError ||
+                            (!serverRanks && !available)
                           }
                           onClick={() => viewProduct(selection)}
                         >
-                          {product?.available
-                            ? commandsPage
-                              ? "Choose command"
-                              : "Choose rank"
-                            : "Coming soon"}
+                          {serverRanks
+                            ? "Choose server"
+                            : available
+                              ? commandsPage
+                                ? "Choose command"
+                                : "Choose rank"
+                              : "Coming soon"}
                         </button>
                       </div>
                     </article>
@@ -890,11 +921,40 @@ export function Storefront({
               <ProductArtwork selection={details} />
               <h3>{detailItem.invocation ?? detailItem.name}</h3>
               {details.command && <p>{detailItem.description}</p>}
+              {detailNeedsServer && (
+                <div className="store-server-choice">
+                  <label htmlFor="store-rank-server">
+                    Which server will you play on?
+                  </label>
+                  <select
+                    id="store-rank-server"
+                    required
+                    value={details.scope}
+                    onChange={(event) =>
+                      setDetails({ ...details, scope: event.target.value })
+                    }
+                    aria-describedby="store-rank-server-help"
+                  >
+                    <option value="" disabled>
+                      Choose a server
+                    </option>
+                    {serverScopes.map((server) => (
+                      <option key={server.id} value={server.id}>
+                        {server.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="store-rank-server-help">
+                    This rank applies only to the server you choose.
+                  </p>
+                </div>
+              )}
               <dl>
                 <div>
                   <dt>Coverage</dt>
                   <dd>
-                    {storeScopes.find(({ id }) => id === details.scope).name}
+                    {storeScopes.find(({ id }) => id === details.scope)?.name ??
+                      "Choose a server"}
                   </dd>
                 </div>
                 <div>
@@ -922,10 +982,19 @@ export function Storefront({
               <button
                 className="store-button"
                 type="button"
-                disabled={loading || catalogError || !detailProduct?.available}
+                disabled={
+                  loading ||
+                  catalogError ||
+                  !validStoreSelection(details) ||
+                  !detailProduct?.available
+                }
                 onClick={addToCart}
               >
-                {detailProduct?.available ? "Add to cart" : "Coming soon"}
+                {detailNeedsServer && !details.scope
+                  ? "Choose a server"
+                  : detailProduct?.available
+                    ? "Add to cart"
+                    : "Coming soon"}
               </button>
             </div>
           ) : cart ? (
