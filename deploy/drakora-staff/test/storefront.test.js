@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import {
   emptyStoreCatalog,
+  emptyCommandCatalog,
   storeRanks,
   storeProductKey,
 } from "../shared/storefront.js";
@@ -61,6 +62,32 @@ test("coming-soon catalog covers all seven ranks, three scopes and both payment 
     },
   );
   assert.equal((await service.catalog()).acceptingPayments, false);
+  const commands = (await service.catalog()).commands;
+  assert.equal(commands.length, 30);
+  assert.ok(
+    commands.every((product) => !product.available && product.price === null),
+  );
+  assert.deepEqual(
+    [...new Set(commands.map(({ invocation }) => invocation))],
+    ["/hat", "/nick", "/particles", "/emote", "/sit"],
+  );
+  assert.equal(
+    new Set([...catalog, ...emptyCommandCatalog()].map(storeProductKey)).size,
+    72,
+  );
+  await assert.rejects(
+    service.checkout(
+      {
+        command: "hat",
+        scope: "network",
+        billing: "lifetime",
+        username: "Test_Player",
+      },
+      "192.0.2.5",
+      settings.origin,
+    ),
+    { code: "command_unavailable" },
+  );
   await assert.rejects(
     service.checkout(request, "192.0.2.5", settings.origin),
     { code: "rank_unavailable" },
@@ -246,4 +273,134 @@ test("HTTP checkout rejects cross-origin requests and returns controlled errors 
   assert.equal((await send("{")).status, 400);
   assert.equal((await send(JSON.stringify(request))).status, 503);
   assert.equal(calls, 1);
+});
+
+test("command mappings validate category, unique packages, delivery and monthly interval", () => {
+  const command = {
+    command: "hat",
+    scope: "prom2",
+    billing: "lifetime",
+    packageId: 102,
+    deliveryVerified: true,
+  };
+  const base = {
+    staffOrigin: "https://staff.example.com",
+    todoOrigin: "https://todo.example.com",
+    applications: { publicOrigin: "https://public.example.com" },
+    website: {},
+  };
+  assert.doesNotThrow(() =>
+    validateStorefront({
+      ...base,
+      storefront: { ...settings, products: [], commandProducts: [command] },
+    }),
+  );
+  for (const commandProducts of [
+    null,
+    {},
+    [mapping],
+    [{ ...command, command: "ban" }],
+    [{ ...command, packageId: 101 }],
+    [{ ...command, deliveryVerified: false }],
+    [{ ...command, billing: "monthly" }],
+    [command, { ...command, packageId: 103 }],
+  ])
+    assert.throws(() =>
+      validateStorefront({
+        ...base,
+        storefront: { ...settings, commandProducts },
+      }),
+    );
+  assert.throws(() =>
+    validateStorefront({
+      ...base,
+      storefront: { ...settings, products: [command] },
+    }),
+  );
+});
+
+test("an individual command checkout adds only its verified package and preserves rank catalog", async () => {
+  const command = {
+    command: "nick",
+    scope: "prom2",
+    billing: "lifetime",
+    packageId: 202,
+    deliveryVerified: true,
+  };
+  const selected = {
+    command: "nick",
+    scope: "prom2",
+    billing: "lifetime",
+    username: "Test_Player",
+  };
+  const ident = "command-12345678901234567890";
+  const calls = [];
+  const service = storefrontService(
+    { ...settings, commandProducts: [command] },
+    async (url, options) => {
+      calls.push({ url, options });
+      if (options.method === "GET")
+        return reply([
+          remoteProduct,
+          { id: 202, type: "single", base_price: 5, currency: "USD" },
+        ]);
+      if (url.endsWith("/baskets")) return reply({ ident });
+      return reply({
+        packages: [{ id: 202, type: "single" }],
+        links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
+      });
+    },
+  );
+  for (const input of [
+    { ...selected, command: "ban" },
+    { ...selected, rank: "king" },
+    { ...selected, username: "<script>" },
+  ])
+    await assert.rejects(
+      service.checkout(input, "192.0.2.5", settings.origin),
+      { code: "invalid_store_selection" },
+    );
+  assert.equal(calls.length, 0);
+  const catalog = await service.catalog();
+  assert.equal(catalog.products.length, 42);
+  assert.equal(
+    catalog.commands.filter((product) => product.available).length,
+    1,
+  );
+  assert.equal(
+    catalog.commands.find(
+      (product) => storeProductKey(product) === storeProductKey(selected),
+    ).price,
+    5,
+  );
+  calls.length = 0;
+  assert.equal(
+    (
+      await service.checkout(
+        { ...selected, packageId: 101, price: 0 },
+        "192.0.2.5",
+        settings.origin,
+      )
+    ).ident,
+    ident,
+  );
+  assert.equal(
+    JSON.parse(calls[1].options.body).cancel_url,
+    `${settings.origin}/store/commands`,
+  );
+  assert.deepEqual(JSON.parse(calls[2].options.body), {
+    package_id: "202",
+    quantity: 1,
+  });
+  const unavailable = storefrontService(
+    { ...settings, products: [], commandProducts: [command] },
+    async () =>
+      reply([
+        { id: 202, type: "subscription", base_price: 5, currency: "USD" },
+      ]),
+  );
+  await assert.rejects(
+    unavailable.checkout(selected, "192.0.2.5", settings.origin),
+    { code: "command_unavailable" },
+  );
 });

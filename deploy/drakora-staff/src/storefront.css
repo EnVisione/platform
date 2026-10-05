@@ -360,7 +360,8 @@
   border-radius: 4px;
   margin-bottom: 16px;
 }
-.storefront .store-category-header h2 {
+.storefront .store-category-header h2,
+.storefront .store-category-header h1 {
   font:
     600 22px Arial,
     sans-serif;
@@ -516,6 +517,16 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+.store-command-description {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #bdbdbd;
+  min-height: 40px;
+  margin: 8px 0 14px;
+}
+.store-command-art {
+  color: var(--gold);
 }
 .storefront .package {
   min-width: 0;

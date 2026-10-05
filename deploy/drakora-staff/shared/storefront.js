@@ -26,6 +26,39 @@ export const storeScopes = [
   },
 ];
 
+export const storeCommands = [
+  {
+    id: "hat",
+    name: "Hat",
+    invocation: "/hat",
+    description: "Wear an item as a hat.",
+  },
+  {
+    id: "nick",
+    name: "Nickname",
+    invocation: "/nick",
+    description: "Give yourself a custom display name.",
+  },
+  {
+    id: "particles",
+    name: "Particles",
+    invocation: "/particles",
+    description: "Add a little flair with cosmetic particle effects.",
+  },
+  {
+    id: "emote",
+    name: "Emotes",
+    invocation: "/emote",
+    description: "Express yourself with playful character emotes.",
+  },
+  {
+    id: "sit",
+    name: "Sit",
+    invocation: "/sit",
+    description: "Take a seat and relax with friends.",
+  },
+];
+
 export const storeBilling = [
   {
     id: "monthly",
@@ -42,14 +75,17 @@ export const storeBilling = [
 export function validStoreSelection(selection) {
   return Boolean(
     selection &&
-      storeRanks.some(({ id }) => id === selection.rank) &&
+      ((selection.command === undefined &&
+        storeRanks.some(({ id }) => id === selection.rank)) ||
+        (selection.rank === undefined &&
+          storeCommands.some(({ id }) => id === selection.command))) &&
       storeScopes.some(({ id }) => id === selection.scope) &&
       storeBilling.some(({ id }) => id === selection.billing),
   );
 }
 
-export function storeProductKey({ rank, scope, billing }) {
-  return `${scope}:${rank}:${billing}`;
+export function storeProductKey({ rank, command, scope, billing }) {
+  return `${scope}:${command ? `command-${command}` : rank}:${billing}`;
 }
 
 export function emptyStoreCatalog() {
@@ -58,6 +94,24 @@ export function emptyStoreCatalog() {
       storeBilling.map(({ id: billing }) => ({
         rank,
         name,
+        scope,
+        billing,
+        available: false,
+        price: null,
+        currency: null,
+      })),
+    ),
+  );
+}
+
+export function emptyCommandCatalog() {
+  return storeScopes.flatMap(({ id: scope }) =>
+    storeCommands.flatMap(({ id: command, name, invocation, description }) =>
+      storeBilling.map(({ id: billing }) => ({
+        command,
+        name,
+        invocation,
+        description,
         scope,
         billing,
         available: false,

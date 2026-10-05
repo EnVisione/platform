@@ -3,6 +3,7 @@ import { rateLimit } from "express-rate-limit";
 import { isIP } from "node:net";
 import {
   emptyStoreCatalog,
+  emptyCommandCatalog,
   validStoreSelection,
   storeProductKey,
 } from "../shared/storefront.js";
@@ -16,6 +17,8 @@ const validIdent = (value) =>
 export function validateStorefront(config) {
   if (config.storefront === undefined) return;
   const settings = config.storefront;
+  const commandProducts =
+    settings?.commandProducts === undefined ? [] : settings.commandProducts;
   if (
     !settings ||
     Array.isArray(settings) ||
@@ -47,20 +50,27 @@ export function validateStorefront(config) {
       !/^[a-zA-Z0-9]{4,8}-[a-zA-Z0-9]{20,100}$/.test(settings.publicToken)) ||
     !Array.isArray(settings.products) ||
     settings.products.length > 42 ||
+    !Array.isArray(commandProducts) ||
+    commandProducts.length > 30 ||
     (settings.allowPurchases &&
-      (!settings.publicToken || !settings.products.length))
+      (!settings.publicToken ||
+        !(settings.products.length + commandProducts.length)))
   )
     throw new Error(
-      "Configure the Tebex public token, purchase switch and rank products",
+      "Configure the Tebex public token, purchase switch and store products",
     );
   const keys = new Set(),
     packages = new Set();
-  for (const product of settings.products) {
+  const mappings = [...settings.products, ...commandProducts];
+  for (const product of mappings) {
     const key = validStoreSelection(product)
       ? storeProductKey(product)
       : undefined;
     if (
       !key ||
+      (settings.products.includes(product)
+        ? product.rank === undefined
+        : product.command === undefined) ||
       keys.has(key) ||
       !Number.isSafeInteger(product.packageId) ||
       product.packageId < 1 ||
@@ -69,7 +79,7 @@ export function validateStorefront(config) {
       (product.billing === "monthly" && product.interval !== "P1M")
     )
       throw new Error(
-        "Map each rank option to a unique, verified Tebex package; monthly products require P1M",
+        "Map each store option to a unique, verified Tebex package; monthly products require P1M",
       );
     keys.add(key);
     packages.add(product.packageId);
@@ -78,6 +88,10 @@ export function validateStorefront(config) {
 
 export function storefrontService(settings = {}, fetcher = fetch) {
   const account = `${apiOrigin}/api/accounts/${settings.publicToken}`;
+  const mappings = [
+    ...(settings.products ?? []),
+    ...(settings.commandProducts ?? []),
+  ];
   let cache;
   async function api(path, body, basket = false) {
     const response = await fetcher(
@@ -103,8 +117,12 @@ export function storefrontService(settings = {}, fetcher = fetch) {
     return response.json();
   }
   async function catalog(fresh = false) {
-    if (!settings.publicToken || !settings.products?.length)
-      return { products: emptyStoreCatalog(), acceptingPayments: false };
+    if (!settings.publicToken || !mappings.length)
+      return {
+        products: emptyStoreCatalog(),
+        commands: emptyCommandCatalog(),
+        acceptingPayments: false,
+      };
     if (!fresh && cache && cache.until > Date.now()) return cache.value;
     const response = await api("/packages");
     if (!Array.isArray(response.data)) throw failure("store_unavailable");
@@ -112,9 +130,9 @@ export function storefrontService(settings = {}, fetcher = fetch) {
       response.data.map((product) => [product.id, product]),
     );
     const mapped = new Map(
-      settings.products.map((product) => [storeProductKey(product), product]),
+      mappings.map((product) => [storeProductKey(product), product]),
     );
-    const products = emptyStoreCatalog().map((slot) => {
+    const priceProduct = (slot) => {
       const mapping = mapped.get(storeProductKey(slot));
       const product = packages.get(mapping?.packageId);
       const correctBilling =
@@ -137,10 +155,15 @@ export function storefrontService(settings = {}, fetcher = fetch) {
         currency: product.currency,
         available: settings.allowPurchases === true,
       };
-    });
+    };
+    const products = emptyStoreCatalog().map(priceProduct);
+    const commands = emptyCommandCatalog().map(priceProduct);
     const value = {
       products,
-      acceptingPayments: products.some((product) => product.available),
+      commands,
+      acceptingPayments: [...products, ...commands].some(
+        (product) => product.available,
+      ),
     };
     cache = { value, until: Date.now() + 15000 };
     return value;
@@ -157,15 +180,18 @@ export function storefrontService(settings = {}, fetcher = fetch) {
       const ip = String(ipAddress).replace(/^::ffff:/, "");
       if (!isIP(ip)) throw failure("invalid_checkout_address", 400);
       const current = await catalog(true);
+      const unavailable = input.command
+        ? "command_unavailable"
+        : "rank_unavailable";
       if (
-        !current.products.some(
+        ![...current.products, ...current.commands].some(
           (product) =>
             storeProductKey(product) === storeProductKey(input) &&
             product.available,
         )
       )
-        throw failure("rank_unavailable", 409);
-      const mapping = settings.products.find(
+        throw failure(unavailable, 409);
+      const mapping = mappings.find(
         (product) => storeProductKey(product) === storeProductKey(input),
       );
       const basket = (
@@ -173,7 +199,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
           username: input.username,
           ip_address: ip,
           complete_url: `${origin}/store/thank-you`,
-          cancel_url: `${origin}/store`,
+          cancel_url: `${origin}/store${input.command ? "/commands" : ""}`,
           complete_auto_redirect: true,
         })
       ).data;
@@ -192,7 +218,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
         !added ||
         added.type !== (input.billing === "monthly" ? "subscription" : "single")
       )
-        throw failure("rank_unavailable", 409);
+        throw failure(unavailable, 409);
       let checkout;
       try {
         checkout = new URL(result.links.checkout);
@@ -247,12 +273,9 @@ export function storefrontRouter(service, origins) {
         : error.type === "entity.parse.failed"
           ? 400
           : (error.status ?? 503);
-    res
-      .status(status)
-      .json({
-        error:
-          typeof error.code === "string" ? error.code : "store_unavailable",
-      });
+    res.status(status).json({
+      error: typeof error.code === "string" ? error.code : "store_unavailable",
+    });
   });
   return router;
 }

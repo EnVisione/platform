@@ -441,12 +441,11 @@ function PublicSite() {
     [status, setStatus] = useState(null);
   const storefrontHost = content?.storefrontOrigin === location.origin;
   const pathname = location.pathname.replace(/\/$/, "") || "/";
-  const path =
-    pathname === "/compare"
-      ? "/store/compare"
-      : storefrontHost && pathname === "/"
-        ? "/store"
-        : pathname;
+  const path = ["/compare", "/commands"].includes(pathname)
+    ? `/store${pathname}`
+    : storefrontHost && pathname === "/"
+      ? "/store"
+      : pathname;
   useEffect(() => {
     const controller = new AbortController();
     fetch("/site/api/content", { signal: controller.signal })
@@ -500,22 +499,29 @@ function PublicSite() {
     applyPage = path === "/apply",
     helpPage = path === "/help",
     comparePage = path === "/store/compare",
-    storePage = path === "/store" || path === "/store/thank-you" || comparePage;
-  const title = comparePage
-    ? "Compare ranks"
-    : storePage
-      ? "Store"
-      : home
-        ? "Home"
-        : partnershipPage
-          ? "Partnerships"
-          : serversPage
-            ? "Servers"
-            : applyPage
-              ? "Apply"
-              : helpPage
-                ? "Need help?"
-                : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+    commandsPage = path === "/store/commands",
+    storePage =
+      path === "/store" ||
+      path === "/store/thank-you" ||
+      comparePage ||
+      commandsPage;
+  const title = commandsPage
+    ? "Commands"
+    : comparePage
+      ? "Compare ranks"
+      : storePage
+        ? "Store"
+        : home
+          ? "Home"
+          : partnershipPage
+            ? "Partnerships"
+            : serversPage
+              ? "Servers"
+              : applyPage
+                ? "Apply"
+                : helpPage
+                  ? "Need help?"
+                  : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -586,6 +592,7 @@ function PublicSite() {
         ) : storePage ? (
           <Storefront
             comparePage={comparePage}
+            commandsPage={commandsPage}
             storefrontHost={storefrontHost}
             discordInvite={content.discordInvite}
             discordCount={status?.discord.total}

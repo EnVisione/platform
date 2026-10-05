@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
 import {
   emptyStoreCatalog,
+  emptyCommandCatalog,
+  storeCommands,
   storeRanks,
   storeScopes,
   storeBilling,
@@ -23,8 +25,9 @@ const money = (product) =>
       }).format(product.price);
 const errors = {
   invalid_store_selection:
-    "Enter your Minecraft Java username and select a rank.",
+    "Enter your Minecraft Java username and select a store item.",
   rank_unavailable: "This rank option is not available to purchase yet.",
+  command_unavailable: "This command option is not available to purchase yet.",
   tebex_rejected_checkout:
     "Tebex could not start checkout. Check your Minecraft username and try again.",
 };
@@ -114,6 +117,37 @@ function RankArtwork({ rank }) {
     </svg>
   );
 }
+
+const commandArtwork = {
+  hat: "M18 12h28v28H18zM6 40h52v10H6z",
+  nick: "M8 12h48v32H28L16 56V44H8z",
+  particles: "M28 4h8v16h16v8H36v16h-8V28H12v-8h16zM48 44h8v8h-8zM8 44h8v8H8z",
+  emote: "M12 8h40v48H12zM20 20v8h8v-8zM36 20v8h8v-8zM20 36v8h8v8h8v-8h8v-8z",
+  sit: "M12 8h10v30h30v10H22v12H12zM42 48h10v12H42z",
+};
+function ProductArtwork({ selection }) {
+  return selection.command ? (
+    <svg
+      className="store-rank-art store-command-art"
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      shapeRendering="crispEdges"
+    >
+      <path
+        fill="currentColor"
+        fillRule="evenodd"
+        d={commandArtwork[selection.command]}
+      />
+    </svg>
+  ) : (
+    <RankArtwork rank={selection.rank} />
+  );
+}
+const storeItem = (selection) =>
+  selection.command
+    ? storeCommands.find(({ id }) => id === selection.command)
+    : storeRanks.find(({ id }) => id === selection.rank);
+const initialCatalog = () => [...emptyStoreCatalog(), ...emptyCommandCatalog()];
 
 function StoreDrawer({ title, onClose, children }) {
   const dialog = useRef(null);
@@ -323,14 +357,18 @@ export function Storefront({
   discordCount,
   join,
   comparePage = false,
+  commandsPage = false,
   storefrontHost = false,
 }) {
-  const [category, setCategory] = useState(comparePage ? "network" : "home");
+  const [category, setCategory] = useState(
+    comparePage || commandsPage ? "network" : "home",
+  );
   const storeHome = storefrontHost ? "/" : "/store";
   const compareHref = storefrontHost ? "/compare" : "/store/compare";
+  const commandsHref = storefrontHost ? "/commands" : "/store/commands";
   const scope = category === "home" ? "network" : category;
   const [billing, setBilling] = useState("monthly");
-  const [catalog, setCatalog] = useState(emptyStoreCatalog());
+  const [catalog, setCatalog] = useState(initialCatalog);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -355,11 +393,16 @@ export function Storefront({
         if (!response.ok) throw new Error();
         const data = await response.json();
         if (!Array.isArray(data.products)) throw new Error();
-        setCatalog(data.products);
+        setCatalog([
+          ...data.products,
+          ...(Array.isArray(data.commands)
+            ? data.commands
+            : emptyCommandCatalog()),
+        ]);
       })
       .catch(() => {
         if (!disposed) {
-          setCatalog(emptyStoreCatalog());
+          setCatalog(initialCatalog());
           setCatalogError(true);
         }
       })
@@ -380,6 +423,8 @@ export function Storefront({
     );
   const cartProduct = productFor(cart);
   const detailProduct = productFor(details);
+  const detailItem = details && storeItem(details);
+  const cartItem = cart && storeItem(cart);
   const currentScope = storeScopes.find(({ id }) => id === scope);
   const purchaseReady = !loading && !catalogError && cartProduct?.available;
   const activeSlide = slides[slide];
@@ -421,7 +466,10 @@ export function Storefront({
     setCheckoutUrl("");
   }
   function viewRank(rank) {
-    setDetails({ rank, scope, billing });
+    viewProduct({ rank });
+  }
+  function viewProduct(selection) {
+    setDetails({ ...selection, scope, billing });
     setDrawer("product");
   }
   function addToCart() {
@@ -552,8 +600,8 @@ export function Storefront({
               </button>
             </div>
           </div>
-          <nav className="user-nav" aria-label="Rank categories">
-            {comparePage ? (
+          <nav className="user-nav" aria-label="Store categories">
+            {comparePage || commandsPage ? (
               <a href={storeHome}>
                 <PublicIcon name="home" /> Store home
               </a>
@@ -574,20 +622,37 @@ export function Storefront({
             >
               <PublicIcon name="crest" /> Compare ranks
             </a>
-            <span className="store-nav-label">RANKS</span>
+            <a
+              href={commandsHref}
+              className={commandsPage ? "active" : ""}
+              aria-current={commandsPage ? "page" : undefined}
+            >
+              <PublicIcon name="play" /> Commands
+            </a>
+            <span className="store-nav-label">
+              {commandsPage ? "COMMAND COVERAGE" : "RANKS"}
+            </span>
             {storeScopes.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 className={category === item.id ? "active" : ""}
                 aria-current={
-                  !comparePage && category === item.id ? "page" : undefined
+                  !comparePage && !commandsPage && category === item.id
+                    ? "page"
+                    : undefined
                 }
-                aria-pressed={comparePage ? category === item.id : undefined}
+                aria-pressed={
+                  comparePage || commandsPage ? category === item.id : undefined
+                }
                 onClick={() => selectCategory(item.id)}
               >
                 <PublicIcon name="servers" />{" "}
-                {item.id === "network" ? "Network ranks" : item.name}
+                {item.id === "network"
+                  ? commandsPage
+                    ? "Whole network"
+                    : "Network ranks"
+                  : item.name}
               </button>
             ))}
           </nav>
@@ -603,7 +668,7 @@ export function Storefront({
           </div>
         </aside>
         <div className="store-main">
-          {!comparePage && category === "home" && (
+          {!comparePage && !commandsPage && category === "home" && (
             <section
               className="store-slider"
               aria-label="Store highlights"
@@ -704,15 +769,21 @@ export function Storefront({
             >
               <header className="store-category-header">
                 <div>
-                  <h2 id="store-category-title">
-                    {scope === "network"
-                      ? "Network ranks"
-                      : `${currentScope.name} ranks`}
-                  </h2>
+                  {commandsPage ? (
+                    <h1 id="store-category-title">Individual commands</h1>
+                  ) : (
+                    <h2 id="store-category-title">
+                      {scope === "network"
+                        ? "Network ranks"
+                        : `${currentScope.name} ranks`}
+                    </h2>
+                  )}
                   <p>
-                    {scope === "network"
-                      ? "Across both of our current modpacks."
-                      : currentScope.description}
+                    {commandsPage
+                      ? `Choose a single command for ${currentScope.name}.`
+                      : scope === "network"
+                        ? "Across both of our current modpacks."
+                        : currentScope.description}
                   </p>
                 </div>
                 <div
@@ -734,20 +805,32 @@ export function Storefront({
                 </div>
               </header>
               <div className="store-products" aria-busy={loading}>
-                {storeRanks.map((item) => {
-                  const product = productFor({ rank: item.id, scope, billing });
+                {(commandsPage ? storeCommands : storeRanks).map((item) => {
+                  const selection = commandsPage
+                    ? { command: item.id }
+                    : { rank: item.id };
+                  const product = productFor({ ...selection, scope, billing });
                   return (
                     <article className="package" key={item.id}>
                       <button
                         className="store-product-image"
                         type="button"
-                        aria-label={`View ${item.name} rank`}
-                        onClick={() => viewRank(item.id)}
+                        aria-label={
+                          commandsPage
+                            ? `View ${item.invocation} command`
+                            : `View ${item.name} rank`
+                        }
+                        onClick={() => viewProduct(selection)}
                       >
-                        <RankArtwork rank={item.id} />
+                        <ProductArtwork selection={selection} />
                       </button>
                       <div className="store-product-info">
-                        <h3>{item.name}</h3>
+                        <h3>{commandsPage ? item.invocation : item.name}</h3>
+                        {commandsPage && (
+                          <p className="store-command-description">
+                            {item.description}
+                          </p>
+                        )}
                         <span>
                           {loading ? "Loading…" : money(product)}
                           {product?.price != null && (
@@ -761,7 +844,7 @@ export function Storefront({
                         <button
                           className="store-detail-button"
                           type="button"
-                          onClick={() => viewRank(item.id)}
+                          onClick={() => viewProduct(selection)}
                         >
                           View details
                         </button>
@@ -771,9 +854,13 @@ export function Storefront({
                           disabled={
                             loading || catalogError || !product?.available
                           }
-                          onClick={() => viewRank(item.id)}
+                          onClick={() => viewProduct(selection)}
                         >
-                          {product?.available ? "Choose rank" : "Coming soon"}
+                          {product?.available
+                            ? commandsPage
+                              ? "Choose command"
+                              : "Choose rank"
+                            : "Coming soon"}
                         </button>
                       </div>
                     </article>
@@ -781,10 +868,14 @@ export function Storefront({
                 })}
               </div>
               <p className="store-catalog-note">
-                Prices and rank perks will be announced before purchases open.{" "}
-                <a href={compareHref}>
-                  Compare all ranks <PublicIcon name="arrow" />
-                </a>
+                {commandsPage
+                  ? "These are previews. Command behavior, prices and access terms will be confirmed before purchases open."
+                  : "Prices and rank perks will be announced before purchases open."}{" "}
+                {!commandsPage && (
+                  <a href={compareHref}>
+                    Compare all ranks <PublicIcon name="arrow" />
+                  </a>
+                )}
               </p>
             </section>
           )}
@@ -792,15 +883,15 @@ export function Storefront({
             <div>
               <h2>Network or modpack?</h2>
               <p>
-                Network ranks cover Prominence II and Restless Horizons. Modpack
-                ranks apply to the selected modpack’s Drakora worlds.
+                Network items cover Prominence II and Restless Horizons. Modpack
+                items apply to the selected modpack’s Drakora worlds.
               </p>
             </div>
             <div>
               <h2>Monthly or lifetime?</h2>
               <p>
                 Monthly is a recurring subscription. Lifetime is one payment
-                with no monthly renewal. Full rank terms will be available
+                with no monthly renewal. Full purchase terms will be available
                 before launch.
               </p>
             </div>
@@ -827,7 +918,7 @@ export function Storefront({
               ? "Login"
               : drawer === "cart"
                 ? `Your cart (${cart ? 1 : 0})`
-                : storeRanks.find(({ id }) => id === details.rank).name
+                : (detailItem.invocation ?? detailItem.name)
           }
           onClose={() => setDrawer(null)}
         >
@@ -836,8 +927,8 @@ export function Storefront({
               <PlayerFace />
               <h3>Please enter your username to continue</h3>
               <p>
-                Use your Minecraft Java username so your rank can be delivered
-                to the right player.
+                Use your Minecraft Java username so your purchase can be
+                delivered to the right player.
               </p>
               <label htmlFor="store-username">Minecraft username</label>
               <input
@@ -869,8 +960,9 @@ export function Storefront({
             </form>
           ) : drawer === "product" ? (
             <div className="store-product-details">
-              <RankArtwork rank={details.rank} />
-              <h3>{storeRanks.find(({ id }) => id === details.rank).name}</h3>
+              <ProductArtwork selection={details} />
+              <h3>{detailItem.invocation ?? detailItem.name}</h3>
+              {details.command && <p>{detailItem.description}</p>}
               <dl>
                 <div>
                   <dt>Coverage</dt>
@@ -895,7 +987,11 @@ export function Storefront({
                   ? "Applies across both current Drakora modpacks."
                   : "Applies to the selected modpack’s Drakora worlds."}
               </p>
-              <p>Rank perks have not been announced yet.</p>
+              <p>
+                {details.command
+                  ? "Includes this individual command, without a rank bundle. Command behavior and access terms will be confirmed before purchases open."
+                  : "Rank perks have not been announced yet."}
+              </p>
               <button
                 className="store-button"
                 type="button"
@@ -908,9 +1004,9 @@ export function Storefront({
           ) : cart ? (
             <div className="store-cart-content">
               <div className="store-cart-item">
-                <RankArtwork rank={cart.rank} />
+                <ProductArtwork selection={cart} />
                 <div>
-                  <h3>{storeRanks.find(({ id }) => id === cart.rank).name}</h3>
+                  <h3>{cartItem.invocation ?? cartItem.name}</h3>
                   <p>
                     {storeScopes.find(({ id }) => id === cart.scope).name} ·{" "}
                     {cart.billing === "monthly" ? "Monthly" : "Lifetime"}
@@ -926,7 +1022,11 @@ export function Storefront({
                     setError("");
                     setCheckoutUrl("");
                   }}
-                  aria-label="Remove rank from cart"
+                  aria-label={
+                    cart.command
+                      ? "Remove command from cart"
+                      : "Remove rank from cart"
+                  }
                 >
                   <PublicIcon name="close" />
                 </button>
@@ -978,8 +1078,8 @@ export function Storefront({
               <PublicIcon name="store" />
               <h3>Your cart is empty</h3>
               <p>
-                Ranks are coming soon. Browse the categories to see what’s
-                planned.
+                Ranks and individual commands are coming soon. Browse the
+                categories to see what’s planned.
               </p>
               <button
                 className="store-button"
