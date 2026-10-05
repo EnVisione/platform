@@ -485,12 +485,15 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   function openingText(ticket) {
     const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
     if (ticket.status === "awaiting_resolution")
-      return `${owner} This ticket was closed by the player. Staff resolution is pending.`;
+      return `${owner} This ticket was closed by the player. ${closureFeedback(ticket)} Staff resolution is pending.`;
     if (ticket.status === "closed")
-      return `${owner} This ticket is resolved and closed. Its saved history remains in the staff dashboard.`;
+      return `${owner} This ticket has been closed. ${closureFeedback(ticket)}`;
     if (ticket.status === "claimed")
       return `${owner} ${ticketStatusLabel(ticket)}. Continue in this private ticket.`;
     return `${owner} Your private ticket is ready. Staff will claim it shortly.`;
+  }
+  function closureFeedback(ticket) {
+    return `You can no longer send messages in this channel. ${ticket.rating === null ? "Please rate your support below or in the bot's DM." : "Your support rating has been saved."}`;
   }
   async function staffUpdate(ticket, notice, target) {
     if (!notice || ticket.status !== "claimed") return;
@@ -646,10 +649,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return { pending: true };
     const target = await channel(ticket.channelId);
     const content = {
-      closed:
-        "The player closed this ticket. The closed channel remains visible so they can rate the support.",
-      resolved:
-        "Staff recorded the resolution and closed this ticket. The closed channel remains visible for private feedback.",
+      closed: `The player closed this ticket. ${closureFeedback(ticket)} Staff resolution is pending.`,
+      resolved: `Staff recorded the resolution and closed this ticket. ${closureFeedback(ticket)}`,
       rated:
         "Private feedback received. The player submitted a support rating. Authorized staff can view it in the dashboard.",
       reopened:
@@ -1418,10 +1419,17 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return;
     const prior = service.store.get("ticket-discord-message", message.id);
     if (!edited && prior) return;
+    const historical =
+      closing &&
+      ["closed", "awaiting_resolution"].includes(ticket.status) &&
+      Number.isFinite(message.createdTimestamp) &&
+      message.createdTimestamp <= ticket.closedAt;
+    if (closing && !prior && !historical) return;
     const user = actor(message.author, message.member);
     const isOwner = user.id === ticket.owner.id;
-    const staff = isOwner || prior ? null : await staffUser(user.id);
-    if (!isOwner && !prior)
+    const staff =
+      isOwner || prior || historical ? null : await staffUser(user.id);
+    if (!isOwner && !prior && !historical)
       service.staff(staff || { roles: [] }, ticket, "tickets.reply");
     service.ingest(
       ticket.id,

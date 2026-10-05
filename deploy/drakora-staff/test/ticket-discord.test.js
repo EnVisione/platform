@@ -3174,6 +3174,103 @@ test("rating is available by DM and retained channel, then auto-deletes only aft
   assert.match(stale.data, /earlier closure/);
 });
 
+test("ratings from the channel and DM delete resolved tickets after capturing former staff history", async (t) => {
+  for (const route of ["channel", "dm"]) {
+    await t.test(route, async (t) => {
+      const app = setupDiscord(t, false, true);
+      const { service, transport, user, client, channels, dms, mainMembers } =
+        app;
+      mainMembers.get("201").roles.cache.set("80", {});
+      const ticket = await supportTicket(service, user, transport);
+      const manager = await transport.staffUser("200");
+      service.claim(manager, ticket.id);
+      await service.pump();
+      const target = channels.get(service.get(ticket.id).channelId);
+      const staffReply = {
+        id: "20000",
+        channelId: target.id,
+        guildId: "2",
+        author: app.staffMembers.get("201").user,
+        content: "Earlier staff reply kept in the transcript.",
+        createdTimestamp: Date.now() - 1000,
+        attachments: new Collection(),
+      };
+      target.savedMessages.set(staffReply.id, staffReply);
+      target.savedMessages.set("20001", {
+        ...staffReply,
+        id: "20001",
+        author: { ...staffReply.author, id: "former-staff" },
+        content: "Earlier reply from a staff member who left.",
+      });
+      mainMembers.get("201").roles.cache.delete("80");
+      const denied = await click(
+        client,
+        staffReply.author,
+        `ticket:claim:${ticket.id}`,
+      );
+      assert.match(denied.data, /permission/i);
+      service.closeTicket(
+        manager,
+        ticket.id,
+        { summary: "Solved", commands: "None" },
+        true,
+      );
+      target.savedMessages.set("20002", {
+        ...staffReply,
+        id: "20002",
+        content: "Unauthorized message after closure.",
+        createdTimestamp: service.get(ticket.id).closedAt + 1000,
+      });
+      await service.pump();
+      assert.equal(
+        service.store.get("ticket-discord-close", ticket.id)?.ready,
+        true,
+      );
+      assert.deepEqual(
+        service.messages(ticket.id).map((message) => message.content),
+        [staffReply.content, "Earlier reply from a staff member who left."],
+      );
+      const intro = await target.messages.fetch(
+        service.store.get("ticket-discord", ticket.id).introId,
+      );
+      const update = intro.embeds[0].fields.find(
+        (field) => field.name === "Ticket update",
+      ).value;
+      assert.match(update, /ticket has been closed/);
+      assert.match(update, /no longer send messages/);
+      assert.match(update, /Please rate your support/);
+      const ownerPermissions = target.overwrites.find(
+        (entry) => entry.id === user.id,
+      );
+      assert.ok(ownerPermissions.allow.includes(P.ViewChannel));
+      assert.ok(ownerPermissions.deny.includes(P.SendMessages));
+      const select = (route === "dm" ? dms[0] : intro).components[0]
+        .components[0];
+      const response = await click(
+        client,
+        user,
+        select.custom_id,
+        ["5"],
+        route === "dm" ? null : "2",
+      );
+      assert.match(response.data, /private rating has been saved/);
+      await service.pump();
+      assert.equal(channels.has(target.id), false);
+      assert.equal(service.get(ticket.id).channelId, null);
+      assert.equal(service.get(ticket.id).rating, 5);
+      assert.equal(service.get(ticket.id).resolution.summary, "Solved");
+      assert.equal(service.messages(ticket.id).length, 2);
+      await service.pump();
+      assert.equal(
+        service.store
+          .entries("ticket-outbox")
+          .filter(([, job]) => job.ticketId === ticket.id).length,
+        0,
+      );
+    });
+  }
+});
+
 test("ticket notice cleanup retries the same embed without a second mention", async (t) => {
   const { service, transport, user, channels } = setupDiscord(t);
   const ticket = await supportTicket(service, user, transport);
