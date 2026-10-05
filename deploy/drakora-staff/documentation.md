@@ -1,5 +1,19 @@
 # Staff portal and Discord Office
 
+## Custom store
+
+The public site serves the custom store at `/store`. The optional `storefront.origin` also serves it at the root of the separate store host. Both use Drakora's public colors and artwork. The seven rank tiers are King, Duke, Earl, Captain, Knight, Sergeant and Squires. Coverage is either the whole network, Prominence II or Restless Horizons. A modpack rank covers that modpack's worlds, rather than one proxy or individual world. Each tier has monthly and lifetime options, for 42 combinations.
+
+The initial catalog has no prices or perks and displays Coming soon. Set `storefront.allowPurchases` to `false` and `products` to `[]` for this mode. The service needs no payment credentials to serve it. Browsing creates no payment basket and does not load Tebex's payment script.
+
+To enable sales later, configure the existing Tebex Headless public token as `storefront.publicToken`. Never use a private key in frontend code or this setting. Each `products` mapping specifies `rank`, `scope`, `billing`, a unique numeric `packageId`, and `deliveryVerified: true`. Monthly mappings also require `interval: "P1M"`. Configure and test monthly renewal, cancellation and rank removal in Tebex, and one-time lifetime delivery, before marking delivery verified. The mapping is an operator assertion; the Headless package response does not prove the renewal interval or game delivery commands.
+
+The catalog reads prices and currency from Tebex. Monthly options require a subscription package and lifetime options require a single-payment package. Missing, disabled, unpriced or incorrectly typed packages remain unavailable. The checkout endpoint rechecks current package data, validates the selected mapping, username and request origin, then sends the username and customer IP to Tebex. It never accepts a client-supplied price or unconfigured package ID. Only after all delivery mappings and customer terms are ready should `allowPurchases` be enabled.
+
+Tebex.js loads on demand after checkout starts, using the existing payment basket. A validated Tebex checkout link remains available if the popup fails. A return to `/store/thank-you` is not proof of payment and never grants a rank. Rank delivery stays with verified Tebex game server commands. No card data, purchase history or customer account is stored by this store adapter. Privacy and privacy settings describe the checkout transfer and browser behavior.
+
+Route the store hostname to the same service as the public site, with trusted TLS termination. The store host has no staff session and returns 404 for staff APIs and authentication routes. Keep the staff and workspace hostnames separate. Test the selector combinations, coming-soon mode and checkout guards with `node --test test/storefront.test.js`.
+
 ## Identity and access
 
 The Express service provides Discord OAuth, an OpenID Connect issuer for Huly, and a reverse proxy that checks every Huly HTTP request and WebSocket upgrade. The React dashboard and Office use same-origin authenticated APIs.

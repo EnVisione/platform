@@ -1,7 +1,9 @@
 import { validMailAddress } from "./mail-address.js";
 import { isIP } from "node:net";
+import { validateStorefront } from "./storefront.js";
 
 export function validateConfig(config) {
+  validateStorefront(config);
   if (config.privacy !== undefined) {
     const privacy = config.privacy;
     if (

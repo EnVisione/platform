@@ -58,6 +58,7 @@ import { moderationHistory } from "./moderation.js";
 import { moderationRouter } from "./moderation-routes.js";
 import { retentionService, privacyActivity } from "./retention.js";
 import { legalRouter } from "./legal.js";
+import { storefrontService, storefrontRouter } from "./storefront.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -225,6 +226,9 @@ const todoHost = new URL(config.todoOrigin).host;
 const applicationHost = config.applications
   ? new URL(config.applications.publicOrigin).host
   : undefined;
+const storefrontHost = config.storefront
+  ? new URL(config.storefront.origin).host
+  : undefined;
 const dist = resolve("dist");
 const newToken = () => randomBytes(32).toString("base64url");
 const safeEqual = (left, right) =>
@@ -293,7 +297,7 @@ app.use((req, res, next) => {
   if (req.path === "/health" && req.headers.host === "127.0.0.1:3000")
     return res.json({ ok: true });
   if (
-    ![staffHost, todoHost, applicationHost]
+    ![staffHost, todoHost, applicationHost, storefrontHost]
       .filter(Boolean)
       .includes(req.headers.host)
   )
@@ -301,24 +305,26 @@ app.use((req, res, next) => {
   if (req.headers["x-forwarded-proto"] !== "https")
     return res.redirect(
       308,
-      `${req.headers.host === staffHost ? config.staffOrigin : req.headers.host === todoHost ? config.todoOrigin : config.applications.publicOrigin}${req.url}`,
+      `${req.headers.host === staffHost ? config.staffOrigin : req.headers.host === todoHost ? config.todoOrigin : req.headers.host === storefrontHost ? config.storefront.origin : config.applications.publicOrigin}${req.url}`,
     );
   next();
 });
 app.use((req, res, next) =>
-  ticketSession &&
-  req.headers.host === applicationHost &&
-  (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
-    ? ticketSession(req, res, next)
-    : config.website &&
+  req.headers.host === storefrontHost
+    ? next()
+    : ticketSession &&
         req.headers.host === applicationHost &&
-        !req.path.startsWith("/apply")
-      ? next()
-      : (req.headers.host === todoHost
-          ? todoSession
-          : req.headers.host === applicationHost
-            ? applicationSession
-            : staffSession)(req, res, next),
+        (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
+      ? ticketSession(req, res, next)
+      : config.website &&
+          req.headers.host === applicationHost &&
+          !req.path.startsWith("/apply")
+        ? next()
+        : (req.headers.host === todoHost
+            ? todoSession
+            : req.headers.host === applicationHost
+              ? applicationSession
+              : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -330,33 +336,51 @@ app.use(
   }),
 );
 app.use((req, res, next) => {
-  if ([staffHost, applicationHost].includes(req.headers.host))
+  if ([staffHost, applicationHost, storefrontHost].includes(req.headers.host))
     res.set(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' ${req.headers.host === applicationHost && config.website ? "https:" : "https://cdn.discordapp.com"}; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      req.headers.host === storefrontHost ||
+        (req.headers.host === applicationHost && req.path.startsWith("/store"))
+        ? "default-src 'self'; script-src 'self' https://js.tebex.io; style-src 'self' 'unsafe-inline' https://js.tebex.io; img-src 'self' https:; connect-src 'self' https://*.tebex.io; frame-src https://*.tebex.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.tebex.io"
+        : `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' ${req.headers.host === applicationHost && config.website ? "https:" : "https://cdn.discordapp.com"}; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
   next();
 });
 
 const legalPages = legalRouter(config);
 app.use((req, res, next) =>
-  [staffHost, applicationHost].includes(req.headers.host)
+  [staffHost, applicationHost, storefrontHost].includes(req.headers.host)
     ? legalPages(req, res, next)
     : next(),
 );
 
 if (website) {
+  const shop = storefrontRouter(
+    storefrontService(config.storefront),
+    [config.applications.publicOrigin, config.storefront?.origin].filter(
+      Boolean,
+    ),
+  );
+  app.use((req, res, next) =>
+    [applicationHost, storefrontHost].includes(req.headers.host)
+      ? shop(req, res, next)
+      : next(),
+  );
   const publicWebsite = publicWebsiteRouter(
     website,
     communityStatus(config),
     dist,
   );
   app.use((req, res, next) =>
-    req.headers.host === applicationHost
+    [applicationHost, storefrontHost].includes(req.headers.host)
       ? publicWebsite(req, res, next)
       : next(),
   );
 }
+
+app.use((req, res, next) =>
+  req.headers.host === storefrontHost ? res.status(404).end() : next(),
+);
 
 if (tickets) {
   const publicTickets = ticketRouter(config, tickets, ticketTransport, {

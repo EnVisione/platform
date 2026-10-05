@@ -10,6 +10,11 @@
     "discordGuildId": "REPLACE_COMMUNITY_GUILD_ID",
     "discordInvite": "https://discord.gg/REPLACE_INVITE"
   },
+  "storefront": {
+    "origin": "https://store.example.com",
+    "allowPurchases": false,
+    "products": []
+  },
   "overview": {
     "servers": [
       {

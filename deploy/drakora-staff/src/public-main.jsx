@@ -16,6 +16,7 @@ import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
+import { Storefront } from "./storefront.jsx";
 
 const artwork = {
   castle,
@@ -24,7 +25,9 @@ const artwork = {
   "restless-horizons": restlessHorizons,
 };
 const storeUrl = "https://store.drakora.org";
-function PublicNavigation({ path }) {
+const publicHref = (path, storefrontHost) =>
+  storefrontHost ? `https://drakora.org${path}` : path;
+function PublicNavigation({ path, storePage, storefrontHost }) {
   const [open, setOpen] = useState(false);
   const navigation = useRef(null);
   const toggle = useRef(null);
@@ -61,7 +64,7 @@ function PublicNavigation({ path }) {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
     >
-      <a href="/" className="public-mobile-brand">
+      <a href={publicHref("/", storefrontHost)} className="public-mobile-brand">
         Drakora
       </a>
       <button
@@ -86,13 +89,17 @@ function PublicNavigation({ path }) {
         ].map(([name, href, icon]) => (
           <a
             key={name}
-            href={href}
+            href={
+              href.startsWith("/") ? publicHref(href, storefrontHost) : href
+            }
             className={name === "Store" ? "public-store-link" : ""}
             aria-current={
               (
-                href === "/"
-                  ? path === "/"
-                  : path === href || path.startsWith(href + "/")
+                name === "Store"
+                  ? storePage
+                  : href === "/"
+                    ? path === "/"
+                    : path === href || path.startsWith(href + "/")
               )
                 ? "page"
                 : undefined
@@ -432,7 +439,11 @@ function PublicSite() {
   const [content, setContent] = useState(null),
     [error, setError] = useState(false),
     [status, setStatus] = useState(null);
-  const path = location.pathname.replace(/\/$/, "") || "/";
+  const storefrontHost = content?.storefrontOrigin === location.origin;
+  const path =
+    storefrontHost && location.pathname === "/"
+      ? "/store"
+      : location.pathname.replace(/\/$/, "") || "/";
   useEffect(() => {
     const controller = new AbortController();
     fetch("/site/api/content", { signal: controller.signal })
@@ -484,34 +495,45 @@ function PublicSite() {
     serversPage = path === "/servers",
     partnershipPage = path === "/partners",
     applyPage = path === "/apply",
-    helpPage = path === "/help";
-  const title = home
-    ? "Home"
-    : partnershipPage
-      ? "Partnerships"
-      : serversPage
-        ? "Servers"
-        : applyPage
-          ? "Apply"
-          : helpPage
-            ? "Need help?"
-            : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+    helpPage = path === "/help",
+    storePage = path === "/store" || path === "/store/thank-you";
+  const title = storePage
+    ? "Store"
+    : home
+      ? "Home"
+      : partnershipPage
+        ? "Partnerships"
+        : serversPage
+          ? "Servers"
+          : applyPage
+            ? "Apply"
+            : helpPage
+              ? "Need help?"
+              : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
   return (
-    <div className="public-site">
-      <AmbientFire ready={Boolean(content)} intro={home} />
+    <div className={`public-site${storePage ? " store-site" : ""}`}>
+      {content && !storePage && <AmbientFire ready intro={home} />}
       <a href="#main" className="public-skip">
         Skip to content
       </a>
       <header className={`public-header${home ? " home" : ""}`}>
-        <PublicNavigation path={path} />
+        <PublicNavigation
+          path={path}
+          storePage={storePage}
+          storefrontHost={storefrontHost}
+        />
         <div className="public-masthead">
           <div className="public-join">
             <CopyAddress large />
           </div>
-          <a href="/" className="public-brand" aria-label="Drakora Home">
+          <a
+            href={publicHref("/", storefrontHost)}
+            className="public-brand"
+            aria-label="Drakora Home"
+          >
             <img src={logo} alt="" />
             <span>
               DRAKORA<small>MINECRAFT NETWORK</small>
@@ -553,6 +575,8 @@ function PublicSite() {
           <p className="public-loading" role="status">
             Opening Drakora…
           </p>
+        ) : storePage ? (
+          <Storefront />
         ) : home ? (
           <HomePage home={content.home} discordInvite={content.discordInvite} />
         ) : applyPage ? (
@@ -731,16 +755,16 @@ function PublicSite() {
           <a href={content?.discordInvite || "/discord"}>
             <PublicIcon name="discord" /> Discord
           </a>
-          <a href="/rules">
+          <a href={publicHref("/rules", storefrontHost)}>
             <PublicIcon name="rules" /> Rules
           </a>
-          <a href="/apply">
+          <a href={publicHref("/apply", storefrontHost)}>
             <PublicIcon name="apply" /> Apply
           </a>
           <a href={storeUrl}>
             <PublicIcon name="store" /> Store
           </a>
-          <a href="/help">
+          <a href={publicHref("/help", storefrontHost)}>
             <PublicIcon name="help" /> Need help?
           </a>
         </nav>

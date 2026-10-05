@@ -203,6 +203,7 @@ export function websiteService(config, store) {
         servers: servers.filter((server) => server.published),
         address: "play.drakora.org",
         discordInvite: config.website.discordInvite,
+        storefrontOrigin: config.storefront?.origin ?? null,
       };
     },
     save(user, input) {
