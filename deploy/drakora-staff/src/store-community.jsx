@@ -143,12 +143,12 @@ export function TopCustomers({ community, storeHref }) {
           <a href={storeHref}>Top 3 supporters</a>
         </h2>
       ) : (
-        <h1 id="store-top-title">Top 3 customers</h1>
+        <h1 id="store-top-title">Top 3 supporters</h1>
       )}
       <div
         className="store-periods"
         role="group"
-        aria-label={storeHref ? "Top supporter period" : "Top customer period"}
+        aria-label="Top supporter period"
       >
         {Object.entries(periods).map(([key, label]) => (
           <button
@@ -194,7 +194,7 @@ export function TopCustomers({ community, storeHref }) {
             ? "Loading supporters…"
             : error
               ? "Supporter rankings are temporarily unavailable."
-              : `No ${storeHref ? "supporters" : "customers"} to show for ${periods[period].toLowerCase()} yet.`}
+              : `No supporters to show for ${periods[period].toLowerCase()} yet.`}
         </p>
       )}
       <p className="store-community-caption">
