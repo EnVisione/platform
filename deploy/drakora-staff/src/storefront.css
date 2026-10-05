@@ -813,17 +813,28 @@
   margin: 0;
 }
 .store-gift-warning {
-  padding: 14px;
-  background: #29221b;
+  display: grid;
+  gap: 6px;
+  color: #aaa;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.5;
 }
-.store-gift-warning strong {
+.store-gift-warning summary {
   color: var(--gold);
+  cursor: pointer;
 }
-.store-gift-warning p {
-  margin-top: 10px;
+.store-gift-warning summary:focus-visible {
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: #35302a;
+}
+.store-gift-card .store-gift-warning p {
   font-size: 12px;
+  line-height: 1.5;
+}
+.store-gift-warning details p {
+  margin-top: 10px;
 }
 .store-saved-cards {
   list-style: none;

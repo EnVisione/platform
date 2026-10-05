@@ -193,16 +193,20 @@ export function StoreGiftCards({ username, onLogin, wallet }) {
         </form>
       )}
       <div className="store-gift-warning">
-        <strong>Keep your unused balance safe</strong>
-        <p>
-          A Minecraft username does not verify ownership. Anyone can enter your
-          name. Unlinked cards stay only in this browser session. If you lose
-          the code, Drakora cannot recover your unused credit.
-        </p>
-        <p>
-          Link Discord to save your cards privately for next time. Anyone with
-          the original code can still redeem it at Tebex. Never share it.
-        </p>
+        <p>Save cards with Discord. Keep your code private.</p>
+        <details>
+          <summary>Why link Discord?</summary>
+          <p>
+            Anyone can enter your Minecraft name; it does not prove ownership.
+            Unlinked cards stay in this browser session. Lost codes cannot be
+            recovered through Drakora. Link Discord to save your cards for
+            later.
+          </p>
+          <p>
+            Anyone with the original code can redeem it at Tebex, even after
+            linking. Never share it.
+          </p>
+        </details>
       </div>
       {data.identity ? (
         <>
