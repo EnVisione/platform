@@ -34,18 +34,22 @@
 .store-topbar {
   max-width: 1220px;
   margin: auto;
-  padding: 14px 24px 0;
-  display: flex;
-  justify-content: space-between;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: minmax(145px, 1fr) auto minmax(180px, 1fr);
   align-items: center;
-  gap: 16px;
+  gap: 24px;
 }
-.store-topbar > div {
+.store-home-link {
+  justify-self: start;
+}
+.store-account-actions {
   display: flex;
   gap: 10px;
+  justify-self: end;
 }
-.store-topbar a,
-.store-topbar button {
+.store-topbar .store-home-link,
+.store-account-actions button {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -56,7 +60,16 @@
   border-radius: 4px;
   font-size: 13px;
 }
-.store-topbar button > span {
+.store-account-actions button:first-child {
+  max-width: 180px;
+  min-width: 0;
+}
+.store-login-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.store-account-actions button:last-child > span {
   background: var(--red);
   color: #fff;
   border-radius: 3px;
@@ -64,16 +77,62 @@
   font-size: 11px;
 }
 .store-site .public-masthead {
-  min-height: 140px;
-  padding-top: 12px;
-  padding-bottom: 12px;
+  grid-template-columns: auto auto auto;
+  min-height: 0;
+  padding: 0;
+  gap: 24px;
+}
+.store-site .public-join,
+.store-site .public-discord {
+  padding: 0;
+}
+.store-site .public-discord,
+.store-site .public-address button {
+  gap: 10px;
+}
+.store-site .public-brand {
+  grid-column: auto;
+  grid-row: auto;
+  gap: 10px;
 }
 .store-site .public-brand img {
-  width: 72px;
-  height: 72px;
+  width: 44px;
+  height: 44px;
 }
 .store-site .public-brand > span {
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: 24px;
+}
+.store-site .public-brand small {
+  margin-top: 5px;
+  font-size: 7px;
+  letter-spacing: 3px;
+}
+.store-site .public-address.large strong,
+.store-site .public-discord strong {
+  font-size: 13px;
+}
+.store-site .public-address.large .public-eyebrow,
+.store-site .public-discord .public-eyebrow {
+  font-size: 8px;
+  margin-bottom: 5px;
+}
+.store-site .public-address-hint,
+.store-site .public-status-copy > span:last-child {
+  font-size: 8px;
+  margin-top: 4px;
+}
+.store-site .public-status-icon {
+  width: 36px;
+  height: 36px;
+}
+.store-site .public-status-icon > .public-icon {
+  width: 18px;
+  height: 18px;
+}
+.store-site .public-status-icon::after {
+  width: 18px;
+  height: 3px;
+  bottom: -8px;
 }
 .store-shell {
   display: grid;
@@ -611,6 +670,25 @@
     transform: translateX(0);
   }
 }
+@media (max-width: 1220px) {
+  .store-topbar {
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+  }
+  .store-home-link {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .store-account-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .store-site .public-masthead {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: center;
+  }
+}
 @media (max-width: 1100px) {
   .store-shell {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -630,9 +708,11 @@
   .store-site .public-masthead {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 14px 12px;
+    width: 100%;
   }
   .store-site .public-brand {
     grid-column: 1 / -1;
+    grid-row: 1;
   }
   .store-site .public-join,
   .store-site .public-discord {
@@ -642,9 +722,6 @@
   .store-site .public-address.large strong,
   .store-site .public-discord strong {
     font-size: 13px;
-  }
-  .store-site .public-status-copy > span:last-child {
-    font-size: 10px;
   }
   .store-shell {
     grid-template-columns: 1fr;
@@ -692,19 +769,34 @@
     gap: 16px;
   }
   .store-topbar {
-    padding: 16px 20px 0;
-    gap: 8px;
+    padding: 16px 20px 20px;
+    gap: 18px 8px;
   }
-  .store-topbar a,
-  .store-topbar button {
+  .store-topbar .store-home-link,
+  .store-account-actions button {
     padding: 8px 10px;
     font-size: 12px;
   }
-  .store-topbar > div {
+  .store-account-actions {
     gap: 6px;
   }
 }
 @media (max-width: 450px) {
+  .store-account-actions button:first-child {
+    max-width: 140px;
+  }
+  .store-site .public-status-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .store-site .public-discord,
+  .store-site .public-address button {
+    gap: 8px;
+  }
+  .store-site .public-address.large strong,
+  .store-site .public-discord strong {
+    font-size: 11px;
+  }
   .store-shell {
     padding: 0 16px;
   }
@@ -737,13 +829,13 @@
     padding: 24px;
   }
   .store-topbar {
-    padding: 14px 16px 0;
+    padding: 14px 16px 20px;
   }
-  .store-topbar a {
+  .store-topbar .store-home-link {
     font-size: 0;
     gap: 0;
   }
-  .store-topbar a > .public-icon {
+  .store-home-link > .public-icon {
     width: 18px;
     height: 18px;
   }

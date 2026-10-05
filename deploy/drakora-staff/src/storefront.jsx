@@ -346,49 +346,50 @@ export function Storefront({ discordInvite, discordCount, join }) {
     <div className="storefront">
       <header className="public-header store-header">
         <div className="store-topbar">
-          <a href="https://drakora.org">
+          <a href="https://drakora.org" className="store-home-link">
             <PublicIcon name="home" /> Back to home
           </a>
-          <div>
+          <div className="public-masthead">
+            <div className="public-join">{join}</div>
+            <a
+              href="https://store.drakora.org"
+              className="public-brand"
+              aria-label="Drakora Store home"
+            >
+              <img src={logo} alt="" />
+              <span>
+                DRAKORA<small>NETWORK STORE</small>
+              </span>
+            </a>
+            <a
+              href={discordInvite || "https://drakora.org/discord"}
+              className="public-discord"
+            >
+              <span className="public-status-icon">
+                <PublicIcon name="discord" />
+              </span>
+              <span className="public-status-copy">
+                <span className="public-eyebrow">
+                  {discordCount == null
+                    ? "OUR COMMUNITY"
+                    : `${discordCount.toLocaleString()} TOTAL MEMBERS`}
+                </span>
+                <strong>
+                  Join our Discord <PublicIcon name="external" />
+                </strong>
+                <span>Chat, updates & support</span>
+              </span>
+            </a>
+          </div>
+          <div className="store-account-actions">
             <button type="button" onClick={openLogin}>
-              <PublicIcon name="users" /> {username || "Login"}
+              <PublicIcon name="users" />
+              <span className="store-login-label">{username || "Login"}</span>
             </button>
             <button type="button" onClick={() => setDrawer("cart")}>
               <PublicIcon name="store" /> Cart <span>{cart ? 1 : 0}</span>
             </button>
           </div>
-        </div>
-        <div className="public-masthead">
-          <div className="public-join">{join}</div>
-          <a
-            href="https://store.drakora.org"
-            className="public-brand"
-            aria-label="Drakora Store home"
-          >
-            <img src={logo} alt="" />
-            <span>
-              DRAKORA<small>NETWORK STORE</small>
-            </span>
-          </a>
-          <a
-            href={discordInvite || "https://drakora.org/discord"}
-            className="public-discord"
-          >
-            <span className="public-status-icon">
-              <PublicIcon name="discord" />
-            </span>
-            <span className="public-status-copy">
-              <span className="public-eyebrow">
-                {discordCount == null
-                  ? "OUR COMMUNITY"
-                  : `${discordCount.toLocaleString()} TOTAL MEMBERS`}
-              </span>
-              <strong>
-                Join our Discord <PublicIcon name="external" />
-              </strong>
-              <span>Chat, updates & support</span>
-            </span>
-          </a>
         </div>
       </header>
       <div className="store-shell">
