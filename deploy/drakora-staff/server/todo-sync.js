@@ -768,6 +768,8 @@ export function discordTodoSync(
                 issueId: issue._id,
                 forumId: channel.id,
                 discord: next,
+                assigneeDiscordId:
+                  people.byPerson.get(next.assignee)?.discordId || null,
               };
               store.set("discord-todo", thread.id, record, expiry);
               store.set(
@@ -851,6 +853,8 @@ export function discordTodoSync(
                 issueId: issue._id,
                 forumId: channel.id,
                 discord: values,
+                assigneeDiscordId:
+                  people.byPerson.get(values.assignee)?.discordId || null,
               },
               expiry,
             );

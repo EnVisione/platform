@@ -143,6 +143,9 @@
       }
     ]
   },
+  "staffReviews": {
+    "channelId": "REPLACE_STAFF_REVIEW_TEXT_CHANNEL_ID"
+  },
   "office": {
     "categoryId": "REPLACE_CATEGORY_ID",
     "inviteChannelId": "REPLACE_INVITES_CHANNEL_ID",

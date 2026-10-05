@@ -14,6 +14,7 @@ import { Overview } from "./overview.jsx";
 import { Tickets } from "./tickets.jsx";
 import { StaffTicketStats } from "./staff-ticket-stats.jsx";
 import { WebsiteEditor } from "./website-editor.jsx";
+import { StaffReview, StaffLogs, AccountReview } from "./staff-reviews.jsx";
 import { Moderation } from "./moderation.jsx";
 import {
   DashboardClock,
@@ -378,19 +379,43 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
     </section>
   );
 }
-function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
+function Accounts({
+  csrf,
+  approveMinecraftChange,
+  format,
+  userId,
+  timeZone,
+  reviewsEnabled,
+}) {
   const now = useClock();
   const [accounts, setAccounts] = useState(null);
+  const [ranks, setRanks] = useState([]);
+  const [query, setQuery] = useState(""),
+    [rankFilter, setRankFilter] = useState(""),
+    [sort, setSort] = useState("name");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   useEffect(() => {
-    fetch("/api/accounts")
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error();
-        setAccounts(data.accounts);
-      })
-      .catch(() => setError("Could not load registered staff accounts."));
+    const controller = new AbortController();
+    const refresh = () =>
+      fetch("/api/accounts", { signal: controller.signal })
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) throw new Error();
+          setAccounts(data.accounts);
+          setRanks(data.rankOrder || []);
+          setError("");
+        })
+        .catch((error) => {
+          if (error.name !== "AbortError")
+            setError("Could not load staff accounts.");
+        });
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
   }, []);
   async function decide(id, decision) {
     setBusy(id);
@@ -416,10 +441,34 @@ function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
       setBusy("");
     }
   }
+  const filtered = accounts
+    ?.filter(
+      (account) =>
+        `${account.name} ${account.minecraft?.name || ""}`
+          .toLowerCase()
+          .includes(query.toLowerCase()) &&
+        (!rankFilter || account.ranks?.includes(rankFilter)),
+    )
+    .sort((a, b) =>
+      sort === "rank"
+        ? Math.min(
+            ...(a.ranks || []).map((rank) =>
+              ranks.indexOf(rank) < 0 ? ranks.length : ranks.indexOf(rank),
+            ),
+            ranks.length,
+          ) -
+            Math.min(
+              ...(b.ranks || []).map((rank) =>
+                ranks.indexOf(rank) < 0 ? ranks.length : ranks.indexOf(rank),
+              ),
+              ranks.length,
+            ) || a.name.localeCompare(b.name)
+        : a.name.localeCompare(b.name),
+    );
   return (
     <section className="accounts-panel" aria-labelledby="accounts-title">
       <div className="welcome">
-        <h2 id="accounts-title">Registered staff</h2>
+        <h2 id="accounts-title">Staff accounts</h2>
         <p>
           Minecraft links and observed Discord activity across Drakora and
           Drakora Staff.
@@ -434,13 +483,59 @@ function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
           {error}
         </p>
       )}
+      {reviewsEnabled && (
+        <p className="notice">
+          <a href="/logs?tab=staff-reviews">
+            Staff reviews:{" "}
+            {accounts?.filter((account) => account.staffReview?.openId)
+              .length || 0}{" "}
+            in progress
+          </a>
+        </p>
+      )}
+      <div className="review-filters">
+        <label>
+          Search staff
+          <input
+            value={query}
+            placeholder="Discord or Minecraft name"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <label>
+          Rank
+          <select
+            value={rankFilter}
+            onChange={(event) => setRankFilter(event.target.value)}
+          >
+            <option value="">All ranks</option>
+            {[
+              ...new Set(
+                accounts?.flatMap((account) => account.ranks || []) || [],
+              ),
+            ].map((rank) => (
+              <option key={rank}>{rank}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Sort by
+          <select
+            value={sort}
+            onChange={(event) => setSort(event.target.value)}
+          >
+            <option value="name">Name</option>
+            <option value="rank">Rank</option>
+          </select>
+        </label>
+      </div>
       {!accounts ? (
         <p>Loading accounts…</p>
-      ) : accounts.length === 0 ? (
-        <p>No Minecraft names registered yet.</p>
+      ) : filtered.length === 0 ? (
+        <p>No staff accounts match your filters.</p>
       ) : (
         <div className="account-list">
-          {accounts.map((account) => (
+          {filtered.map((account) => (
             <article className="registered-account" key={account.id}>
               {account.avatar ? (
                 <img src={account.avatar} alt="" />
@@ -477,11 +572,20 @@ function Accounts({ csrf, approveMinecraftChange, format, userId, timeZone }) {
                   · {account.discordStatus}
                 </span>
                 <StaffTicketStats stats={account.ticketStats} />
+                {reviewsEnabled && (
+                  <AccountReview account={account} csrf={csrf} />
+                )}
               </div>
               <div className="registered-minecraft">
-                <strong>{account.minecraft.name}</strong>
-                <span>Awaiting in-game verification</span>
-                {account.minecraft.changeRequest && (
+                <strong>
+                  {account.minecraft?.name || "Minecraft name not linked"}
+                </strong>
+                <span>
+                  {account.minecraft
+                    ? "Awaiting in-game verification"
+                    : "Not registered yet"}
+                </span>
+                {account.minecraft?.changeRequest && (
                   <div className="change-request">
                     <span>
                       Requested: {account.minecraft.changeRequest.name}
@@ -616,6 +720,7 @@ function App() {
   const loginPage = page === "/login";
   const settingsPage = page === "/settings";
   const accountsPage = page === "/accounts";
+  const reviewPage = page.startsWith("/staff-reviews/");
   const emailPage = page === "/email";
   const rolesPage = page === "/roles";
   const websitePage = page === "/website";
@@ -729,7 +834,7 @@ function App() {
   const user = state.user;
   return (
     <div
-      className={`workspace${workspaceView ? " workspace-tools-page" : ""}${ticketsPage || logsPage ? " workspace-tickets-page" : ""}`}
+      className={`workspace${workspaceView ? " workspace-tools-page" : ""}${ticketsPage || logsPage || reviewPage ? " workspace-tickets-page" : ""}`}
       style={{ "--accent": accent, "--accent-text": accentForeground(accent) }}
       onClick={(event) => {
         const link = event.target.closest?.("a[href]");
@@ -905,28 +1010,30 @@ function App() {
             Drakora Staff
           </a>
           <h1>
-            {workspaceView
-              ? dashboardTools.find((tool) => tool.view === workspaceView)
-                  ?.title
-              : ticketsPage
-                ? "Tickets"
-                : logsPage
-                  ? "Logs"
-                  : moderationPage
-                    ? "Moderation"
-                    : settingsPage
-                      ? "Settings"
-                      : accountsPage
-                        ? "Accounts"
-                        : applicationsPage
-                          ? "Staff Applications"
-                          : emailPage
-                            ? "Email"
-                            : rolesPage
-                              ? "Roles"
-                              : websitePage
-                                ? "Website"
-                                : "Overview"}
+            {reviewPage
+              ? "Staff reviews"
+              : workspaceView
+                ? dashboardTools.find((tool) => tool.view === workspaceView)
+                    ?.title
+                : ticketsPage
+                  ? "Tickets"
+                  : logsPage
+                    ? "Logs"
+                    : moderationPage
+                      ? "Moderation"
+                      : settingsPage
+                        ? "Settings"
+                        : accountsPage
+                          ? "Accounts"
+                          : applicationsPage
+                            ? "Staff Applications"
+                            : emailPage
+                              ? "Email"
+                              : rolesPage
+                                ? "Roles"
+                                : websitePage
+                                  ? "Website"
+                                  : "Overview"}
           </h1>
           <details className="mobile-menu">
             <summary>☰ Menu</summary>
@@ -1028,7 +1135,15 @@ function App() {
               <WebsiteEditor csrf={state.csrf} />
             </div>
           )}
-          {moderationPage ? (
+          {reviewPage ? (
+            user.staffReviews ? (
+              <StaffReview key={route} csrf={state.csrf} />
+            ) : (
+              <p className="notice">
+                Only Managers and Founders can view staff reviews.
+              </p>
+            )
+          ) : moderationPage ? (
             user.capabilities["moderation.view"] ? (
               <Moderation key={route} onNavigate={navigateDashboard} />
             ) : (
@@ -1036,7 +1151,9 @@ function App() {
                 Your roles do not have permission to view moderation history.
               </p>
             )
-          ) : ticketsPage || logsPage ? (
+          ) : logsPage ? (
+            <StaffLogs key={route} user={user} csrf={state.csrf} />
+          ) : ticketsPage ? (
             user.tickets ? (
               <Tickets
                 key={route}
@@ -1110,6 +1227,7 @@ function App() {
           ) : accountsPage ? (
             <Accounts
               csrf={state.csrf}
+              reviewsEnabled={user.staffReviews}
               approveMinecraftChange={user.approveMinecraftChange}
               format={preferences.format}
               userId={user.id}

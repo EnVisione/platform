@@ -2,7 +2,7 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { ruleSections } from "../shared/website.js";
 
-export function publicWebsiteRouter(service, status, dist) {
+export function publicWebsiteRouter(service, status, dist, staffDirectory) {
   const router = express.Router();
   router.get("/site/api/content", (_req, res) =>
     res
@@ -15,6 +15,17 @@ export function publicWebsiteRouter(service, status, dist) {
     async (_req, res) =>
       res.set("Cache-Control", "public, max-age=15").json(await status()),
   );
+  router.get(
+    "/site/api/staff",
+    rateLimit({ windowMs: 60000, limit: 60, legacyHeaders: false }),
+    async (_req, res) => {
+      if (!staffDirectory)
+        return res.status(503).json({ error: "staff_directory_unavailable" });
+      res
+        .set("Cache-Control", "public, max-age=15")
+        .json(await staffDirectory());
+    },
+  );
   router.use(
     "/__staff/assets",
     express.static(`${dist}/assets`, { immutable: true, maxAge: "1y" }),
@@ -26,6 +37,7 @@ export function publicWebsiteRouter(service, status, dist) {
     [
       "/",
       "/servers",
+      "/staff",
       "/rules",
       "/help",
       "/partners",

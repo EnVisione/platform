@@ -50,6 +50,16 @@ export function validateConfig(config) {
     );
   const snowflake = (value) =>
     typeof value === "string" && /^\d{1,20}$/.test(value);
+  if (
+    config.staffReviews !== undefined &&
+    (!config.staffReviews ||
+      !snowflake(config.staffReviews.channelId) ||
+      !config.office ||
+      !config.roleSync)
+  )
+    throw new Error(
+      "Configure a staff review channel, office and role synchronization",
+    );
   if (config.website !== undefined) {
     if (
       !config.website ||

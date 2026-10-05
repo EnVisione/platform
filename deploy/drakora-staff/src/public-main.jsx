@@ -16,6 +16,7 @@ import { PublicTickets } from "./tickets.jsx";
 import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
+import { StaffDirectory } from "./staff-directory.jsx";
 import { Storefront } from "./storefront.jsx";
 import { TopCustomers, useStoreCommunity } from "./store-community.jsx";
 
@@ -85,6 +86,7 @@ function PublicNavigation({ path, storePage, storefrontHost }) {
           ["Servers", "/servers", "servers"],
           ["Store", storeUrl, "store"],
           ["Rules", "/rules", "rules"],
+          ["Staff", "/staff", "apply"],
           ["Apply", "/apply", "apply"],
           ["Need help?", "/help", "help"],
         ].map(([name, href, icon]) => (
@@ -498,6 +500,7 @@ function PublicSite() {
   const section =
     ruleSections.find((section) => path === `/rules/${section.id}`) ??
     (path === "/rules" ? ruleSections[0] : null);
+  const staffPage = path === "/staff";
   const home = path === "/",
     serversPage = path === "/servers",
     partnershipPage = path === "/partners",
@@ -518,15 +521,18 @@ function PublicSite() {
         ? "Store"
         : home
           ? "Home"
-          : partnershipPage
-            ? "Partnerships"
-            : serversPage
-              ? "Servers"
-              : applyPage
-                ? "Apply"
-                : helpPage
-                  ? "Need help?"
-                  : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+          : staffPage
+            ? "Staff"
+            : partnershipPage
+              ? "Partnerships"
+              : serversPage
+                ? "Servers"
+                : applyPage
+                  ? "Apply"
+                  : helpPage
+                    ? "Need help?"
+                    : (server?.name ??
+                      (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -609,6 +615,8 @@ function PublicSite() {
           <ApplicationInformation apply={content.apply} />
         ) : helpPage ? (
           <HelpPage help={content.help} discordInvite={content.discordInvite} />
+        ) : staffPage ? (
+          <StaffDirectory />
         ) : partnershipPage ? (
           <PartnershipForm />
         ) : serversPage ? (

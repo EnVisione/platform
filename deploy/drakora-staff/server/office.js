@@ -157,6 +157,9 @@ export function discordOffice(config, store, dependencies = {}) {
       name: member.displayName,
       avatar: discordAvatar(member.user, config.guildId, member.avatar),
       ranks: assigned.hulyRanks,
+      roles: [...member.roles.cache.keys()],
+      bot: member.user.bot,
+      pending: member.pending,
       staff:
         assigned.dashboard || assigned.todo || assigned.hulyRanks.length > 0,
       status:
@@ -423,6 +426,11 @@ export function discordOffice(config, store, dependencies = {}) {
   }
   return {
     gateway: client,
+    staffRoster() {
+      if (!ready || !guild?.available)
+        throw new AuthError("discord_unavailable", 503);
+      return [...guild.members.cache.values()].map(profile);
+    },
     snapshot,
     overviewQueues: discordOverview(config, client, () => ready),
     meetings,

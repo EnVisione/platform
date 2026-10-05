@@ -33,6 +33,14 @@ import {
 } from "./roles.js";
 import { rolePermissions } from "./role-permissions.js";
 import { roleAssignments } from "./role-assignment.js";
+import {
+  staffReviews,
+  staffReviewAccess,
+  reviewProgress,
+} from "./staff-reviews.js";
+import { staffReviewDiscord } from "./staff-review-discord.js";
+import { staffReviewRouter } from "./staff-review-routes.js";
+import { staffDirectory } from "./staff-directory.js";
 import { roleRouter } from "./role-routes.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
@@ -217,6 +225,38 @@ office?.onRolesChanged((id) => {
     console.error("Staff role assignment is pending."),
   );
 });
+async function reviewMember(id) {
+  const raw = await office.staffMember(id);
+  if (!raw) return null;
+  return rolePolicy.apply({
+    id,
+    name: raw.nick || raw.user.global_name || raw.user.username,
+    roles: raw.roles,
+    bot: raw.user.bot,
+    pending: raw.pending,
+  });
+}
+const reviews =
+  config.staffReviews && office && assignments
+    ? staffReviews(config, store, {
+        roster: () => office.staffRoster(),
+        member: reviewMember,
+        assignments,
+        applicationStore: applicationDatabase?.store,
+        progress: (id, from, to) => ({
+          ...reviewProgress(store, tickets, id, from, to),
+          lastActiveAt: activity.lastActiveAt(id),
+        }),
+        minecraft: minecraft.get,
+      })
+    : null;
+if (reviews)
+  reviews.setTransport(
+    staffReviewDiscord(config, store, office, reviews, reviewMember),
+  );
+const publicStaffDirectory = office
+  ? staffDirectory(config, () => office.staffRoster(), minecraft.get)
+  : null;
 const assignmentTimer = assignments
   ? setInterval(
       () =>
@@ -403,6 +443,7 @@ if (website) {
     website,
     communityStatus(config),
     dist,
+    publicStaffDirectory,
   );
   app.use((req, res, next) =>
     [applicationHost, storefrontHost].includes(req.headers.host)
@@ -472,7 +513,9 @@ function safeNext(value) {
     return value;
   if (
     typeof value === "string" &&
-    /^\/(applications|tickets|moderation)\/[a-f0-9-]{36}$/.test(value)
+    /^\/(applications|tickets|moderation|staff-reviews)\/[a-f0-9-]{36}$/.test(
+      value,
+    )
   )
     return value;
   return "/";
@@ -527,7 +570,11 @@ function publicUser(user) {
     rolesPanel: Boolean(user.capabilities["roles.view"]),
     website: Boolean(website && websiteAccess(config, user)),
     tickets: Boolean(tickets && user.capabilities["tickets.view"]),
-    logs: Boolean(tickets && user.capabilities["logs.view"]),
+    staffReviews: Boolean(reviews && staffReviewAccess(config, user)),
+    logs: Boolean(
+      (tickets && user.capabilities["logs.view"]) ||
+      (reviews && staffReviewAccess(config, user)),
+    ),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
     workspaceOrigin: config.todoOrigin,
@@ -554,6 +601,22 @@ function requireMutation(req) {
     throw new AuthError("invalid_request");
 }
 
+app.get("/logs", async (req, res, next) => {
+  if (req.headers.host !== staffHost) return next();
+  try {
+    const user = await signedIn(req, {
+      allowUnlinked: true,
+      syncHuly: false,
+      forceDiscord: true,
+    });
+    if (reviews && staffReviewAccess(config, user))
+      return res.sendFile(`${dist}/index.html`);
+    next();
+  } catch (error) {
+    if (error.status === 401) return res.redirect("/login?next=%2Flogs");
+    next(error);
+  }
+});
 if (tickets) {
   const staffTickets = ticketRouter(config, tickets, ticketTransport, {
     staffView: true,
@@ -1117,7 +1180,13 @@ app.get("/api/accounts", async (req, res) => {
     tickets && user.capabilities["tickets.view"]
       ? tickets.staffStats(user)
       : null;
-  const accounts = minecraft.entries().map(([id, link]) => {
+  const reviewSummaries =
+    reviews && staffReviewAccess(config, user) ? reviews.summaries() : null;
+  const identities = new Map(minecraft.entries());
+  for (const member of live.values())
+    if (member.staff && !identities.has(member.id))
+      identities.set(member.id, null);
+  const accounts = [...identities].map(([id, link]) => {
     const stored = store.get("user", id);
     const member = live.get(id);
     return {
@@ -1126,6 +1195,10 @@ app.get("/api/accounts", async (req, res) => {
       avatar: member?.avatar ?? stored?.avatar ?? null,
       ranks: officeSnapshot?.connected ? (member?.ranks ?? []) : null,
       minecraft: link,
+      staffReview: reviewSummaries?.get(id) || null,
+      reviewEligible: Boolean(
+        reviewSummaries && member && reviews.eligible(member),
+      ),
       discordStatus: member?.status ?? "unknown",
       lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
       timeZone: timeSettings.get(id).timeZone,
@@ -1140,7 +1213,7 @@ app.get("/api/accounts", async (req, res) => {
     };
   });
   accounts.sort((a, b) => a.name.localeCompare(b.name));
-  res.json({ accounts });
+  res.json({ accounts, rankOrder: config.ranks.map((rank) => rank.name) });
 });
 async function authorizeMail(req, capability = "mail.view") {
   const user = await signedIn(req, {
@@ -1494,6 +1567,26 @@ app.get("/api/applications", async (req, res) => {
     }),
   );
 });
+if (reviews) {
+  const router = staffReviewRouter({
+    reviews,
+    authorize: (req) =>
+      signedIn(req, {
+        allowUnlinked: true,
+        syncHuly: false,
+        forceDiscord: true,
+      }),
+    mutation: requireMutation,
+    staffHost,
+    dist,
+  });
+  app.use((req, res, next) =>
+    req.path.startsWith("/api/staff-reviews") ||
+    req.path.startsWith("/staff-reviews/")
+      ? router(req, res, next)
+      : next(),
+  );
+}
 app.use(
   moderationRouter({
     history: moderationHistory(store),
@@ -1720,10 +1813,12 @@ trackerAccess?.start();
 applications?.start();
 tickets?.start();
 retention.start();
+reviews?.start();
 partnerships?.start();
 ticketEmails?.start();
 ticketStaffNotices?.start();
 async function stop() {
+  await reviews?.close();
   await retention.close();
   clearInterval(sweep);
   clearInterval(assignmentTimer);

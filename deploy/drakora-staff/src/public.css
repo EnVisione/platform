@@ -1277,3 +1277,42 @@ button {
     margin-bottom: 20px;
   }
 }
+
+.public-staff-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 24px 0;
+}
+.public-staff-section {
+  margin: 40px 0;
+  scroll-margin-top: 100px;
+}
+.public-staff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 24px;
+}
+.public-staff-card {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.public-staff-card h3 {
+  margin-bottom: 8px;
+}
+.public-staff-avatar {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  background: #25211d;
+  font-size: 40px;
+  color: #d0ba86;
+}
+.public-staff-avatar img {
+  image-rendering: pixelated;
+}
+.public-staff-ranks {
+  color: #d0ba86;
+}

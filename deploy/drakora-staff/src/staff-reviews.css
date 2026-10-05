@@ -1,0 +1,121 @@
+.staff-review-panel {
+  padding: 28px;
+}
+.review-filters,
+.review-tabs,
+.review-pagination,
+.account-review,
+.review-heading {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.review-filters {
+  margin: 24px 0;
+}
+.review-filters label,
+.review-decision label,
+.review-conversation label {
+  display: grid;
+  gap: 8px;
+}
+.review-heading {
+  justify-content: space-between;
+  margin: 24px 0;
+}
+.review-tabs {
+  padding: 16px 28px;
+}
+.review-tabs button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.review-list {
+  display: grid;
+  gap: 12px;
+}
+.review-list a {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  background: #272a2e;
+  color: inherit;
+  text-decoration: none;
+}
+.review-pagination {
+  margin-top: 20px;
+}
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr);
+  gap: 28px;
+}
+.review-conversation article {
+  padding: 16px 20px;
+  margin: 12px 0;
+  background: #272a2e;
+  overflow-wrap: anywhere;
+}
+.review-conversation small {
+  display: block;
+  color: #b7bac1;
+  margin: 6px 0;
+}
+.review-conversation article p,
+.review-text {
+  white-space: pre-wrap;
+}
+.review-conversation textarea,
+.review-decision textarea {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.review-progress {
+  background: #272a2e;
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.review-progress dt {
+  color: #b7bac1;
+  margin-top: 14px;
+}
+.review-progress dd {
+  margin: 6px 0;
+  font-weight: 600;
+}
+.review-decision {
+  margin: 28px 0;
+  display: grid;
+  gap: 16px;
+}
+.review-decision button {
+  margin-right: 12px;
+}
+button.review-continue {
+  background: #a9342a;
+  color: white;
+}
+button.review-promote {
+  background: #247948;
+  color: white;
+}
+.account-review {
+  margin-top: 16px;
+}
+.review-link {
+  font-weight: 700;
+  color: #d6bd86;
+}
+@media (max-width: 800px) {
+  .review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .staff-review-panel {
+    padding: 18px;
+  }
+  .review-filters label {
+    width: 100%;
+  }
+}
