@@ -2,6 +2,10 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { isIP } from "node:net";
 import {
+  storeCommunityService,
+  validateStoreCommunity,
+} from "./store-community.js";
+import {
   emptyStoreCatalog,
   emptyCommandCatalog,
   validStoreSelection,
@@ -61,6 +65,7 @@ export function validateStorefront(config) {
     );
   const keys = new Set(),
     packages = new Set();
+  validateStoreCommunity(settings);
   const mappings = [...settings.products, ...commandProducts];
   for (const product of mappings) {
     const key = validStoreSelection(product)
@@ -169,6 +174,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
     return value;
   }
   return {
+    ...storeCommunityService(settings, fetcher),
     catalog,
     async checkout(input, ipAddress, origin) {
       if (
@@ -251,6 +257,29 @@ export function storefrontRouter(service, origins) {
   );
   router.get("/store/api/catalog", async (_req, res) =>
     res.json(await service.catalog()),
+  );
+  router.get("/store/api/community", async (_req, res) =>
+    res.set("Cache-Control", "no-store").json(await service.community()),
+  );
+  router.post(
+    "/store/api/gift-card",
+    rateLimit({
+      windowMs: 60000,
+      limit: 5,
+      legacyHeaders: false,
+      standardHeaders: "draft-8",
+    }),
+    express.json({ limit: "1kb" }),
+    async (req, res) => {
+      const origin = origins.find(
+        (value) => new URL(value).host === req.headers.host,
+      );
+      if (!origin || req.headers.origin !== origin)
+        throw failure("store_origin_required", 403);
+      res
+        .set("Cache-Control", "no-store")
+        .json(await service.giftCard(req.body));
+    },
   );
   router.post(
     "/store/api/checkout",

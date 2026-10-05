@@ -1,6 +1,7 @@
 import React from "react";
 
 const paths = {
+  gift: "M2 9h20v5H2zm2 7h7v6H4zm9 0h7v6h-7zM11 9H7a4 4 0 1 1 4-5l1 2 1-2a4 4 0 1 1 4 5h-4v5h-2zm-1-3-1-2a1 1 0 1 0-1 2zm4 0h2a1 1 0 1 0-1-2z",
   home: "M12 2 1 11h3v11h6v-7h4v7h6V11h3z",
   servers: "M3 2h18v6H3zM3 10h18v6H3zM3 18h18v4H3zM6 4v2h2V4zM6 12v2h2v-2z",
   store: "M7 7V6a5 5 0 0 1 10 0v1h4l1 15H2L3 7zm3 0h4V6a2 2 0 0 0-4 0z",

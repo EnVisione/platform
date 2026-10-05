@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
+import { StoreCommunity, StoreSupportMessage } from "./store-community.jsx";
 import {
   emptyStoreCatalog,
   emptyCommandCatalog,
@@ -367,6 +368,17 @@ export function Storefront({
   const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
   const scope = category === "home" ? "network" : category;
+  const homePage = !comparePage && !commandsPage && category === "home";
+  const [giftRequested, setGiftRequested] = useState(
+    () => location.hash === "#store-gift-cards",
+  );
+  useEffect(() => {
+    if (!homePage || !giftRequested) return;
+    document
+      .getElementById("store-gift-cards")
+      ?.scrollIntoView({ block: "start" });
+    setGiftRequested(false);
+  }, [homePage, giftRequested]);
   const [billing, setBilling] = useState("monthly");
   const [catalog, setCatalog] = useState(initialCatalog);
   const [loading, setLoading] = useState(true);
@@ -629,6 +641,21 @@ export function Storefront({
             >
               <PublicIcon name="play" /> Commands
             </a>
+            {comparePage || commandsPage ? (
+              <a href={`${storeHome}#store-gift-cards`}>
+                <PublicIcon name="gift" /> Gift cards
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  selectCategory("home");
+                  setGiftRequested(true);
+                }}
+              >
+                <PublicIcon name="gift" /> Gift cards
+              </button>
+            )}
             <span className="store-nav-label">
               {commandsPage ? "COMMAND COVERAGE" : "RANKS"}
             </span>
@@ -668,7 +695,7 @@ export function Storefront({
           </div>
         </aside>
         <div className="store-main">
-          {!comparePage && !commandsPage && category === "home" && (
+          {homePage && (
             <section
               className="store-slider"
               aria-label="Store highlights"
@@ -734,6 +761,7 @@ export function Storefront({
               </div>
             </section>
           )}
+          {homePage && <StoreSupportMessage />}
           {location.pathname.endsWith("/thank-you") && (
             <p className="store-notice" role="status">
               You’ve returned from checkout. Check your Tebex receipt for
@@ -773,17 +801,21 @@ export function Storefront({
                     <h1 id="store-category-title">Individual commands</h1>
                   ) : (
                     <h2 id="store-category-title">
-                      {scope === "network"
-                        ? "Network ranks"
-                        : `${currentScope.name} ranks`}
+                      {homePage
+                        ? "Featured ranks"
+                        : scope === "network"
+                          ? "Network ranks"
+                          : `${currentScope.name} ranks`}
                     </h2>
                   )}
                   <p>
-                    {commandsPage
-                      ? `Choose a single command for ${currentScope.name}.`
-                      : scope === "network"
-                        ? "Across both of our current modpacks."
-                        : currentScope.description}
+                    {homePage
+                      ? "A few of our planned ranks. Explore the categories for all seven tiers."
+                      : commandsPage
+                        ? `Choose a single command for ${currentScope.name}.`
+                        : scope === "network"
+                          ? "Across both of our current modpacks."
+                          : currentScope.description}
                   </p>
                 </div>
                 <div
@@ -805,7 +837,14 @@ export function Storefront({
                 </div>
               </header>
               <div className="store-products" aria-busy={loading}>
-                {(commandsPage ? storeCommands : storeRanks).map((item) => {
+                {(commandsPage
+                  ? storeCommands
+                  : homePage
+                    ? storeRanks.filter(({ id }) =>
+                        ["king", "duke", "knight"].includes(id),
+                      )
+                    : storeRanks
+                ).map((item) => {
                   const selection = commandsPage
                     ? { command: item.id }
                     : { rank: item.id };
@@ -879,6 +918,7 @@ export function Storefront({
               </p>
             </section>
           )}
+          {homePage && <StoreCommunity />}
           <section className="store-information" aria-label="Store information">
             <div>
               <h2>Network or modpack?</h2>
@@ -903,11 +943,31 @@ export function Storefront({
               </p>
             </div>
           </section>
-          <p className="store-legal">
-            Read our <a href="/terms">Terms of Service</a> and{" "}
-            <a href="/privacy">Privacy Policy</a>. Tebex’s checkout terms and
-            privacy information apply when you use its payment services.
-          </p>
+          <section
+            className="store-policies"
+            aria-labelledby="store-policies-title"
+          >
+            <h2 id="store-policies-title">Store policies</h2>
+            <p>
+              Need help with a purchase?{" "}
+              <a href="https://drakora.org/help">Contact our support team</a>.
+              Read the store terms and how your information is handled before
+              purchasing.
+            </p>
+            <div className="store-policy-links">
+              <a className="store-button secondary" href="/terms">
+                Terms of Service
+              </a>
+              <a className="store-button secondary" href="/privacy">
+                Privacy Policy
+              </a>
+            </div>
+            <p>
+              Tebex’s checkout terms and privacy information also apply when you
+              use its payment services. Drakora is not affiliated with Mojang or
+              Microsoft.
+            </p>
+          </section>
         </div>
       </div>
       {drawer && (
