@@ -7,6 +7,7 @@ import {
   StoreSupportMessage,
 } from "./store-community.jsx";
 import { StoreGiftCards, useStoreWallet } from "./store-gift-cards.jsx";
+import { StorePlayer, validUsername } from "./store-player.jsx";
 import {
   emptyStoreCatalog,
   emptyCommandCatalog,
@@ -73,7 +74,6 @@ function loadCheckout() {
 }
 
 const usernameKey = "drakora-store-username";
-const validUsername = (value) => /^[A-Za-z0-9_]{3,16}$/.test(value);
 function savedUsername() {
   try {
     const value = sessionStorage.getItem(usernameKey) || "";
@@ -81,23 +81,6 @@ function savedUsername() {
   } catch {
     return "";
   }
-}
-
-function PlayerFace() {
-  return (
-    <svg
-      className="store-player"
-      viewBox="0 0 8 8"
-      aria-hidden="true"
-      shapeRendering="crispEdges"
-    >
-      <path fill="#49382b" d="M0 0h8v8H0z" />
-      <path fill="#bb906b" d="M0 3h8v4H0zM2 7h4v1H2z" />
-      <path fill="#e1d4bd" d="M1 4h2v1H1zM5 4h2v1H5z" />
-      <path fill="#52615b" d="M2 4h1v1H2zM5 4h1v1H5z" />
-      <path fill="#76553c" d="M3 5h2v1H3zM2 6h4v1H2z" />
-    </svg>
-  );
 }
 
 function RankArtwork({ rank }) {
@@ -663,7 +646,7 @@ export function Storefront({
       <div className="store-shell">
         <aside className="store-sidebar" aria-label="Store navigation">
           <div className="username-box">
-            <PlayerFace />
+            <StorePlayer username={username} />
             <div>
               <strong>{username || "Guest"}</strong>
               <span>
@@ -1000,7 +983,7 @@ export function Storefront({
         >
           {drawer === "login" ? (
             <form className="store-login-form" onSubmit={login}>
-              <PlayerFace />
+              <StorePlayer username={usernameDraft} preview />
               <h3>Please enter your username to continue</h3>
               <p>
                 Use your Minecraft Java username so your purchase can be

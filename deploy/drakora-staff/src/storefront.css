@@ -170,6 +170,23 @@
   width: 54px;
   height: 54px;
   flex-shrink: 0;
+  image-rendering: pixelated;
+}
+.store-player-preview {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.storefront .store-player-placeholder {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: #252525;
+  color: var(--gold);
+}
+.store-player-placeholder svg {
+  width: 28px;
+  height: 28px;
 }
 .username-box strong,
 .username-box span {
@@ -932,10 +949,29 @@
   font-size: 14px;
   line-height: 1.75;
 }
-.store-login-form > .store-player {
+.store-player-preview.editing {
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.store-player-preview.editing .store-player {
   width: 76px;
   height: 76px;
-  margin-bottom: 20px;
+}
+.storefront .store-player-preview-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #999;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.store-player-preview-status strong,
+.store-player-preview-status span {
+  display: block;
+}
+.store-player-preview-status strong {
+  color: var(--gold);
+  font-size: 15px;
 }
 .store-login-form label {
   display: block;

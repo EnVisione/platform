@@ -399,6 +399,15 @@ export function storefrontRouter(service, origins, wallet, options = {}) {
   router.get("/store/api/community", async (_req, res) =>
     res.set("Cache-Control", "no-store").json(await service.community()),
   );
+  router.get("/store/api/minecraft/:name", async (req, res) => {
+    if (!validStoreUsername(req.params.name))
+      throw failure("invalid_minecraft_name", 400);
+    if (!options.minecraftProfile)
+      throw failure("player_preview_unavailable", 503);
+    res
+      .set("Cache-Control", "no-store")
+      .json(await options.minecraftProfile(req.params.name));
+  });
   router.post(
     "/store/api/gift-card",
     rateLimit({

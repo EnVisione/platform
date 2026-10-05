@@ -382,6 +382,7 @@ if (website) {
     {
       staffOrigin: config.staffOrigin,
       giftCardsEnabled: Boolean(config.storefront?.pluginSecret),
+      minecraftProfile: applications?.minecraftProfile,
     },
   );
   app.use((req, res, next) =>

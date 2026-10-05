@@ -338,6 +338,52 @@ test("HTTP checkout rejects cross-origin requests and returns controlled errors 
   assert.equal(calls, 1);
 });
 
+test("store player preview validates names and returns profiles without creating a checkout", async (t) => {
+  const names = [];
+  const profile = {
+    name: "Test_Player",
+    uuid: "0123456789abcdef0123456789abcdef",
+    found: true,
+  };
+  const app = express();
+  app.use(
+    storefrontRouter({}, [], undefined, {
+      minecraftProfile: async (name) => {
+        names.push(name);
+        if (name === "Failed_Player") throw new Error("provider unavailable");
+        return name === "Test_Player"
+          ? profile
+          : { name, uuid: null, found: false };
+      },
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  await new Promise((resolve) => server.once("listening", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  for (const name of ["ab", "bad-name", "a".repeat(17)])
+    assert.equal(
+      (await fetch(`${origin}/store/api/minecraft/${name}`)).status,
+      400,
+    );
+  assert.equal(names.length, 0);
+  const response = await fetch(`${origin}/store/api/minecraft/Test_Player`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), profile);
+  assert.deepEqual(
+    await (await fetch(`${origin}/store/api/minecraft/Unknown_Player`)).json(),
+    {
+      name: "Unknown_Player",
+      uuid: null,
+      found: false,
+    },
+  );
+  const failed = await fetch(`${origin}/store/api/minecraft/Failed_Player`);
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: "store_unavailable" });
+});
+
 test("command mappings validate category, unique packages, delivery and monthly interval", () => {
   const command = {
     command: "hat",
