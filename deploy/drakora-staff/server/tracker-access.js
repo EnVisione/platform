@@ -95,7 +95,7 @@ export function trackerAccessService(config, store, huly, discord) {
       const users = [];
       for (const [id, saved] of store.entries("user")) {
         if (!saved.hulyAccount) continue;
-        const checked = await discord.check(id, true);
+        const checked = await discord.checkMembership(id);
         users.push(await huly.sync(checked));
       }
       await withClient(config, huly.serviceToken(), (client) =>

@@ -180,7 +180,9 @@ export function validateConfig(config) {
     throw new Error("Staff rank IDs must be unique");
   if (
     config.trackerProjects !== undefined &&
-    (!Array.isArray(config.trackerProjects) ||
+    (!config.office ||
+      !config.discordBotToken ||
+      !Array.isArray(config.trackerProjects) ||
       !config.trackerProjects.length ||
       config.trackerProjects.length > 50 ||
       config.trackerProjects.some(

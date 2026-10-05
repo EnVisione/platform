@@ -239,6 +239,45 @@ test("staff-server membership is required at login and bot checks fail closed", 
   });
 });
 
+test("background role checks use bot membership without refreshing expired login tokens", async (t) => {
+  const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
+  t.after(() => store.close());
+  store.set("user", "42", {
+    id: "42",
+    hulyAccount: "account",
+    tokens: { access_token: "expired", refresh_token: "revoked" },
+    tokenExpires: 0,
+    checkedAt: 0,
+  });
+  let member = { roles: [accessRoles.dashboard, "23"] };
+  let available = true;
+  const client = discordClient(
+    config,
+    store,
+    async () => {
+      throw new Error("Background reconciliation must not use user OAuth");
+    },
+    undefined,
+    {
+      available: () => available,
+      member: async () => member,
+    },
+  );
+  let checked = await client.checkMembership("42");
+  assert.equal(checked.permissions.todo, true);
+  assert.deepEqual(checked.permissions.hulyRanks, ["Helper"]);
+  assert.equal(checked.hulyAccount, "account");
+  assert.equal(checked.tokens.refresh_token, "revoked");
+  member = { roles: [accessRoles.dashboard], pending: true };
+  assert.equal((await client.checkMembership("42")).permissions.todo, false);
+  member = undefined;
+  assert.equal((await client.checkMembership("42")).staffMember, false);
+  available = false;
+  await assert.rejects(client.checkMembership("42"), {
+    code: "discord_unavailable",
+  });
+});
+
 test("gateway revocation ends exact staff sessions and wins against in-flight role checks", async (t) => {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   t.after(() => store.close());

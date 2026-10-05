@@ -72,11 +72,12 @@ export function discordClient(
       throw new AuthError("dashboard_role_required");
     return admitted;
   }
-  async function refresh(id) {
+  async function refresh(id, botOnly = false) {
     const user = store.get("user", id);
-    if (!user?.tokens) throw new AuthError("discord_login_required", 401);
+    if (!user || (!botOnly && !user.tokens))
+      throw new AuthError("discord_login_required", 401);
     const revision = user.accessRevision || 0;
-    if (user.tokenExpires < Date.now() + 30000) {
+    if (!botOnly && user.tokenExpires < Date.now() + 30000) {
       user.tokens = await token({
         grant_type: "refresh_token",
         refresh_token: user.tokens.refresh_token,
@@ -124,6 +125,17 @@ export function discordClient(
         refresh(id).finally(() => pending.delete(id)),
       );
     const user = await pending.get(id);
+    const latest = store.get("user", id);
+    return applyPermissions(
+      (latest?.accessRevision || 0) !== (user.accessRevision || 0)
+        ? latest
+        : user,
+    );
+  }
+  async function checkMembership(id) {
+    if (!membership?.available())
+      throw new AuthError("discord_unavailable", 503);
+    const user = await refresh(id, true);
     const latest = store.get("user", id);
     return applyPermissions(
       (latest?.accessRevision || 0) !== (user.accessRevision || 0)
@@ -218,5 +230,5 @@ export function discordClient(
     if (!profile?.id) throw new AuthError("discord_login_required", 401);
     return { id: profile.id, name: profile.global_name || profile.username };
   }
-  return { login, check, identity, storeIdentity, observe };
+  return { login, check, checkMembership, identity, storeIdentity, observe };
 }
