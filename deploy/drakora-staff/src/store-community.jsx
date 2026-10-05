@@ -127,7 +127,7 @@ export function RecentPayments({ community }) {
   );
 }
 
-export function TopCustomers({ community }) {
+export function TopCustomers({ community, storeHref }) {
   const { data, loading, error, retry } = community;
   const [period, setPeriod] = useState("month");
   const ready = !loading && !error && data?.connected;
@@ -138,11 +138,17 @@ export function TopCustomers({ community }) {
       aria-labelledby="store-top-title"
       aria-busy={loading}
     >
-      <h1 id="store-top-title">Top 3 customers</h1>
+      {storeHref ? (
+        <h2 id="store-top-title">
+          <a href={storeHref}>Top 3 supporters</a>
+        </h2>
+      ) : (
+        <h1 id="store-top-title">Top 3 customers</h1>
+      )}
       <div
         className="store-periods"
         role="group"
-        aria-label="Top customer period"
+        aria-label={storeHref ? "Top supporter period" : "Top customer period"}
       >
         {Object.entries(periods).map(([key, label]) => (
           <button
@@ -158,21 +164,37 @@ export function TopCustomers({ community }) {
       </div>
       {ready && top.length ? (
         <ol className="store-top-customers" aria-label={periods[period]}>
-          {top.map((player, index) => (
-            <li key={player.uuid ?? player.username}>
-              <span className="store-customer-position">{index + 1}</span>
-              <SupporterFace player={player} />
-              <strong>{player.username}</strong>
-            </li>
-          ))}
+          {top.map((player, index) => {
+            const supporter = (
+              <>
+                <span className="store-customer-position">{index + 1}</span>
+                <SupporterFace player={player} />
+                <strong>{player.username}</strong>
+              </>
+            );
+            return (
+              <li key={player.uuid ?? player.username}>
+                {storeHref ? (
+                  <a
+                    href={storeHref}
+                    aria-label={`Visit the store. Supporter ${index + 1}: ${player.username}`}
+                  >
+                    {supporter}
+                  </a>
+                ) : (
+                  supporter
+                )}
+              </li>
+            );
+          })}
         </ol>
       ) : (
         <p className="store-community-empty">
           {loading
             ? "Loading supporters…"
             : error
-              ? "Customer rankings are temporarily unavailable."
-              : `No customers to show for ${periods[period].toLowerCase()} yet.`}
+              ? "Supporter rankings are temporarily unavailable."
+              : `No ${storeHref ? "supporters" : "customers"} to show for ${periods[period].toLowerCase()} yet.`}
         </p>
       )}
       <p className="store-community-caption">
@@ -185,6 +207,11 @@ export function TopCustomers({ community }) {
             Try again
           </button>
         </p>
+      )}
+      {storeHref && (
+        <a className="public-button beige" href={storeHref}>
+          Support Drakora <PublicIcon name="arrow" />
+        </a>
       )}
     </section>
   );

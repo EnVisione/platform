@@ -592,6 +592,58 @@ button {
   padding: 28px;
   background: var(--panel);
 }
+.public-home-sidebar {
+  min-width: 0;
+  display: grid;
+  gap: 24px;
+}
+.public-home-sidebar .store-top-panel {
+  background: var(--panel);
+  border-radius: var(--radius);
+  margin: 0;
+  order: 0;
+}
+.public-home-sidebar .store-top-panel h2 {
+  margin: 0 0 20px;
+  font-size: 24px;
+  color: #b7a080;
+}
+.public-home-sidebar .store-top-panel h2 a {
+  color: inherit;
+}
+.public-home-sidebar .store-periods button {
+  padding: 8px;
+  border: 0;
+  font-size: 11px;
+  background: var(--raised);
+  color: var(--muted);
+}
+.public-home-sidebar .store-periods button.active {
+  background: var(--gold);
+  color: #29221b;
+}
+.public-home-sidebar .store-top-customers li > a {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  color: #f2f3f5;
+}
+.public-home-sidebar .store-top-customers li > a:hover strong {
+  color: var(--gold);
+}
+.public-home-sidebar .store-top-customers strong {
+  overflow-wrap: anywhere;
+}
+.public-home-sidebar .store-community-empty,
+.public-home-sidebar .store-community-caption {
+  color: var(--muted);
+}
+.public-home-sidebar .store-top-panel > .public-button {
+  width: 100%;
+  margin-top: 18px;
+}
 .public-home-help p {
   font-size: 15px;
 }

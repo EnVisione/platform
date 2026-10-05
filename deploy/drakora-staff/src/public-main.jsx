@@ -17,6 +17,7 @@ import { PublicIcon, PublicHeading } from "./public-icons.jsx";
 import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
 import { Storefront } from "./storefront.jsx";
+import { TopCustomers, useStoreCommunity } from "./store-community.jsx";
 
 const artwork = {
   castle,
@@ -275,6 +276,7 @@ function PartnershipBanner({ discordInvite }) {
   );
 }
 function HomePage({ home, discordInvite }) {
+  const community = useStoreCommunity();
   return (
     <>
       <section className="public-welcome">
@@ -336,13 +338,16 @@ function HomePage({ home, discordInvite }) {
             </div>
           )}
         </section>
-        <aside className="public-home-help">
-          <span className="public-eyebrow">WE ARE HERE TO HELP</span>
-          <PublicHeading icon="help">Need a hand?</PublicHeading>
-          <p>New to the network, stuck in a world or need to reach staff?</p>
-          <a href="/help">
-            Find support <PublicIcon name="arrow" />
-          </a>
+        <aside className="public-home-sidebar" aria-label="Community support">
+          <TopCustomers community={community} storeHref={storeUrl} />
+          <section className="public-home-help">
+            <span className="public-eyebrow">WE ARE HERE TO HELP</span>
+            <PublicHeading icon="help">Need a hand?</PublicHeading>
+            <p>New to the network, stuck in a world or need to reach staff?</p>
+            <a href="/help">
+              Find support <PublicIcon name="arrow" />
+            </a>
+          </section>
         </aside>
       </div>
     </>
