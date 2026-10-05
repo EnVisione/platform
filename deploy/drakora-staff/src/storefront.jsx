@@ -184,8 +184,150 @@ const slides = [
   },
 ];
 
-export function Storefront({ discordInvite, discordCount, join }) {
-  const [category, setCategory] = useState("home");
+function RankComparison({
+  scope,
+  billing,
+  loading,
+  productFor,
+  viewRank,
+  selectScope,
+  selectBilling,
+}) {
+  const coverage = storeScopes.find(({ id }) => id === scope);
+  const period = storeBilling.find(({ id }) => id === billing);
+  const rows = [
+    {
+      label: "Price",
+      value: (product) => (loading ? "Loading…" : money(product)),
+    },
+    { label: "Where it applies", value: () => coverage.name },
+    {
+      label: "Payment",
+      value: () =>
+        billing === "monthly" ? "Monthly subscription" : "One payment",
+    },
+    { label: "Rank perks", value: () => "Not announced" },
+    {
+      label: "Availability",
+      value: (product) =>
+        loading ? "Loading…" : product?.available ? "Available" : "Coming soon",
+    },
+  ];
+  return (
+    <section className="store-comparison" aria-labelledby="store-compare-title">
+      <header className="store-comparison-heading">
+        <h1 id="store-compare-title">Compare ranks</h1>
+        <p>
+          All seven ranks, side by side. Choose where you play and how you want
+          to pay.
+        </p>
+      </header>
+      <div className="store-comparison-controls">
+        <div
+          className="store-compare-scopes"
+          role="group"
+          aria-label="Rank coverage"
+        >
+          {storeScopes.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={scope === item.id ? "active" : ""}
+              aria-pressed={scope === item.id}
+              onClick={() => selectScope(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+        <div className="store-billing" role="group" aria-label="Payment period">
+          {storeBilling.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={billing === item.id ? "active" : ""}
+              aria-pressed={billing === item.id}
+              onClick={() => selectBilling(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="store-compare-selection" aria-live="polite">
+        {coverage.description} · {period.name}
+      </p>
+      <p id="store-compare-scroll" className="store-compare-scroll">
+        Scroll across to compare all seven ranks.
+      </p>
+      <div
+        className="store-comparison-scroll"
+        role="region"
+        aria-label="Rank comparison"
+        aria-describedby="store-compare-scroll"
+        tabIndex={0}
+      >
+        <table className="store-comparison-table" aria-busy={loading}>
+          <caption>
+            {coverage.name} ranks · {period.name}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Rank</th>
+              {storeRanks.map((rank) => (
+                <th scope="col" key={rank.id}>
+                  <RankArtwork rank={rank.id} />
+                  <span>{rank.name}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <th scope="row">{row.label}</th>
+                {storeRanks.map((rank) => (
+                  <td key={rank.id}>
+                    {row.value(productFor({ rank: rank.id, scope, billing }))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr>
+              <th scope="row">Explore rank</th>
+              {storeRanks.map((rank) => (
+                <td key={rank.id}>
+                  <button
+                    className="store-detail-button"
+                    type="button"
+                    aria-label={`View ${rank.name} rank`}
+                    onClick={() => viewRank(rank.id)}
+                  >
+                    View rank
+                  </button>
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="store-catalog-note">
+        Prices and rank perks will be announced before purchases open.
+      </p>
+    </section>
+  );
+}
+
+export function Storefront({
+  discordInvite,
+  discordCount,
+  join,
+  comparePage = false,
+  storefrontHost = false,
+}) {
+  const [category, setCategory] = useState(comparePage ? "network" : "home");
+  const storeHome = storefrontHost ? "/" : "/store";
+  const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const scope = category === "home" ? "network" : category;
   const [billing, setBilling] = useState("monthly");
   const [catalog, setCatalog] = useState(emptyStoreCatalog());
@@ -411,21 +553,37 @@ export function Storefront({ discordInvite, discordCount, join }) {
             </div>
           </div>
           <nav className="user-nav" aria-label="Rank categories">
-            <button
-              type="button"
-              className={category === "home" ? "active" : ""}
-              aria-current={category === "home" ? "page" : undefined}
-              onClick={() => selectCategory("home")}
+            {comparePage ? (
+              <a href={storeHome}>
+                <PublicIcon name="home" /> Store home
+              </a>
+            ) : (
+              <button
+                type="button"
+                className={category === "home" ? "active" : ""}
+                aria-current={category === "home" ? "page" : undefined}
+                onClick={() => selectCategory("home")}
+              >
+                <PublicIcon name="home" /> Store home
+              </button>
+            )}
+            <a
+              href={compareHref}
+              className={comparePage ? "active" : ""}
+              aria-current={comparePage ? "page" : undefined}
             >
-              <PublicIcon name="home" /> Store home
-            </button>
+              <PublicIcon name="crest" /> Compare ranks
+            </a>
             <span className="store-nav-label">RANKS</span>
             {storeScopes.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 className={category === item.id ? "active" : ""}
-                aria-current={category === item.id ? "page" : undefined}
+                aria-current={
+                  !comparePage && category === item.id ? "page" : undefined
+                }
+                aria-pressed={comparePage ? category === item.id : undefined}
                 onClick={() => selectCategory(item.id)}
               >
                 <PublicIcon name="servers" />{" "}
@@ -445,7 +603,7 @@ export function Storefront({ discordInvite, discordCount, join }) {
           </div>
         </aside>
         <div className="store-main">
-          {category === "home" && (
+          {!comparePage && category === "home" && (
             <section
               className="store-slider"
               aria-label="Store highlights"
@@ -529,92 +687,107 @@ export function Storefront({ discordInvite, discordCount, join }) {
               </button>
             </div>
           )}
-          <section
-            className="store-catalog"
-            aria-labelledby="store-category-title"
-          >
-            <header className="store-category-header">
-              <div>
-                <h2 id="store-category-title">
-                  {scope === "network"
-                    ? "Network ranks"
-                    : `${currentScope.name} ranks`}
-                </h2>
-                <p>
-                  {scope === "network"
-                    ? "Across both of our current modpacks."
-                    : currentScope.description}
-                </p>
-              </div>
-              <div
-                className="store-billing"
-                role="group"
-                aria-label="Payment period"
-              >
-                {storeBilling.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    className={billing === item.id ? "active" : ""}
-                    aria-pressed={billing === item.id}
-                    onClick={() => setBilling(item.id)}
-                  >
-                    {item.name}
-                  </button>
-                ))}
-              </div>
-            </header>
-            <div className="store-products" aria-busy={loading}>
-              {storeRanks.map((item) => {
-                const product = productFor({ rank: item.id, scope, billing });
-                return (
-                  <article className="package" key={item.id}>
+          {comparePage ? (
+            <RankComparison
+              scope={scope}
+              billing={billing}
+              loading={loading}
+              productFor={productFor}
+              viewRank={viewRank}
+              selectScope={selectCategory}
+              selectBilling={setBilling}
+            />
+          ) : (
+            <section
+              className="store-catalog"
+              aria-labelledby="store-category-title"
+            >
+              <header className="store-category-header">
+                <div>
+                  <h2 id="store-category-title">
+                    {scope === "network"
+                      ? "Network ranks"
+                      : `${currentScope.name} ranks`}
+                  </h2>
+                  <p>
+                    {scope === "network"
+                      ? "Across both of our current modpacks."
+                      : currentScope.description}
+                  </p>
+                </div>
+                <div
+                  className="store-billing"
+                  role="group"
+                  aria-label="Payment period"
+                >
+                  {storeBilling.map((item) => (
                     <button
-                      className="store-product-image"
                       type="button"
-                      aria-label={`View ${item.name} rank`}
-                      onClick={() => viewRank(item.id)}
+                      key={item.id}
+                      className={billing === item.id ? "active" : ""}
+                      aria-pressed={billing === item.id}
+                      onClick={() => setBilling(item.id)}
                     >
-                      <RankArtwork rank={item.id} />
+                      {item.name}
                     </button>
-                    <div className="store-product-info">
-                      <h3>{item.name}</h3>
-                      <span>
-                        {loading ? "Loading…" : money(product)}
-                        {product?.price != null && (
-                          <small>
-                            {billing === "monthly" ? " / month" : " once"}
-                          </small>
-                        )}
-                      </span>
-                    </div>
-                    <div className="store-product-actions">
+                  ))}
+                </div>
+              </header>
+              <div className="store-products" aria-busy={loading}>
+                {storeRanks.map((item) => {
+                  const product = productFor({ rank: item.id, scope, billing });
+                  return (
+                    <article className="package" key={item.id}>
                       <button
-                        className="store-detail-button"
+                        className="store-product-image"
                         type="button"
+                        aria-label={`View ${item.name} rank`}
                         onClick={() => viewRank(item.id)}
                       >
-                        View details
+                        <RankArtwork rank={item.id} />
                       </button>
-                      <button
-                        className="store-button"
-                        type="button"
-                        disabled={
-                          loading || catalogError || !product?.available
-                        }
-                        onClick={() => viewRank(item.id)}
-                      >
-                        {product?.available ? "Choose rank" : "Coming soon"}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-            <p className="store-catalog-note">
-              Prices and rank perks will be announced before purchases open.
-            </p>
-          </section>
+                      <div className="store-product-info">
+                        <h3>{item.name}</h3>
+                        <span>
+                          {loading ? "Loading…" : money(product)}
+                          {product?.price != null && (
+                            <small>
+                              {billing === "monthly" ? " / month" : " once"}
+                            </small>
+                          )}
+                        </span>
+                      </div>
+                      <div className="store-product-actions">
+                        <button
+                          className="store-detail-button"
+                          type="button"
+                          onClick={() => viewRank(item.id)}
+                        >
+                          View details
+                        </button>
+                        <button
+                          className="store-button"
+                          type="button"
+                          disabled={
+                            loading || catalogError || !product?.available
+                          }
+                          onClick={() => viewRank(item.id)}
+                        >
+                          {product?.available ? "Choose rank" : "Coming soon"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <p className="store-catalog-note">
+                Prices and rank perks will be announced before purchases open.{" "}
+                <a href={compareHref}>
+                  Compare all ranks <PublicIcon name="arrow" />
+                </a>
+              </p>
+            </section>
+          )}
           <section className="store-information" aria-label="Store information">
             <div>
               <h2>Network or modpack?</h2>

@@ -30,6 +30,8 @@ export function publicWebsiteRouter(service, status, dist) {
       "/help",
       "/partners",
       "/store",
+      "/store/compare",
+      "/compare",
       "/store/thank-you",
     ],
     (_req, res) => res.sendFile(`${dist}/public.html`),

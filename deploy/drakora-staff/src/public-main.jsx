@@ -440,10 +440,13 @@ function PublicSite() {
     [error, setError] = useState(false),
     [status, setStatus] = useState(null);
   const storefrontHost = content?.storefrontOrigin === location.origin;
+  const pathname = location.pathname.replace(/\/$/, "") || "/";
   const path =
-    storefrontHost && location.pathname === "/"
-      ? "/store"
-      : location.pathname.replace(/\/$/, "") || "/";
+    pathname === "/compare"
+      ? "/store/compare"
+      : storefrontHost && pathname === "/"
+        ? "/store"
+        : pathname;
   useEffect(() => {
     const controller = new AbortController();
     fetch("/site/api/content", { signal: controller.signal })
@@ -496,20 +499,23 @@ function PublicSite() {
     partnershipPage = path === "/partners",
     applyPage = path === "/apply",
     helpPage = path === "/help",
-    storePage = path === "/store" || path === "/store/thank-you";
-  const title = storePage
-    ? "Store"
-    : home
-      ? "Home"
-      : partnershipPage
-        ? "Partnerships"
-        : serversPage
-          ? "Servers"
-          : applyPage
-            ? "Apply"
-            : helpPage
-              ? "Need help?"
-              : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
+    comparePage = path === "/store/compare",
+    storePage = path === "/store" || path === "/store/thank-you" || comparePage;
+  const title = comparePage
+    ? "Compare ranks"
+    : storePage
+      ? "Store"
+      : home
+        ? "Home"
+        : partnershipPage
+          ? "Partnerships"
+          : serversPage
+            ? "Servers"
+            : applyPage
+              ? "Apply"
+              : helpPage
+                ? "Need help?"
+                : (server?.name ?? (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -579,6 +585,8 @@ function PublicSite() {
           </p>
         ) : storePage ? (
           <Storefront
+            comparePage={comparePage}
+            storefrontHost={storefrontHost}
             discordInvite={content.discordInvite}
             discordCount={status?.discord.total}
             join={<CopyAddress large />}

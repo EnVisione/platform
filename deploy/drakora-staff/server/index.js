@@ -340,7 +340,9 @@ app.use((req, res, next) => {
     res.set(
       "Content-Security-Policy",
       req.headers.host === storefrontHost ||
-        (req.headers.host === applicationHost && req.path.startsWith("/store"))
+        (req.headers.host === applicationHost &&
+          (req.path.startsWith("/store") ||
+            ["/compare", "/compare/"].includes(req.path)))
         ? "default-src 'self'; script-src 'self' https://js.tebex.io; style-src 'self' 'unsafe-inline' https://js.tebex.io; img-src 'self' https:; connect-src 'self' https://*.tebex.io; frame-src https://*.tebex.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.tebex.io"
         : `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' ${req.headers.host === applicationHost && config.website ? "https:" : "https://cdn.discordapp.com"}; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
