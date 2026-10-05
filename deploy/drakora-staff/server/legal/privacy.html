@@ -675,8 +675,14 @@
           advertising consent choice.
         </p>
         <p>
-          The custom store keeps rank selections in page memory and does not
-          save them as a tracking profile. It loads the Tebex checkout script
+          The custom store keeps rank selections and its cart in page memory
+          and does not save them as a tracking profile. Its Minecraft username
+          drawer saves the name you enter in this tab’s session storage, so it
+          can survive a page refresh. Logout removes that name; closing the tab
+          normally clears session storage, although browser session restoration
+          may restore it. This is a checkout identity preference, not proof of
+          Minecraft account ownership or a Drakora customer account. Entering a
+          name does not send it to Tebex. It loads the Tebex checkout script
           only after you choose an available rank and start checkout. This
           creates requests to Tebex, whose checkout may use essential payment,
           session and fraud-prevention storage under its own privacy notice.

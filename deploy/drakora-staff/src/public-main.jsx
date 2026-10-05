@@ -519,47 +519,49 @@ function PublicSite() {
       <a href="#main" className="public-skip">
         Skip to content
       </a>
-      <header className={`public-header${home ? " home" : ""}`}>
-        <PublicNavigation
-          path={path}
-          storePage={storePage}
-          storefrontHost={storefrontHost}
-        />
-        <div className="public-masthead">
-          <div className="public-join">
-            <CopyAddress large />
-          </div>
-          <a
-            href={publicHref("/", storefrontHost)}
-            className="public-brand"
-            aria-label="Drakora Home"
-          >
-            <img src={logo} alt="" />
-            <span>
-              DRAKORA<small>MINECRAFT NETWORK</small>
-            </span>
-          </a>
-          <a
-            href={content?.discordInvite || "/discord"}
-            className="public-discord"
-          >
-            <span className="public-status-icon">
-              <PublicIcon name="discord" />
-            </span>
-            <span className="public-status-copy">
-              <span className="public-eyebrow">
-                {status?.discord.total == null
-                  ? "OUR COMMUNITY"
-                  : `${status.discord.total.toLocaleString()} TOTAL MEMBERS${status.discord.stale ? " · LAST CHECK" : ""}`}
+      {!storePage && (
+        <header className={`public-header${home ? " home" : ""}`}>
+          <PublicNavigation
+            path={path}
+            storePage={storePage}
+            storefrontHost={storefrontHost}
+          />
+          <div className="public-masthead">
+            <div className="public-join">
+              <CopyAddress large />
+            </div>
+            <a
+              href={publicHref("/", storefrontHost)}
+              className="public-brand"
+              aria-label="Drakora Home"
+            >
+              <img src={logo} alt="" />
+              <span>
+                DRAKORA<small>MINECRAFT NETWORK</small>
               </span>
-              <strong>
-                Join our Discord <PublicIcon name="external" />
-              </strong>
-              <span>Chat, updates & support</span>
-            </span>
-          </a>
-        </div>
-      </header>
+            </a>
+            <a
+              href={content?.discordInvite || "/discord"}
+              className="public-discord"
+            >
+              <span className="public-status-icon">
+                <PublicIcon name="discord" />
+              </span>
+              <span className="public-status-copy">
+                <span className="public-eyebrow">
+                  {status?.discord.total == null
+                    ? "OUR COMMUNITY"
+                    : `${status.discord.total.toLocaleString()} TOTAL MEMBERS${status.discord.stale ? " · LAST CHECK" : ""}`}
+                </span>
+                <strong>
+                  Join our Discord <PublicIcon name="external" />
+                </strong>
+                <span>Chat, updates & support</span>
+              </span>
+            </a>
+          </div>
+        </header>
+      )}
       <main id="main" className="public-content">
         {error ? (
           <section className="public-panel">
@@ -576,7 +578,11 @@ function PublicSite() {
             Opening Drakora…
           </p>
         ) : storePage ? (
-          <Storefront />
+          <Storefront
+            discordInvite={content.discordInvite}
+            discordCount={status?.discord.total}
+            join={<CopyAddress large />}
+          />
         ) : home ? (
           <HomePage home={content.home} discordInvite={content.discordInvite} />
         ) : applyPage ? (
