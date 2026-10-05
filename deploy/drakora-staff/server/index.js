@@ -879,7 +879,7 @@ app.get("/auth/discord", async (req, res) => {
       client_id: config.discordClientId,
       redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
       response_type: "code",
-      scope: "identify email guilds.members.read",
+      scope: "identify",
       state,
     });
     return res.redirect(authorize.href);
@@ -981,7 +981,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       return res.redirect(
         storeWallet.handoff(
           pending.challenge,
-          await discord.identity(req.query.code),
+          await discord.storeIdentity(req.query.code),
         ),
       );
     } catch {

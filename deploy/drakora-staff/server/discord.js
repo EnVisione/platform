@@ -208,5 +208,15 @@ export function discordClient(
       roles: [...roles],
     };
   }
-  return { login, check, identity, observe };
+  async function storeIdentity(code) {
+    const tokens = await token({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+    });
+    const profile = await api("/users/@me", tokens.access_token);
+    if (!profile?.id) throw new AuthError("discord_login_required", 401);
+    return { id: profile.id, name: profile.global_name || profile.username };
+  }
+  return { login, check, identity, storeIdentity, observe };
 }

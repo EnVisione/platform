@@ -9,10 +9,43 @@ import session from "express-session";
 import { openStore } from "../server/store.js";
 import { storeWalletService } from "../server/store-wallet.js";
 import { storefrontRouter, storefrontService } from "../server/storefront.js";
+import { discordClient } from "../server/discord.js";
 
 const alice = { id: "111111111111111111", name: "Alice" };
 const bob = { id: "222222222222222222", name: "Bob" };
 const code = "PRIVATE-CARD-ABC123";
+test("store linking reads only the Discord profile and persists no staff identity or tokens", async () => {
+  const calls = [];
+  const client = discordClient(
+    {
+      staffOrigin: "https://staff.example.test",
+      discordClientId: "fixture",
+      discordClientSecret: randomBytes(32).toString("base64url"),
+    },
+    {},
+    async (url) => {
+      calls.push(url);
+      return new Response(
+        JSON.stringify(
+          url.endsWith("/token")
+            ? { access_token: "fixture" }
+            : {
+                ...alice,
+                username: alice.name,
+                email: "private@example.test",
+                roles: ["staff"],
+              },
+        ),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    },
+  );
+  assert.deepEqual(await client.storeIdentity("code"), alice);
+  assert.deepEqual(calls, [
+    "https://discord.com/api/oauth2/token",
+    "https://discord.com/api/v10/users/@me",
+  ]);
+});
 function fixture(
   t,
   lookup = async () => ({ remaining: 12.6, currency: "USD" }),
