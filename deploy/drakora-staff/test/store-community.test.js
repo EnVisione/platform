@@ -227,7 +227,7 @@ test("public community and gift card routes contain no private data and balance 
     fetch(`${origin}/store/api/gift-card`, {
       method: "POST",
       headers: { Origin: requestOrigin, "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "012345678901" }),
+      body: JSON.stringify({ code: "012345678901", username: "PlayerOne" }),
     });
   assert.equal((await send("https://evil.test")).status, 403);
   assert.equal(lookups, 0);

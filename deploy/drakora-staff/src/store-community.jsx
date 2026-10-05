@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
 
 const periods = { week: "This week", month: "This month", all: "All time" };
@@ -46,113 +46,7 @@ export function StoreSupportMessage() {
   );
 }
 
-function GiftCardBalance({ enabled }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState("");
-  const [error, setError] = useState("");
-  const activeRequest = useRef(null);
-  useEffect(() => () => activeRequest.current?.abort(), []);
-  async function check(event) {
-    event.preventDefault();
-    if (busy || !enabled) return;
-    setResult("");
-    setError("");
-    if (!/^[A-Za-z0-9-]{6,64}$/.test(code.trim().replaceAll(" ", ""))) {
-      setError("Enter a valid gift card number.");
-      return;
-    }
-    setBusy(true);
-    const controller = new AbortController();
-    activeRequest.current = controller;
-    let message = "We couldn’t check this card. Please try again shortly.";
-    try {
-      const response = await fetch("/store/api/gift-card", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(12000),
-        ]),
-      });
-      if (response.status === 429)
-        message = "Too many checks. Please wait a minute and try again.";
-      if (response.status === 404)
-        message = "This gift card could not be found or is no longer valid.";
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      if (!controller.signal.aborted)
-        setResult(
-          `Remaining balance: ${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency }).format(data.remaining)}`,
-        );
-    } catch (failure) {
-      if (!controller.signal.aborted)
-        setError(
-          failure.name === "TimeoutError"
-            ? "The balance check timed out. Please try again."
-            : message,
-        );
-    } finally {
-      if (!controller.signal.aborted) setBusy(false);
-    }
-  }
-  return (
-    <section
-      className="store-community-panel store-gift-card"
-      id="store-gift-cards"
-      aria-labelledby="store-gift-title"
-    >
-      <div>
-        <h2 id="store-gift-title">Gift cards</h2>
-        <p>
-          Give someone a little Drakora. Gift card purchases are coming soon.
-        </p>
-        <p>
-          Already have a card? Check its balance here and redeem it at Tebex
-          checkout.
-        </p>
-      </div>
-      <form onSubmit={check}>
-        <label htmlFor="store-gift-number">Gift card number</label>
-        <div className="store-gift-input">
-          <input
-            id="store-gift-number"
-            name="gift-card"
-            autoComplete="off"
-            maxLength={64}
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value);
-              setResult("");
-              setError("");
-            }}
-            disabled={busy || !enabled}
-            placeholder="Card number"
-            required
-          />
-          <button
-            className="store-button"
-            type="submit"
-            disabled={busy || !enabled}
-          >
-            {busy ? "Checking…" : "Check"}
-          </button>
-        </div>
-        {result && <p role="status">{result}</p>}
-        {error && (
-          <p className="store-checkout-error" role="alert">
-            {error}
-          </p>
-        )}
-        {!enabled && <p>Balance checks are temporarily unavailable.</p>}
-      </form>
-    </section>
-  );
-}
-
-export function StoreCommunity() {
-  const [period, setPeriod] = useState("month");
+export function useStoreCommunity() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -187,96 +81,111 @@ export function StoreCommunity() {
       controller.abort();
     };
   }, [revision]);
+  return {
+    data,
+    loading,
+    error,
+    retry: () => setRevision((value) => value + 1),
+  };
+}
+
+export function RecentPayments({ community }) {
+  const { data, loading, error, retry } = community;
+  const ready = !loading && !error && data?.connected;
+  return (
+    <section
+      className="store-community-panel store-recent-panel"
+      aria-labelledby="store-payments-title"
+      aria-busy={loading}
+    >
+      <h2 id="store-payments-title">Recent payments</h2>
+      <p>Thank you for helping keep Drakora running.</p>
+      {ready && data.recent.length ? (
+        <ul className="store-recent-payments">
+          {data.recent.map((player, index) => (
+            <li key={`${player.username}-${player.date}-${index}`}>
+              <SupporterFace player={player} />
+              <span>{player.username}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="store-community-empty">
+          {loading
+            ? "Loading payments…"
+            : error
+              ? "Payment updates are temporarily unavailable."
+              : "No payments yet. Your support will appear here when the store opens."}
+        </p>
+      )}
+      {error && (
+        <button className="store-detail-button" type="button" onClick={retry}>
+          Try again
+        </button>
+      )}
+    </section>
+  );
+}
+
+export function TopCustomers({ community }) {
+  const { data, loading, error, retry } = community;
+  const [period, setPeriod] = useState("month");
   const ready = !loading && !error && data?.connected;
   const top = data?.top[period] ?? [];
   return (
-    <>
-      <div className="store-community-grid">
-        <section
-          className="store-community-panel"
-          aria-labelledby="store-payments-title"
-          aria-busy={loading}
-        >
-          <h2 id="store-payments-title">Recent payments</h2>
-          <p>Thank you for helping keep Drakora running.</p>
-          {ready && data.recent.length ? (
-            <ul className="store-recent-payments">
-              {data.recent.map((player, index) => (
-                <li key={`${player.username}-${player.date}-${index}`}>
-                  <SupporterFace player={player} />
-                  <span>{player.username}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="store-community-empty">
-              {loading
-                ? "Loading payments…"
-                : error
-                  ? "Payment updates are temporarily unavailable."
-                  : "No payments yet. Your support will appear here when the store opens."}
-            </p>
-          )}
-        </section>
-        <section
-          className="store-community-panel"
-          aria-labelledby="store-top-title"
-          aria-busy={loading}
-        >
-          <h2 id="store-top-title">Top 3 customers</h2>
-          <div
-            className="store-periods"
-            role="group"
-            aria-label="Top customer period"
+    <section
+      className="store-community-panel store-top-panel"
+      aria-labelledby="store-top-title"
+      aria-busy={loading}
+    >
+      <h1 id="store-top-title">Top 3 customers</h1>
+      <div
+        className="store-periods"
+        role="group"
+        aria-label="Top customer period"
+      >
+        {Object.entries(periods).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={period === key ? "active" : ""}
+            aria-pressed={period === key}
+            onClick={() => setPeriod(key)}
           >
-            {Object.entries(periods).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={period === key ? "active" : ""}
-                aria-pressed={period === key}
-                onClick={() => setPeriod(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {ready && top.length ? (
-            <ol className="store-top-customers" aria-label={periods[period]}>
-              {top.map((player, index) => (
-                <li key={player.uuid ?? player.username}>
-                  <span className="store-customer-position">{index + 1}</span>
-                  <SupporterFace player={player} />
-                  <strong>{player.username}</strong>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="store-community-empty">
-              {loading
-                ? "Loading supporters…"
-                : error
-                  ? "Customer rankings are temporarily unavailable."
-                  : `No customers to show for ${periods[period].toLowerCase()} yet.`}
-            </p>
-          )}
-          <p className="store-community-caption">
-            Ranked by completed purchases. Week and month follow UTC.
-          </p>
-        </section>
+            {label}
+          </button>
+        ))}
       </div>
+      {ready && top.length ? (
+        <ol className="store-top-customers" aria-label={periods[period]}>
+          {top.map((player, index) => (
+            <li key={player.uuid ?? player.username}>
+              <span className="store-customer-position">{index + 1}</span>
+              <SupporterFace player={player} />
+              <strong>{player.username}</strong>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="store-community-empty">
+          {loading
+            ? "Loading supporters…"
+            : error
+              ? "Customer rankings are temporarily unavailable."
+              : `No customers to show for ${periods[period].toLowerCase()} yet.`}
+        </p>
+      )}
+      <p className="store-community-caption">
+        Ranked by completed purchases. Week and month follow UTC.
+      </p>
       {error && (
         <p className="store-community-retry" role="alert">
           We couldn’t load the latest supporter updates.{" "}
-          <button
-            type="button"
-            onClick={() => setRevision((value) => value + 1)}
-          >
+          <button type="button" onClick={retry}>
             Try again
           </button>
         </p>
       )}
-      <GiftCardBalance enabled={Boolean(data?.giftCards)} />
-    </>
+    </section>
   );
 }

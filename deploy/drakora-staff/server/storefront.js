@@ -1,6 +1,8 @@
 import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { isIP } from "node:net";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { validStoreUsername } from "./store-wallet.js";
 import {
   storeCommunityService,
   validateStoreCommunity,
@@ -176,7 +178,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
   return {
     ...storeCommunityService(settings, fetcher),
     catalog,
-    async checkout(input, ipAddress, origin) {
+    async checkout(input, ipAddress, origin, giftCard) {
       if (
         !validStoreSelection(input) ||
         typeof input.username !== "string" ||
@@ -210,7 +212,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
         })
       ).data;
       if (!validIdent(basket?.ident)) throw failure("store_unavailable");
-      const result = (
+      let result = (
         await api(
           `/${basket.ident}/packages`,
           { package_id: String(mapping.packageId), quantity: 1 },
@@ -225,6 +227,18 @@ export function storefrontService(settings = {}, fetcher = fetch) {
         added.type !== (input.billing === "monthly" ? "subscription" : "single")
       )
         throw failure(unavailable, 409);
+      if (giftCard) {
+        result = (
+          await api(`/baskets/${basket.ident}/giftcards`, {
+            card_number: giftCard,
+          })
+        ).data;
+        if (
+          result?.ident !== basket.ident ||
+          !result.giftcards?.some((card) => card.card_number === giftCard)
+        )
+          throw failure("gift_card_checkout_failed", 422);
+      }
       let checkout;
       try {
         checkout = new URL(result.links.checkout);
@@ -244,7 +258,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
   };
 }
 
-export function storefrontRouter(service, origins) {
+export function storefrontRouter(service, origins, wallet, options = {}) {
   const router = express.Router();
   router.use(
     "/store/api",
@@ -255,6 +269,119 @@ export function storefrontRouter(service, origins) {
       standardHeaders: "draft-8",
     }),
   );
+  const requestOrigin = (req) => {
+    const origin = origins.find(
+      (value) => new URL(value).host === req.headers.host,
+    );
+    if (!origin) throw failure("store_origin_required", 403);
+    return origin;
+  };
+  const mutation = (req) => {
+    const origin = requestOrigin(req);
+    if (req.headers.origin !== origin)
+      throw failure("store_origin_required", 403);
+    const actual = req.headers["x-csrf-token"],
+      expected = req.session?.storeCsrf;
+    if (
+      wallet &&
+      (typeof actual !== "string" ||
+        typeof expected !== "string" ||
+        Buffer.byteLength(actual) !== Buffer.byteLength(expected) ||
+        !timingSafeEqual(Buffer.from(actual), Buffer.from(expected)))
+    )
+      throw failure("invalid_store_request", 403);
+    return origin;
+  };
+  const saveSession = (req) =>
+    new Promise((resolve, reject) =>
+      req.session.save((error) => (error ? reject(error) : resolve())),
+    );
+  const regenerateSession = (req) =>
+    new Promise((resolve, reject) =>
+      req.session.regenerate((error) => (error ? reject(error) : resolve())),
+    );
+  if (wallet) {
+    router.get("/store/api/wallet", async (req, res) => {
+      req.session.storeCsrf ??= randomBytes(32).toString("base64url");
+      await saveSession(req);
+      res.json({
+        ...wallet.snapshot(req.session),
+        csrf: req.session.storeCsrf,
+        enabled: options.giftCardsEnabled === true,
+      });
+    });
+    router.post(
+      "/store/api/wallet/connect",
+      express.json({ limit: "1kb" }),
+      async (req, res) => {
+        const origin = mutation(req);
+        if (!validStoreUsername(req.body?.username))
+          throw failure("minecraft_login_required", 401);
+        req.session.storeMinecraft = req.body.username;
+        await saveSession(req);
+        const challenge = wallet.challenge(req.sessionID, origin);
+        res.json({
+          url: `${options.staffOrigin}/auth/discord?purpose=store&challenge=${challenge}`,
+        });
+      },
+    );
+    router.get("/store/auth/consume", async (req, res) => {
+      const origin = requestOrigin(req);
+      try {
+        const identity = wallet.consume(
+          req.query.handoff,
+          req.sessionID,
+          origin,
+        );
+        const carried = {
+          storeCards: req.session.storeCards,
+          storeMinecraft: req.session.storeMinecraft,
+        };
+        wallet.link(carried, identity);
+        await regenerateSession(req);
+        Object.assign(req.session, carried, {
+          storeCsrf: randomBytes(32).toString("base64url"),
+        });
+        await saveSession(req);
+        res.redirect(`${origin}/store#store-gift-cards`);
+      } catch {
+        res.redirect(
+          `${origin}/store?giftCardError=discord_link_failed#store-gift-cards`,
+        );
+      }
+    });
+    router.post(
+      "/store/api/wallet/sign-out",
+      express.json({ limit: "1kb" }),
+      async (req, res) => {
+        mutation(req);
+        await regenerateSession(req);
+        req.session.storeCsrf = randomBytes(32).toString("base64url");
+        await saveSession(req);
+        res.json({
+          ...wallet.snapshot(req.session),
+          csrf: req.session.storeCsrf,
+          enabled: options.giftCardsEnabled === true,
+        });
+      },
+    );
+    router.post(
+      "/store/api/wallet/:id/refresh",
+      express.json({ limit: "1kb" }),
+      async (req, res) => {
+        mutation(req);
+        const result = await wallet.refresh(req.session, req.params.id);
+        await saveSession(req);
+        res.json(result);
+      },
+    );
+    router.delete("/store/api/wallet/:id", async (req, res) => {
+      mutation(req);
+      const result = wallet.forget(req.session, req.params.id);
+      await saveSession(req);
+      res.json(result);
+    });
+  }
   router.get("/store/api/catalog", async (_req, res) =>
     res.json(await service.catalog()),
   );
@@ -271,28 +398,34 @@ export function storefrontRouter(service, origins) {
     }),
     express.json({ limit: "1kb" }),
     async (req, res) => {
-      const origin = origins.find(
-        (value) => new URL(value).host === req.headers.host,
-      );
-      if (!origin || req.headers.origin !== origin)
-        throw failure("store_origin_required", 403);
-      res
-        .set("Cache-Control", "no-store")
-        .json(await service.giftCard(req.body));
+      mutation(req);
+      if (!validStoreUsername(req.body?.username))
+        throw failure("minecraft_login_required", 401);
+      const result = wallet
+        ? await wallet.register(req.session, req.body)
+        : await service.giftCard(req.body);
+      if (wallet) await saveSession(req);
+      res.set("Cache-Control", "no-store").json(result);
     },
   );
   router.post(
     "/store/api/checkout",
     express.json({ limit: "2kb" }),
     async (req, res) => {
-      const origin = origins.find(
-        (value) => new URL(value).host === req.headers.host,
-      );
-      if (!origin || req.headers.origin !== origin)
-        throw failure("store_origin_required", 403);
+      const origin = mutation(req);
+      const code =
+        req.body?.giftCardId && wallet
+          ? wallet.checkoutCode(
+              req.session,
+              req.body.giftCardId,
+              req.body.username,
+            )
+          : undefined;
+      if (req.body?.giftCardId && !code)
+        throw failure("gift_card_not_found", 404);
       res
         .set("Cache-Control", "no-store")
-        .json(await service.checkout(req.body, req.ip, origin));
+        .json(await service.checkout(req.body, req.ip, origin, code));
     },
   );
   router.use((error, _req, res, _next) => {

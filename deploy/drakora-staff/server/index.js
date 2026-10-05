@@ -59,6 +59,7 @@ import { moderationRouter } from "./moderation-routes.js";
 import { retentionService, privacyActivity } from "./retention.js";
 import { legalRouter } from "./legal.js";
 import { storefrontService, storefrontRouter } from "./storefront.js";
+import { storeWalletService } from "./store-wallet.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -83,6 +84,12 @@ const applicationDatabase = config.applications
 const minecraft = minecraftRegistry(store);
 const timeSettings = timePreferences(store);
 const website = config.website ? websiteService(config, store) : undefined;
+const shopService = config.website
+  ? storefrontService(config.storefront)
+  : undefined;
+const storeWallet = shopService
+  ? storeWalletService(store, shopService.giftCard)
+  : undefined;
 let onboarding;
 const applications = applicationDatabase
   ? applicationService(
@@ -266,6 +273,7 @@ const makeSession = (name) =>
   });
 const staffSession = makeSession("__Host-drakora_staff");
 const todoSession = makeSession("__Host-drakora_todo");
+const storeSession = makeSession("__Host-drakora_store");
 const applicationSession = applicationDatabase
   ? session({
       name: "__Host-drakora_apply",
@@ -310,21 +318,27 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) =>
-  req.headers.host === storefrontHost
-    ? next()
-    : ticketSession &&
-        req.headers.host === applicationHost &&
-        (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
-      ? ticketSession(req, res, next)
-      : config.website &&
+  [applicationHost, storefrontHost].includes(req.headers.host) &&
+  (req.path.startsWith("/store/api/wallet") ||
+    req.path === "/store/api/gift-card" ||
+    req.path === "/store/api/checkout" ||
+    req.path === "/store/auth/consume")
+    ? storeSession(req, res, next)
+    : req.headers.host === storefrontHost
+      ? next()
+      : ticketSession &&
           req.headers.host === applicationHost &&
-          !req.path.startsWith("/apply")
-        ? next()
-        : (req.headers.host === todoHost
-            ? todoSession
-            : req.headers.host === applicationHost
-              ? applicationSession
-              : staffSession)(req, res, next),
+          (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
+        ? ticketSession(req, res, next)
+        : config.website &&
+            req.headers.host === applicationHost &&
+            !req.path.startsWith("/apply")
+          ? next()
+          : (req.headers.host === todoHost
+              ? todoSession
+              : req.headers.host === applicationHost
+                ? applicationSession
+                : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -360,10 +374,15 @@ app.use((req, res, next) =>
 
 if (website) {
   const shop = storefrontRouter(
-    storefrontService(config.storefront),
+    shopService,
     [config.applications.publicOrigin, config.storefront?.origin].filter(
       Boolean,
     ),
+    storeWallet,
+    {
+      staffOrigin: config.staffOrigin,
+      giftCardsEnabled: Boolean(config.storefront?.pluginSecret),
+    },
   );
   app.use((req, res, next) =>
     [applicationHost, storefrontHost].includes(req.headers.host)
@@ -846,6 +865,25 @@ app.use(async (req, res, next) => {
 app.get("/auth/discord", async (req, res) => {
   const state = newToken();
   const next = safeNext(req.query.next);
+  if (req.query.purpose === "store") {
+    if (!storeWallet?.challengeGet(req.query.challenge))
+      throw new AuthError("invalid_login_state");
+    req.session.storeOAuth = {
+      challenge: req.query.challenge,
+      state: hash(state),
+      until: Date.now() + 600000,
+    };
+    await save(req);
+    const authorize = new URL("https://discord.com/oauth2/authorize");
+    authorize.search = new URLSearchParams({
+      client_id: config.discordClientId,
+      redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
+      response_type: "code",
+      scope: "identify email guilds.members.read",
+      state,
+    });
+    return res.redirect(authorize.href);
+  }
   if (req.query.purpose === "ticket") {
     if (!tickets?.challengeGet(req.query.challenge))
       throw new AuthError("invalid_login_state");
@@ -928,6 +966,30 @@ app.get("/auth/discord", async (req, res) => {
 
 app.get("/auth/discord/callback", async (req, res) => {
   const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (
+    req.session.storeOAuth &&
+    safeEqual(hash(state), req.session.storeOAuth.state)
+  ) {
+    const pending = req.session.storeOAuth;
+    delete req.session.storeOAuth;
+    await save(req);
+    const challenge = storeWallet.challengeGet(pending.challenge);
+    if (!challenge) throw new AuthError("invalid_login_state");
+    try {
+      if (pending.until < Date.now() || typeof req.query.code !== "string")
+        throw new AuthError("invalid_login_state");
+      return res.redirect(
+        storeWallet.handoff(
+          pending.challenge,
+          await discord.identity(req.query.code),
+        ),
+      );
+    } catch {
+      return res.redirect(
+        `${challenge.origin}/store?giftCardError=discord_cancelled#store-gift-cards`,
+      );
+    }
+  }
   if (
     req.session.ticketOAuth &&
     safeEqual(hash(state), req.session.ticketOAuth.state)

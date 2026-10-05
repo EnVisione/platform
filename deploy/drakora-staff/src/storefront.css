@@ -257,74 +257,6 @@
 .store-main {
   min-width: 0;
 }
-.store-slider {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  min-height: 285px;
-  padding: 38px 34px 58px;
-  background: #202522;
-  border-radius: 4px;
-  margin-bottom: 24px;
-}
-.store-slide-scenery {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.18;
-  z-index: -1;
-}
-.store-slide-content {
-  max-width: 570px;
-  position: relative;
-  z-index: 1;
-}
-.store-slide-content > span {
-  font-size: 14px;
-  color: #bdbdbd;
-}
-.storefront .store-slide-content h1 {
-  margin: 8px 0 14px;
-  color: var(--gold);
-  font:
-    700 clamp(30px, 3.2vw, 42px) Georgia,
-    serif;
-}
-.store-slide-content p {
-  max-width: 430px;
-  line-height: 1.65;
-  margin: 0 0 22px;
-  font-size: 14px;
-}
-.store-slide-logo {
-  position: absolute;
-  right: 32px;
-  top: 52px;
-  width: 130px;
-  max-height: 100px;
-  object-fit: contain;
-  opacity: 0.65;
-}
-.store-slider-controls {
-  position: absolute;
-  bottom: 15px;
-  right: 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.store-slider-controls > button:not(.store-icon-button) {
-  width: 8px;
-  height: 8px;
-  padding: 0;
-  background: #666;
-  border-radius: 50%;
-}
-.store-slider-controls > button.active {
-  background: var(--gold);
-}
 .storefront .store-icon-button {
   display: inline-grid;
   place-items: center;
@@ -665,12 +597,7 @@
 .store-support-message p:last-child {
   margin: 0;
 }
-.store-community-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
-}
+.storefront .store-community-panel h1,
 .storefront .store-community-panel h2,
 .storefront .store-policies h2 {
   font:
@@ -783,9 +710,7 @@
 }
 .store-gift-card {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  align-items: center;
+  gap: 14px;
   scroll-margin-top: 24px;
 }
 .store-gift-card label {
@@ -829,12 +754,6 @@
   font-size: 12px;
   color: #999;
 }
-@media (max-width: 1000px) {
-  .store-community-grid,
-  .store-gift-card {
-    grid-template-columns: 1fr;
-  }
-}
 @media (max-width: 650px) {
   .store-support-message,
   .store-community-panel,
@@ -843,6 +762,109 @@
   }
   .storefront .store-support-message h2 {
     font-size: 23px;
+  }
+}
+.store-top-panel {
+  margin-bottom: 24px;
+}
+.store-sidebar .store-community-panel {
+  padding: 22px;
+}
+.store-sidebar .store-community-panel h2 {
+  font-size: 18px;
+}
+.store-sidebar .store-community-empty {
+  min-height: 60px;
+  margin-bottom: 0;
+}
+.store-sidebar .store-recent-payments {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 8px;
+}
+.store-sidebar .store-gift-input {
+  flex-direction: column;
+}
+.store-gift-card p {
+  margin: 0;
+}
+.store-gift-warning {
+  padding: 14px;
+  background: #29221b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.store-gift-warning strong {
+  color: var(--gold);
+}
+.store-gift-warning p {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.store-saved-cards {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 16px;
+}
+.store-saved-cards li {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  background: #202020;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.store-saved-cards li > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.store-saved-cards small {
+  color: #999;
+}
+.store-cart-gift {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+}
+.store-cart-gift select {
+  max-width: 100%;
+  background: #222;
+  color: #f2f3f5;
+  padding: 12px;
+  border: 0;
+}
+@media (max-width: 760px) {
+  .store-shell {
+    display: flex;
+    flex-direction: column;
+  }
+  .store-sidebar,
+  .store-main {
+    display: contents;
+  }
+  .store-shell .username-box,
+  .store-shell .user-nav {
+    order: 0;
+    width: 100%;
+  }
+  .store-top-panel {
+    order: 1;
+    margin: 0;
+  }
+  .store-recent-panel {
+    order: 2;
+  }
+  .store-gift-card {
+    order: 3;
+  }
+  .store-main > :not(.store-top-panel) {
+    order: 4;
+  }
+  .store-shell .store-community-panel,
+  .store-main > * {
+    width: 100%;
   }
 }
 .store-notice {
@@ -1064,9 +1086,6 @@
     align-items: flex-start;
     flex-direction: column;
   }
-  .store-slide-logo {
-    display: none;
-  }
 }
 @media (max-width: 760px) {
   .store-site .public-masthead {
@@ -1124,10 +1143,6 @@
   .store-nav-label,
   .store-sidebar-help {
     display: none;
-  }
-  .store-slider {
-    min-height: 250px;
-    padding: 28px 24px 58px;
   }
   .store-comparison-heading {
     padding: 22px;

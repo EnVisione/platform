@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
-import { StoreCommunity, StoreSupportMessage } from "./store-community.jsx";
+import {
+  useStoreCommunity,
+  RecentPayments,
+  TopCustomers,
+  StoreSupportMessage,
+} from "./store-community.jsx";
+import { StoreGiftCards, useStoreWallet } from "./store-gift-cards.jsx";
 import {
   emptyStoreCatalog,
   emptyCommandCatalog,
@@ -10,11 +16,7 @@ import {
   storeBilling,
   storeProductKey,
 } from "../shared/storefront.js";
-import prominence from "./assets/prominence-logo.png";
-import restless from "./assets/restless-horizons-logo.png";
 import logo from "./assets/drakora-logo.png";
-import castle from "./assets/medieval-castle.svg";
-import forest from "./assets/medieval-forest.svg";
 import "./storefront.css";
 
 const money = (product) =>
@@ -31,6 +33,12 @@ const errors = {
   command_unavailable: "This command option is not available to purchase yet.",
   tebex_rejected_checkout:
     "Tebex could not start checkout. Check your Minecraft username and try again.",
+  gift_card_not_found:
+    "This gift card is no longer available. Register it again or choose another card.",
+  gift_card_checkout_failed:
+    "Tebex could not apply this gift card. Please refresh its balance and try again.",
+  invalid_store_request:
+    "Your store session expired. Refresh this page before checkout.",
 };
 let checkoutScript;
 function loadCheckout() {
@@ -192,32 +200,6 @@ function StoreDrawer({ title, onClose, children }) {
     </dialog>
   );
 }
-
-const slides = [
-  {
-    scope: "network",
-    title: "Drakora Store",
-    kicker: "Welcome to the official",
-    description: "Network ranks for Prominence II and Restless Horizons.",
-    artwork: castle,
-  },
-  {
-    scope: "prom2",
-    title: "Prominence II",
-    kicker: "Choose your modpack",
-    description: "Ranks for every Drakora world running Prominence II.",
-    artwork: forest,
-    logo: prominence,
-  },
-  {
-    scope: "restless-horizons",
-    title: "Restless Horizons",
-    kicker: "Choose your modpack",
-    description: "Ranks for every Drakora world running Restless Horizons.",
-    artwork: castle,
-    logo: restless,
-  },
-];
 
 function RankComparison({
   scope,
@@ -390,7 +372,9 @@ export function Storefront({
   const [drawer, setDrawer] = useState(null);
   const [details, setDetails] = useState(null);
   const [cart, setCart] = useState(null);
-  const [slide, setSlide] = useState(0);
+  const community = useStoreCommunity();
+  const wallet = useStoreWallet();
+  const [giftCardId, setGiftCardId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [checkoutUrl, setCheckoutUrl] = useState("");
@@ -439,7 +423,15 @@ export function Storefront({
   const cartItem = cart && storeItem(cart);
   const currentScope = storeScopes.find(({ id }) => id === scope);
   const purchaseReady = !loading && !catalogError && cartProduct?.available;
-  const activeSlide = slides[slide];
+  const giftCards = wallet.data.cards.filter(
+    (card) =>
+      card.remaining > 0 &&
+      (wallet.data.identity ||
+        card.username.toLowerCase() === username.toLowerCase()),
+  );
+  useEffect(() => {
+    if (!giftCards.some((card) => card.id === giftCardId)) setGiftCardId("");
+  }, [wallet.data, username, giftCardId]);
   function openLogin() {
     setUsernameDraft(username);
     setUsernameError("");
@@ -504,8 +496,11 @@ export function Storefront({
     try {
       const response = await fetch("/store/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...cart, username }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": wallet.data.csrf,
+        },
+        body: JSON.stringify({ ...cart, username, giftCardId }),
         signal: AbortSignal.timeout(30000),
       });
       const data = await response.json();
@@ -683,6 +678,12 @@ export function Storefront({
               </button>
             ))}
           </nav>
+          <RecentPayments community={community} />
+          <StoreGiftCards
+            username={username}
+            onLogin={openLogin}
+            wallet={wallet}
+          />
           <div className="store-sidebar-help">
             <h2>Need a hand?</h2>
             <p>Questions about the store? Our staff can help.</p>
@@ -695,72 +696,7 @@ export function Storefront({
           </div>
         </aside>
         <div className="store-main">
-          {homePage && (
-            <section
-              className="store-slider"
-              aria-label="Store highlights"
-              aria-roledescription="carousel"
-            >
-              <img
-                className="store-slide-scenery"
-                src={activeSlide.artwork}
-                alt=""
-              />
-              <div className="store-slide-content" aria-live="polite">
-                <span>{activeSlide.kicker}</span>
-                <h1>{activeSlide.title}</h1>
-                <p>{activeSlide.description}</p>
-                <button
-                  className="store-button"
-                  type="button"
-                  onClick={() => selectCategory(activeSlide.scope)}
-                >
-                  Browse ranks <PublicIcon name="arrow" />
-                </button>
-              </div>
-              {activeSlide.logo && (
-                <img
-                  className="store-slide-logo"
-                  src={activeSlide.logo}
-                  alt=""
-                />
-              )}
-              <div className="store-slider-controls">
-                <button
-                  className="store-icon-button"
-                  type="button"
-                  aria-label="Previous slide"
-                  onClick={() =>
-                    setSlide(
-                      (value) => (value + slides.length - 1) % slides.length,
-                    )
-                  }
-                >
-                  <PublicIcon name="back" />
-                </button>
-                {slides.map((item, index) => (
-                  <button
-                    type="button"
-                    key={item.scope}
-                    className={slide === index ? "active" : ""}
-                    aria-label={`Show ${item.title}`}
-                    aria-pressed={slide === index}
-                    onClick={() => setSlide(index)}
-                  />
-                ))}
-                <button
-                  className="store-icon-button"
-                  type="button"
-                  aria-label="Next slide"
-                  onClick={() =>
-                    setSlide((value) => (value + 1) % slides.length)
-                  }
-                >
-                  <PublicIcon name="arrow" />
-                </button>
-              </div>
-            </section>
-          )}
+          {homePage && <TopCustomers community={community} />}
           {homePage && <StoreSupportMessage />}
           {location.pathname.endsWith("/thank-you") && (
             <p className="store-notice" role="status">
@@ -848,7 +784,11 @@ export function Storefront({
                   const selection = commandsPage
                     ? { command: item.id }
                     : { rank: item.id };
-                  const product = productFor({ ...selection, scope, billing });
+                  const product = productFor({
+                    ...selection,
+                    scope,
+                    billing,
+                  });
                   return (
                     <article className="package" key={item.id}>
                       <button
@@ -918,7 +858,6 @@ export function Storefront({
               </p>
             </section>
           )}
-          {homePage && <StoreCommunity />}
           <section className="store-information" aria-label="Store information">
             <div>
               <h2>Network or modpack?</h2>
@@ -1105,10 +1044,40 @@ export function Storefront({
                   {username ? "Change" : "Login"}
                 </button>
               </div>
+              {giftCards.length > 0 && (
+                <div className="store-cart-gift">
+                  <label htmlFor="store-cart-gift-card">Gift card</label>
+                  <select
+                    id="store-cart-gift-card"
+                    value={giftCardId}
+                    disabled={busy}
+                    onChange={(event) => setGiftCardId(event.target.value)}
+                  >
+                    <option value="">No gift card</option>
+                    {giftCards.map((card) => (
+                      <option key={card.id} value={card.id}>
+                        Card ending {card.suffix} ·{" "}
+                        {money({
+                          price: card.remaining,
+                          currency: card.currency,
+                        })}
+                      </option>
+                    ))}
+                  </select>
+                  {!wallet.data.identity && (
+                    <p>
+                      This card is registered only for this browser session.
+                      Link Discord to save any unused balance for later.
+                    </p>
+                  )}
+                </div>
+              )}
               <button
                 className="store-button"
                 type="button"
-                disabled={!purchaseReady || busy}
+                disabled={
+                  !purchaseReady || busy || wallet.loading || !wallet.data.csrf
+                }
                 onClick={checkout}
               >
                 {busy
