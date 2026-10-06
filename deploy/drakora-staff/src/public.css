@@ -457,8 +457,14 @@ button {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.public-welcome .public-button {
+.public-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 24px;
+}
+.public-welcome-actions .public-button.secondary {
+  width: auto;
 }
 .public-welcome-art {
   align-self: stretch;
@@ -1055,7 +1061,7 @@ button {
   .public-page-title {
     margin-bottom: 24px;
   }
-  .public-welcome .public-button {
+  .public-welcome-actions {
     margin-top: 20px;
   }
   .public-server-grid,
@@ -1102,6 +1108,8 @@ button {
   }
   .public-server-actions .public-button,
   .public-server-actions .public-button.secondary,
+  .public-welcome-actions .public-button,
+  .public-welcome-actions .public-button.secondary,
   .public-help-actions .public-button,
   .public-help-actions .public-button.secondary,
   .public-partner-actions .public-button,

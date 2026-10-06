@@ -86,7 +86,6 @@ function PublicNavigation({ path, storePage, storefrontHost }) {
           ["Servers", "/servers", "servers"],
           ["Store", storeUrl, "store"],
           ["Rules", "/rules", "rules"],
-          ["Staff", "/staff", "apply"],
           ["Apply", "/apply", "apply"],
           ["Need help?", "/help", "help"],
         ].map(([name, href, icon]) => (
@@ -290,9 +289,14 @@ function HomePage({ home, discordInvite }) {
             {home.title}
           </PublicHeading>
           <p>{home.introduction}</p>
-          <a href="/servers" className="public-button beige">
-            View servers <PublicIcon name="arrow" />
-          </a>
+          <div className="public-welcome-actions">
+            <a href="/servers" className="public-button beige">
+              View servers <PublicIcon name="arrow" />
+            </a>
+            <a href="/staff" className="public-button secondary">
+              Meet our staff <PublicIcon name="users" />
+            </a>
+          </div>
         </div>
         <FireScenery image={castle} />
       </section>
