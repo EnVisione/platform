@@ -538,22 +538,22 @@ export function Storefront({
       </header>
       <div className="store-shell">
         <aside className="store-sidebar" aria-label="Store navigation">
-          <div className="username-box">
-            <StorePlayer username={username} />
-            <div>
-              <strong>{username || "Guest"}</strong>
-              <span>
-                {username ? "Minecraft Java" : "Enter your Minecraft username"}
-              </span>
-              <button
-                className="store-button secondary"
-                type="button"
-                onClick={username ? logout : openLogin}
-              >
-                {username ? "Logout" : "Login"}
-              </button>
+          {username && (
+            <div className="username-box">
+              <StorePlayer username={username} />
+              <div>
+                <strong>{username}</strong>
+                <span>Minecraft Java</span>
+                <button
+                  className="store-button secondary"
+                  type="button"
+                  onClick={logout}
+                >
+                  Logout
+                </button>
+              </div>
             </div>
-          </div>
+          )}
           <nav className="user-nav" aria-label="Store categories">
             {comparePage || commandsPage ? (
               <a href={storeHome}>
@@ -567,35 +567,6 @@ export function Storefront({
                 onClick={() => selectCategory("home")}
               >
                 <PublicIcon name="home" /> Store home
-              </button>
-            )}
-            <a
-              href={compareHref}
-              className={comparePage ? "active" : ""}
-              aria-current={comparePage ? "page" : undefined}
-            >
-              <PublicIcon name="crest" /> Compare ranks
-            </a>
-            <a
-              href={commandsHref}
-              className={commandsPage ? "active" : ""}
-              aria-current={commandsPage ? "page" : undefined}
-            >
-              <PublicIcon name="play" /> Commands
-            </a>
-            {comparePage || commandsPage ? (
-              <a href={`${storeHome}#store-gift-cards`}>
-                <PublicIcon name="gift" /> Gift cards
-              </a>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  selectCategory("home");
-                  setGiftRequested(true);
-                }}
-              >
-                <PublicIcon name="gift" /> Gift cards
               </button>
             )}
             <span className="store-nav-label">
@@ -619,6 +590,28 @@ export function Storefront({
                 <PublicIcon name="servers" /> {item.name}
               </button>
             ))}
+            <a
+              href={commandsHref}
+              className={commandsPage ? "active" : ""}
+              aria-current={commandsPage ? "page" : undefined}
+            >
+              <PublicIcon name="play" /> Commands
+            </a>
+            {comparePage || commandsPage ? (
+              <a href={`${storeHome}#store-gift-cards`}>
+                <PublicIcon name="gift" /> Gift cards
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  selectCategory("home");
+                  setGiftRequested(true);
+                }}
+              >
+                <PublicIcon name="gift" /> Gift cards
+              </button>
+            )}
           </nav>
           <RecentPayments community={community} />
           <StoreGiftCards
@@ -638,8 +631,7 @@ export function Storefront({
           </div>
         </aside>
         <div className="store-main">
-          {homePage && <TopCustomers community={community} />}
-          {homePage && <StoreSupportMessage />}
+          {homePage && <TopCustomers community={community} compact />}
           {location.pathname.endsWith("/thank-you") && (
             <p className="store-notice" role="status">
               You’ve returned from checkout. Check your Tebex receipt for
@@ -675,26 +667,28 @@ export function Storefront({
                   <p>
                     {commandsPage
                       ? `Choose a single command for ${currentScope.name}.`
-                      : "A few of our planned network ranks. Compare four network tiers or four server tiers for your modpack."}
+                      : "Network-wide support. Choose a rank to explore."}
                   </p>
                 </div>
-                <div
-                  className="store-billing"
-                  role="group"
-                  aria-label="Payment period"
-                >
-                  {storeBilling.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      className={billing === item.id ? "active" : ""}
-                      aria-pressed={billing === item.id}
-                      onClick={() => setBilling(item.id)}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
+                {commandsPage && (
+                  <div
+                    className="store-billing"
+                    role="group"
+                    aria-label="Payment period"
+                  >
+                    {storeBilling.map((item) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className={billing === item.id ? "active" : ""}
+                        aria-pressed={billing === item.id}
+                        onClick={() => setBilling(item.id)}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </header>
               <div className="store-products" aria-busy={loading}>
                 {(commandsPage
@@ -712,18 +706,9 @@ export function Storefront({
                   const available = product?.available;
                   return (
                     <article className="package" key={item.id}>
-                      <button
-                        className="store-product-image"
-                        type="button"
-                        aria-label={
-                          commandsPage
-                            ? `View ${item.invocation} command`
-                            : `View ${item.name} rank`
-                        }
-                        onClick={() => viewProduct(selection)}
-                      >
+                      <div className="store-product-image" aria-hidden="true">
                         <ProductArtwork selection={selection} />
-                      </button>
+                      </div>
                       <div className="store-product-info">
                         <h3>{commandsPage ? item.invocation : item.name}</h3>
                         {commandsPage && (
@@ -744,21 +729,21 @@ export function Storefront({
                         <button
                           className="store-detail-button"
                           type="button"
-                          onClick={() => viewProduct(selection)}
-                        >
-                          View details
-                        </button>
-                        <button
-                          className="store-button"
-                          type="button"
-                          disabled={loading || catalogError || !available}
+                          aria-label={
+                            commandsPage
+                              ? `View ${item.invocation} command`
+                              : `View ${item.name} rank`
+                          }
                           onClick={() => viewProduct(selection)}
                         >
                           {available
                             ? commandsPage
                               ? "Choose command"
                               : "Choose rank"
-                            : "Coming soon"}
+                            : commandsPage
+                              ? "View command"
+                              : "View rank"}
+                          <PublicIcon name="arrow" />
                         </button>
                       </div>
                     </article>
@@ -768,7 +753,7 @@ export function Storefront({
               <p className="store-catalog-note">
                 {commandsPage
                   ? "These are previews. Command behavior, prices and access terms will be confirmed before purchases open."
-                  : "Prices and rank perks will be announced before purchases open."}{" "}
+                  : "Prices and perks are coming soon."}{" "}
                 {!commandsPage && (
                   <a href={`${compareHref}?scope=${scope}`}>
                     Compare {scope === "network" ? "network" : "server"} ranks{" "}
@@ -778,54 +763,30 @@ export function Storefront({
               </p>
             </section>
           )}
-          <section className="store-information" aria-label="Store information">
-            <div>
-              <h2>Network or modpack?</h2>
-              <p>
-                Network items cover Prominence II and Restless Horizons. Modpack
-                items apply to the selected modpack’s Drakora worlds.
-              </p>
-            </div>
-            <div>
-              <h2>Monthly or lifetime?</h2>
-              <p>
-                Monthly is a recurring subscription. Lifetime is one payment
-                with no monthly renewal. Full purchase terms will be available
-                before launch.
-              </p>
-            </div>
-            <div>
-              <h2>Secure checkout</h2>
-              <p>
-                Payments will be handled by Tebex. Drakora does not collect your
-                card details.
-              </p>
-            </div>
-          </section>
+          {homePage && <StoreSupportMessage />}
           <section
             className="store-policies"
             aria-labelledby="store-policies-title"
           >
-            <h2 id="store-policies-title">Store policies</h2>
-            <p>
-              Need help with a purchase?{" "}
-              <a href="https://drakora.org/help">Contact our support team</a>.
-              Read the store terms and how your information is handled before
-              purchasing.
-            </p>
+            <h2 id="store-policies-title">Before you buy</h2>
+            <details className="store-buying-details">
+              <summary>Coverage, payment options & checkout</summary>
+              <p>
+                Network ranks cover both modpacks. Server ranks apply only to
+                the modpack you choose. Monthly subscriptions renew each month;
+                lifetime is one payment without a monthly renewal.
+              </p>
+              <p>
+                Checkout is handled by Tebex. Drakora does not collect your card
+                details. Tebex’s checkout terms and privacy information also
+                apply. Full purchase terms will be available before launch.
+                Drakora is not affiliated with Mojang or Microsoft.
+              </p>
+            </details>
             <div className="store-policy-links">
-              <a className="store-button secondary" href="/terms">
-                Terms of Service
-              </a>
-              <a className="store-button secondary" href="/privacy">
-                Privacy Policy
-              </a>
+              <a href="/terms">Terms of Service</a>
+              <a href="/privacy">Privacy Policy</a>
             </div>
-            <p>
-              Tebex’s checkout terms and privacy information also apply when you
-              use its payment services. Drakora is not affiliated with Mojang or
-              Microsoft.
-            </p>
           </section>
         </div>
       </div>

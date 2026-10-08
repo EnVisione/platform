@@ -82,7 +82,7 @@ export function useStoreWallet() {
           response.status === 429
             ? "Too many requests. Wait a minute and try again."
             : (errors[value.error] ??
-              "Gift cards are temporarily unavailable. Please try again."),
+                "Gift cards are temporarily unavailable. Please try again."),
         );
       if (!controller.signal.aborted) {
         if (Array.isArray(value.cards))
@@ -154,10 +154,14 @@ export function StoreGiftCards({ username, onLogin, wallet }) {
       aria-labelledby="store-gift-title"
     >
       <h2 id="store-gift-title">Gift cards</h2>
-      <p>Register an existing card. Gift card purchases are coming soon.</p>
+      <p>
+        {username
+          ? "Register an existing card."
+          : "Log in with Minecraft to register a card."}{" "}
+        Gift card purchases are coming soon.
+      </p>
       {!username ? (
         <>
-          <p>Enter your Minecraft username before registering a gift card.</p>
           <button className="store-button" type="button" onClick={onLogin}>
             Minecraft login
           </button>

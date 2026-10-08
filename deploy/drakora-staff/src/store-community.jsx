@@ -26,21 +26,14 @@ export function StoreSupportMessage() {
       className="store-support-message"
       aria-labelledby="store-support-title"
     >
-      <span className="store-section-kicker">
-        A fair game. A stronger network.
-      </span>
       <h2 id="store-support-title">
-        No pay-to-win. Just a better place to play.
+        No pay-to-win. Every contribution gives back.
       </h2>
       <p>
-        We’re strongly against pay-to-win. Supporting Drakora should never buy
-        an unfair gameplay advantage.
-      </p>
-      <p>
-        All support received through this store is reinvested directly into our
-        servers. It helps cover server costs, improve hardware and performance,
-        and bring more modpacks to the network. Your support builds a better
-        experience for everyone, with smoother gameplay and less lag.
+        We’re strongly against pay-to-win. All store support goes directly back
+        into server costs, better hardware and more modpacks, for smoother
+        gameplay and less lag. Supporting Drakora never buys an unfair
+        advantage.
       </p>
     </section>
   );
@@ -99,7 +92,6 @@ export function RecentPayments({ community }) {
       aria-busy={loading}
     >
       <h2 id="store-payments-title">Recent payments</h2>
-      <p>Thank you for helping keep Drakora running.</p>
       {ready && data.recent.length ? (
         <ul className="store-recent-payments">
           {data.recent.map((player, index) => (
@@ -115,7 +107,7 @@ export function RecentPayments({ community }) {
             ? "Loading payments…"
             : error
               ? "Payment updates are temporarily unavailable."
-              : "No payments yet. Your support will appear here when the store opens."}
+              : "No payments yet. Thank you for supporting Drakora."}
         </p>
       )}
       {error && (
@@ -127,7 +119,7 @@ export function RecentPayments({ community }) {
   );
 }
 
-export function TopCustomers({ community, storeHref }) {
+export function TopCustomers({ community, storeHref, compact = false }) {
   const { data, loading, error, retry } = community;
   const [period, setPeriod] = useState("month");
   const ready = !loading && !error && data?.connected;
@@ -138,30 +130,32 @@ export function TopCustomers({ community, storeHref }) {
       aria-labelledby="store-top-title"
       aria-busy={loading}
     >
-      {storeHref ? (
-        <h2 id="store-top-title">
-          <a href={storeHref}>Top 3 supporters</a>
-        </h2>
-      ) : (
-        <h1 id="store-top-title">Top 3 supporters</h1>
-      )}
-      <div
-        className="store-periods"
-        role="group"
-        aria-label="Top supporter period"
-      >
-        {Object.entries(periods).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={period === key ? "active" : ""}
-            aria-pressed={period === key}
-            onClick={() => setPeriod(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <header className="store-supporters-header">
+        {storeHref ? (
+          <h2 id="store-top-title">
+            <a href={storeHref}>Top 3 supporters</a>
+          </h2>
+        ) : (
+          <h1 id="store-top-title">Top 3 supporters</h1>
+        )}
+        <div
+          className="store-periods"
+          role="group"
+          aria-label="Top supporter period"
+        >
+          {Object.entries(periods).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={period === key ? "active" : ""}
+              aria-pressed={period === key}
+              onClick={() => setPeriod(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </header>
       {ready && top.length ? (
         <ol className="store-top-customers" aria-label={periods[period]}>
           {top.map((player, index) => {
@@ -194,11 +188,15 @@ export function TopCustomers({ community, storeHref }) {
             ? "Loading supporters…"
             : error
               ? "Supporter rankings are temporarily unavailable."
-              : `No supporters to show for ${periods[period].toLowerCase()} yet.`}
+              : compact
+                ? `No supporters${period === "all" ? "" : ` ${periods[period].toLowerCase()}`} yet.`
+                : `No supporters to show for ${periods[period].toLowerCase()} yet.`}
         </p>
       )}
       <p className="store-community-caption">
-        Ranked by completed purchases. Week and month follow UTC.
+        {compact
+          ? "Completed purchases · UTC"
+          : "Ranked by completed purchases. Week and month follow UTC."}
       </p>
       {error && (
         <p className="store-community-retry" role="alert">
