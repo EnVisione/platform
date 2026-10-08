@@ -1265,18 +1265,28 @@
     grid-template-columns: 1fr;
   }
   .storefront .package {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    column-gap: 16px;
     padding: 16px 14px;
   }
   .store-product-image {
+    grid-row: 1 / span 2;
+    width: 54px;
     height: 64px;
+  }
+  .storefront .store-product-info h3 {
+    margin-top: 0;
   }
   .store-rank-art {
     width: 54px;
     height: 54px;
   }
   .store-product-actions {
+    grid-column: 2;
     display: grid;
     gap: 4px;
+    margin-top: 10px;
   }
   .store-category-header {
     padding: 0;
