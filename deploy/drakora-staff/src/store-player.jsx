@@ -21,8 +21,9 @@ function PlayerFace() {
   );
 }
 
-function PlayerSkin({ profile, preview }) {
+function PlayerSkin({ profile, preview, body = false }) {
   const [failed, setFailed] = useState(false);
+  const identifier = profile?.uuid ?? "MHF_Steve";
   return (
     <>
       {failed ? (
@@ -35,10 +36,14 @@ function PlayerSkin({ profile, preview }) {
       ) : (
         <img
           className="store-player"
-          src={`https://drakora.org/apply/api/head/${profile.uuid}`}
-          alt={`Minecraft skin for ${profile.name}`}
-          width="76"
-          height="76"
+          src={`https://drakora.org/apply/api/head/${identifier}${body ? "?render=body" : ""}`}
+          alt={
+            profile
+              ? `Minecraft skin for ${profile.name}`
+              : "Default Minecraft skin"
+          }
+          width={body ? "100" : "76"}
+          height={body ? "240" : "76"}
           referrerPolicy="no-referrer"
           onError={() => setFailed(true)}
         />
@@ -57,7 +62,7 @@ function PlayerSkin({ profile, preview }) {
   );
 }
 
-export function StorePlayer({ username = "", preview = false }) {
+export function StorePlayer({ username = "", preview = false, body = false }) {
   const name = username.trim().toLowerCase();
   const valid = validUsername(name);
   const [result, setResult] = useState(null);
@@ -101,7 +106,7 @@ export function StorePlayer({ username = "", preview = false }) {
   const current = valid && result?.name === name ? result : null;
   return (
     <div
-      className={`store-player-preview${preview ? " editing" : ""}`}
+      className={`store-player-preview${preview ? " editing" : ""}${body ? " full-body" : ""}`}
       aria-busy={valid && !current}
     >
       {current?.profile?.found ? (
@@ -109,6 +114,7 @@ export function StorePlayer({ username = "", preview = false }) {
           key={current.profile.uuid}
           profile={current.profile}
           preview={preview}
+          body={body}
         />
       ) : (
         <>
@@ -119,6 +125,8 @@ export function StorePlayer({ username = "", preview = false }) {
             >
               <PublicIcon name="users" />
             </span>
+          ) : body ? (
+            <PlayerSkin body />
           ) : (
             <PlayerFace />
           )}

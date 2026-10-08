@@ -13,7 +13,6 @@ import {
   emptyCommandCatalog,
   storeCommands,
   storeRanks,
-  storeRanksForScope,
   storeScopes,
   storeBilling,
   storeProductKey,
@@ -524,10 +523,6 @@ export function Storefront({
             </a>
           </div>
           <div className="store-account-actions">
-            <button type="button" onClick={openLogin}>
-              <PublicIcon name="users" />
-              <span className="store-login-label">{username || "Login"}</span>
-            </button>
             <button type="button" onClick={() => setDrawer("cart")}>
               <PublicIcon name="store" /> Cart <span>{cart ? 1 : 0}</span>
             </button>
@@ -536,22 +531,19 @@ export function Storefront({
       </header>
       <div className="store-shell">
         <aside className="store-sidebar" aria-label="Store navigation">
-          {username && (
-            <div className="username-box">
-              <StorePlayer username={username} />
-              <div>
-                <strong>{username}</strong>
-                <span>Minecraft Java</span>
-                <button
-                  className="store-button secondary"
-                  type="button"
-                  onClick={logout}
-                >
-                  Logout
-                </button>
-              </div>
+          <div className="username-box">
+            <StorePlayer username={username} body />
+            <div className="store-player-text">
+              <strong>{username || "Guest"}</strong>
+              <button
+                className="store-button secondary"
+                type="button"
+                onClick={username ? logout : openLogin}
+              >
+                {username ? "Logout" : "Login"}
+              </button>
             </div>
-          )}
+          </div>
           <nav className="user-nav" aria-label="Store categories">
             {comparePage || commandsPage ? (
               <a href={storeHome}>
@@ -650,47 +642,36 @@ export function Storefront({
           )}
           {showComparison ? (
             <RankComparison category={category} viewRank={viewRank} />
-          ) : (
+          ) : commandsPage ? (
             <section
               className="store-catalog"
               aria-labelledby="store-category-title"
             >
               <header className="store-category-header">
                 <div>
-                  {commandsPage ? (
-                    <h1 id="store-category-title">Individual commands</h1>
-                  ) : (
-                    <h2 id="store-category-title">Featured ranks</h2>
-                  )}
+                  <h1 id="store-category-title">Individual commands</h1>
                 </div>
-                {commandsPage && (
-                  <div
-                    className="store-billing"
-                    role="group"
-                    aria-label="Payment period"
-                  >
-                    {storeBilling.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={billing === item.id ? "active" : ""}
-                        aria-pressed={billing === item.id}
-                        onClick={() => setBilling(item.id)}
-                      >
-                        {item.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div
+                  className="store-billing"
+                  role="group"
+                  aria-label="Payment period"
+                >
+                  {storeBilling.map((item) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={billing === item.id ? "active" : ""}
+                      aria-pressed={billing === item.id}
+                      onClick={() => setBilling(item.id)}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
               </header>
               <div className="store-products" aria-busy={loading}>
-                {(commandsPage
-                  ? storeCommands
-                  : storeRanksForScope("network").slice(-3)
-                ).map((item) => {
-                  const selection = commandsPage
-                    ? { command: item.id }
-                    : { rank: item.id };
+                {storeCommands.map((item) => {
+                  const selection = { command: item.id };
                   const product = productFor({
                     ...selection,
                     scope,
@@ -703,12 +684,10 @@ export function Storefront({
                         <ProductArtwork selection={selection} />
                       </div>
                       <div className="store-product-info">
-                        <h3>{commandsPage ? item.invocation : item.name}</h3>
-                        {commandsPage && (
-                          <p className="store-command-description">
-                            {item.description}
-                          </p>
-                        )}
+                        <h3>{item.invocation}</h3>
+                        <p className="store-command-description">
+                          {item.description}
+                        </p>
                         <span>
                           {loading ? "Loading…" : money(product)}
                           {product?.price != null && (
@@ -722,20 +701,10 @@ export function Storefront({
                         <button
                           className="store-detail-button"
                           type="button"
-                          aria-label={
-                            commandsPage
-                              ? `View ${item.invocation} command`
-                              : `View ${item.name} rank`
-                          }
+                          aria-label={`View ${item.invocation} command`}
                           onClick={() => viewProduct(selection)}
                         >
-                          {available
-                            ? commandsPage
-                              ? "Choose command"
-                              : "Choose rank"
-                            : commandsPage
-                              ? "View command"
-                              : "View rank"}
+                          {available ? "Choose command" : "View command"}
                           <PublicIcon name="arrow" />
                         </button>
                       </div>
@@ -744,7 +713,7 @@ export function Storefront({
                 })}
               </div>
             </section>
-          )}
+          ) : null}
         </div>
       </div>
       {drawer && (

@@ -8,7 +8,7 @@ import { applicationService } from "../server/applications.js";
 import { applicationRouter } from "../server/application-routes.js";
 import { config as fixture } from "./fixture.js";
 
-test("Minecraft head proxy accepts names and UUIDs and rejects unsafe images", async (t) => {
+test("Minecraft skin proxy accepts names and UUIDs and rejects unsafe images", async (t) => {
   const app = express();
   app.use(applicationRouter(fixture, {}, "/unused-test-assets"));
   const server = app.listen(0, "127.0.0.1");
@@ -47,8 +47,17 @@ test("Minecraft head proxy accepts names and UUIDs and rejects unsafe images", a
   );
   assert.equal(invalid.status, 400);
   assert.equal(calls.length, 2);
+  const body = await fetch(`${origin}/apply/api/head/rarara?render=body`);
+  assert.equal(body.status, 200);
+  assert.deepEqual(new Uint8Array(await body.arrayBuffer()), image);
+  assert.equal(calls.at(-1), "/body/rarara/right");
+  await fetch(`${origin}/apply/api/head/rarara?render=https://private.invalid`);
+  assert.equal(calls.at(-1), "/avatar/rarara/64");
   contentType = "image/svg+xml";
-  assert.equal((await fetch(`${origin}/apply/api/head/rarara`)).status, 404);
+  assert.equal(
+    (await fetch(`${origin}/apply/api/head/rarara?render=body`)).status,
+    404,
+  );
   contentType = "image/png";
   image = new Uint8Array(256001);
   assert.equal((await fetch(`${origin}/apply/api/head/rarara`)).status, 502);

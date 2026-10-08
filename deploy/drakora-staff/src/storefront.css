@@ -118,20 +118,11 @@
   border-radius: 4px;
   font-size: 13px;
 }
-.store-account-actions button:first-child {
-  max-width: 180px;
-  min-width: 0;
-}
-.store-account-actions button:last-child {
+.store-account-actions button {
   flex-shrink: 0;
   white-space: nowrap;
 }
-.store-login-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.store-account-actions button:last-child > span {
+.store-account-actions button > span {
   background: var(--red);
   color: #fff;
   border-radius: 3px;
@@ -211,10 +202,16 @@
 .storefront .username-box {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
+  height: 132px;
+  overflow: hidden;
   background: #161616;
-  padding: 18px;
+  padding: 0 16px 0 14px;
   border-radius: 4px;
+}
+.store-player-text {
+  flex: 1;
+  min-width: 0;
 }
 .store-player {
   width: 54px;
@@ -227,6 +224,18 @@
   display: flex;
   align-items: center;
 }
+.store-player-preview.full-body {
+  width: 88px;
+  height: 132px;
+  padding-top: 16px;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+.full-body img.store-player {
+  width: 88px;
+  height: auto;
+}
 .storefront .store-player-placeholder {
   display: grid;
   place-items: center;
@@ -238,20 +247,11 @@
   width: 28px;
   height: 28px;
 }
-.username-box strong,
-.username-box span {
-  display: block;
-}
 .username-box strong {
-  font-size: 17px;
+  display: block;
+  font-size: 16px;
   color: #f2f3f5;
   overflow-wrap: anywhere;
-}
-.username-box span {
-  margin-top: 6px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #999;
 }
 .username-box .store-button {
   margin-top: 12px;
@@ -1196,18 +1196,7 @@
     gap: 14px;
   }
   .storefront .username-box {
-    padding: 18px 22px;
-  }
-  .username-box > div {
-    flex: 1;
-    position: relative;
-    padding-right: 70px;
-  }
-  .username-box .store-button {
-    position: absolute;
-    top: 0;
-    right: 0;
-    margin-top: 6px;
+    padding: 0 22px 0 16px;
   }
   .storefront .user-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1258,9 +1247,6 @@
   }
 }
 @media (max-width: 450px) {
-  .store-account-actions button:first-child {
-    max-width: 140px;
-  }
   .store-site .public-status-icon {
     width: 28px;
     height: 28px;

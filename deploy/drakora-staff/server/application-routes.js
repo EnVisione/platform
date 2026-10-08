@@ -79,8 +79,9 @@ export function applicationRouter(config, applications, dist) {
         !/^[a-f0-9]{32}$/i.test(req.params.name)
       )
         return res.status(400).end();
+      const body = req.query.render === "body";
       const response = await fetch(
-        `https://mc-heads.net/avatar/${encodeURIComponent(req.params.name)}/64`,
+        `https://mc-heads.net/${body ? "body" : "avatar"}/${encodeURIComponent(req.params.name)}/${body ? "right" : "64"}`,
         { signal: AbortSignal.timeout(8000) },
       );
       if (
