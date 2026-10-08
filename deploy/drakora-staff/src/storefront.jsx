@@ -85,14 +85,8 @@ function savedUsername() {
 }
 
 function RankArtwork({ rank }) {
-  const crown = [
-    "ruler",
-    "monarch",
-    "sovereign",
-    "regent",
-    "harbinger",
-    "dovahkiin",
-  ].includes(rank);
+  const crown =
+    storeRanks.find(({ id }) => id === rank)?.coverage === "network";
   return (
     <svg
       className={`store-rank-art ${rank}`}
@@ -215,7 +209,7 @@ function RankComparison({ category, viewRank }) {
         <p>
           {network
             ? "All four ranks cover Prominence II and Restless Horizons."
-            : "All six ranks apply to one modpack. Choose your server before adding a rank to your cart."}
+            : "All four ranks apply to one modpack. Choose your server before adding a rank to your cart."}
         </p>
         <p>
           Monthly and lifetime options share the same perks. Prices and perks
@@ -223,8 +217,7 @@ function RankComparison({ category, viewRank }) {
         </p>
       </header>
       <p id="store-compare-scroll" className="store-compare-scroll">
-        On smaller screens, scroll across to compare these{" "}
-        {network ? "four" : "six"} ranks.
+        On smaller screens, scroll across to compare these four ranks.
       </p>
       <div
         className="store-comparison-scroll"
@@ -233,9 +226,7 @@ function RankComparison({ category, viewRank }) {
         aria-describedby="store-compare-scroll"
         tabIndex={0}
       >
-        <table
-          className={`store-comparison-table ${network ? "network" : "modpack"}`}
-        >
+        <table className="store-comparison-table">
           <caption>{network ? "Network" : "Server-specific"} ranks</caption>
           <thead>
             <tr>
@@ -293,8 +284,8 @@ export function Storefront({
   const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
   const scope = category === "home" ? "network" : category;
-  const serverRanks = !commandsPage && category === "server";
   const homePage = !comparePage && !commandsPage && category === "home";
+  const showComparison = !commandsPage && (comparePage || category !== "home");
   const [giftRequested, setGiftRequested] = useState(
     () => location.hash === "#store-gift-cards",
   );
@@ -667,7 +658,7 @@ export function Storefront({
               </button>
             </div>
           )}
-          {comparePage ? (
+          {showComparison ? (
             <RankComparison category={category} viewRank={viewRank} />
           ) : (
             <section
@@ -679,22 +670,12 @@ export function Storefront({
                   {commandsPage ? (
                     <h1 id="store-category-title">Individual commands</h1>
                   ) : (
-                    <h2 id="store-category-title">
-                      {homePage
-                        ? "Featured ranks"
-                        : scope === "network"
-                          ? "Network ranks"
-                          : "Server-specific ranks"}
-                    </h2>
+                    <h2 id="store-category-title">Featured ranks</h2>
                   )}
                   <p>
-                    {homePage
-                      ? "A few of our planned network ranks. Explore four network tiers or six server tiers for your modpack."
-                      : commandsPage
-                        ? `Choose a single command for ${currentScope.name}.`
-                        : scope === "network"
-                          ? "Premium ranks across both current modpacks."
-                          : "Lower-priced ranks for one modpack. Choose your server before adding a rank to your cart."}
+                    {commandsPage
+                      ? `Choose a single command for ${currentScope.name}.`
+                      : "A few of our planned network ranks. Compare four network tiers or four server tiers for your modpack."}
                   </p>
                 </div>
                 <div
@@ -718,11 +699,7 @@ export function Storefront({
               <div className="store-products" aria-busy={loading}>
                 {(commandsPage
                   ? storeCommands
-                  : homePage
-                    ? storeRanksForScope(scope).filter(({ id }) =>
-                        ["ruler", "monarch", "regent"].includes(id),
-                      )
-                    : ranksForCategory(category)
+                  : storeRanksForScope("network").slice(-3)
                 ).map((item) => {
                   const selection = commandsPage
                     ? { command: item.id }
@@ -732,13 +709,7 @@ export function Storefront({
                     scope,
                     billing,
                   });
-                  const available = serverRanks
-                    ? serverScopes.some(
-                        ({ id }) =>
-                          productFor({ ...selection, scope: id, billing })
-                            ?.available,
-                      )
-                    : product?.available;
+                  const available = product?.available;
                   return (
                     <article className="package" key={item.id}>
                       <button
@@ -761,11 +732,7 @@ export function Storefront({
                           </p>
                         )}
                         <span>
-                          {loading
-                            ? "Loading…"
-                            : serverRanks && available
-                              ? "Choose server for price"
-                              : money(product)}
+                          {loading ? "Loading…" : money(product)}
                           {product?.price != null && (
                             <small>
                               {billing === "monthly" ? " / month" : " once"}
@@ -784,20 +751,14 @@ export function Storefront({
                         <button
                           className="store-button"
                           type="button"
-                          disabled={
-                            loading ||
-                            catalogError ||
-                            (!serverRanks && !available)
-                          }
+                          disabled={loading || catalogError || !available}
                           onClick={() => viewProduct(selection)}
                         >
-                          {serverRanks
-                            ? "Choose server"
-                            : available
-                              ? commandsPage
-                                ? "Choose command"
-                                : "Choose rank"
-                              : "Coming soon"}
+                          {available
+                            ? commandsPage
+                              ? "Choose command"
+                              : "Choose rank"
+                            : "Coming soon"}
                         </button>
                       </div>
                     </article>
@@ -960,9 +921,28 @@ export function Storefront({
                 <div>
                   <dt>Payment</dt>
                   <dd>
-                    {details.billing === "monthly"
-                      ? "Monthly subscription"
-                      : "Lifetime · one payment"}
+                    <div
+                      className="store-billing"
+                      role="group"
+                      aria-label="Payment period"
+                    >
+                      {storeBilling.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className={
+                            details.billing === item.id ? "active" : ""
+                          }
+                          aria-pressed={details.billing === item.id}
+                          onClick={() => {
+                            setDetails({ ...details, billing: item.id });
+                            setBilling(item.id);
+                          }}
+                        >
+                          {item.name}
+                        </button>
+                      ))}
+                    </div>
                   </dd>
                 </div>
               </dl>

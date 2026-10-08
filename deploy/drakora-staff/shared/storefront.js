@@ -1,14 +1,12 @@
 export const storeRanks = [
-  { id: "ruler", name: "Ruler", coverage: "network" },
-  { id: "monarch", name: "Monarch", coverage: "network" },
-  { id: "sovereign", name: "Sovereign", coverage: "network" },
-  { id: "regent", name: "Regent", coverage: "network" },
-  { id: "harbinger", name: "Harbinger", coverage: "modpack" },
-  { id: "dovahkiin", name: "Dovahkiin", coverage: "modpack" },
-  { id: "dragonborn", name: "Dragonborn", coverage: "modpack" },
-  { id: "warden", name: "Warden", coverage: "modpack" },
-  { id: "thane", name: "Thane", coverage: "modpack" },
-  { id: "adventurer", name: "Adventurer", coverage: "modpack" },
+  { id: "archwyrm", name: "ArchWyrm", coverage: "network" },
+  { id: "archdrake", name: "ArchDrake", coverage: "network" },
+  { id: "archwyvern", name: "ArchWyvern", coverage: "network" },
+  { id: "archdragon", name: "ArchDragon", coverage: "network" },
+  { id: "wyrm", name: "Wyrm", coverage: "modpack" },
+  { id: "drake", name: "Drake", coverage: "modpack" },
+  { id: "wyvern", name: "Wyvern", coverage: "modpack" },
+  { id: "dragon", name: "Dragon", coverage: "modpack" },
 ];
 
 export const storeScopes = [
@@ -78,15 +76,15 @@ export const storeBilling = [
 export function validStoreSelection(selection) {
   return Boolean(
     selection &&
-      selection.title === undefined &&
-      ((selection.command === undefined &&
-        storeRanksForScope(selection.scope).some(
-          ({ id }) => id === selection.rank,
-        )) ||
-        (selection.rank === undefined &&
-          storeCommands.some(({ id }) => id === selection.command))) &&
-      storeScopes.some(({ id }) => id === selection.scope) &&
-      storeBilling.some(({ id }) => id === selection.billing),
+    selection.title === undefined &&
+    ((selection.command === undefined &&
+      storeRanksForScope(selection.scope).some(
+        ({ id }) => id === selection.rank,
+      )) ||
+      (selection.rank === undefined &&
+        storeCommands.some(({ id }) => id === selection.command))) &&
+    storeScopes.some(({ id }) => id === selection.scope) &&
+    storeBilling.some(({ id }) => id === selection.billing),
   );
 }
 

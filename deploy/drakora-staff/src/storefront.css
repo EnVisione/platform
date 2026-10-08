@@ -395,15 +395,12 @@
 }
 .store-comparison-table {
   width: 100%;
-  min-width: 850px;
+  min-width: 650px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
   line-height: 1.6;
-}
-.store-comparison-table.network {
-  min-width: 650px;
 }
 .store-comparison-table caption {
   position: absolute;
@@ -488,18 +485,16 @@
   height: 90px;
   color: var(--gold);
 }
-.store-rank-art.sovereign,
-.store-rank-art.regent {
+.store-rank-art.archwyvern,
+.store-rank-art.archdragon {
   color: #c3ab94;
 }
-.store-rank-art.harbinger,
-.store-rank-art.dovahkiin,
-.store-rank-art.dragonborn {
+.store-rank-art.wyrm,
+.store-rank-art.drake {
   color: #b69d7e;
 }
-.store-rank-art.thane,
-.store-rank-art.warden,
-.store-rank-art.adventurer {
+.store-rank-art.wyvern,
+.store-rank-art.dragon {
   color: #a6a297;
 }
 .storefront .store-product-info h3 {

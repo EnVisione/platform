@@ -15,7 +15,7 @@ import {
 } from "../server/storefront.js";
 
 const mapping = {
-  rank: "monarch",
+  rank: "archdrake",
   scope: "network",
   billing: "monthly",
   packageId: 101,
@@ -35,7 +35,7 @@ const remoteProduct = {
   currency: "USD",
 };
 const request = {
-  rank: "monarch",
+  rank: "archdrake",
   scope: "network",
   billing: "monthly",
   username: "Test_Player",
@@ -45,19 +45,19 @@ const reply = (data) =>
     headers: { "Content-Type": "application/json" },
   });
 
-test("coming-soon catalog separates four network tiers and six modpack tiers without creating baskets", async () => {
+test("coming-soon catalog separates four network tiers and four modpack tiers without creating baskets", async () => {
   const catalog = emptyStoreCatalog();
   assert.deepEqual(
     storeRanksForScope("network").map(({ name }) => name),
-    ["Ruler", "Monarch", "Sovereign", "Regent"],
+    ["ArchWyrm", "ArchDrake", "ArchWyvern", "ArchDragon"],
   );
   for (const scope of ["prom2", "restless-horizons"])
     assert.deepEqual(
       storeRanksForScope(scope).map(({ name }) => name),
-      ["Harbinger", "Dovahkiin", "Dragonborn", "Warden", "Thane", "Adventurer"],
+      ["Wyrm", "Drake", "Wyvern", "Dragon"],
     );
-  assert.equal(catalog.length, 32);
-  assert.equal(new Set(catalog.map(storeProductKey)).size, 32);
+  assert.equal(catalog.length, 24);
+  assert.equal(new Set(catalog.map(storeProductKey)).size, 24);
   assert.ok(
     catalog.every((product) => !product.available && product.price === null),
   );
@@ -79,7 +79,7 @@ test("coming-soon catalog separates four network tiers and six modpack tiers wit
   );
   assert.equal(
     new Set([...catalog, ...emptyCommandCatalog()].map(storeProductKey)).size,
-    62,
+    54,
   );
   await assert.rejects(
     service.checkout(
@@ -105,12 +105,27 @@ test("rank selections reject other categories, retired ranks and alternate title
     assert.equal(validStoreSelection(selection), true);
   for (const selection of [
     { ...request, scope: "prom2" },
-    { ...request, rank: "harbinger" },
-    { ...request, title: "Monarch" },
-    { command: "hat", scope: "network", billing: "monthly", title: "Monarch" },
+    { ...request, rank: "wyrm" },
+    { ...request, title: "ArchDrake" },
+    {
+      command: "hat",
+      scope: "network",
+      billing: "monthly",
+      title: "ArchDrake",
+    },
   ])
     assert.equal(validStoreSelection(selection), false);
   for (const rank of [
+    "ruler",
+    "monarch",
+    "sovereign",
+    "regent",
+    "harbinger",
+    "dovahkiin",
+    "dragonborn",
+    "warden",
+    "thane",
+    "adventurer",
     "emperor",
     "king",
     "archduke",
@@ -142,8 +157,8 @@ test("configuration rejects overlapping hosts, duplicate packages, unverified de
     { ...settings, products: [{ ...mapping, deliveryVerified: false }] },
     { ...settings, products: [{ ...mapping, interval: "P1Y" }] },
     { ...settings, products: [{ ...mapping, rank: "founder" }] },
-    { ...settings, products: [{ ...mapping, rank: "dovahkiin" }] },
-    { ...settings, products: [{ ...mapping, title: "Monarch" }] },
+    { ...settings, products: [{ ...mapping, rank: "drake" }] },
+    { ...settings, products: [{ ...mapping, title: "ArchDrake" }] },
   ])
     assert.throws(() => validateStorefront({ ...base, storefront }));
 });
@@ -194,8 +209,8 @@ test("checkout uses the configured package and customer IP, ignores client price
   for (const input of [
     { ...request, scope: "unknown" },
     { ...request, scope: "prom2" },
-    { ...request, rank: "dovahkiin" },
-    { ...request, title: "Monarch" },
+    { ...request, rank: "drake" },
+    { ...request, title: "ArchDrake" },
     { ...request, username: "a<script>" },
   ])
     await assert.rejects(
@@ -246,10 +261,10 @@ test("checkout refreshes cached availability before making a basket", async () =
 
 test("server ranks require a server and checkout uses that server's package", async () => {
   const mappings = [
-    { ...mapping, rank: "harbinger", scope: "prom2", packageId: 102 },
+    { ...mapping, rank: "wyrm", scope: "prom2", packageId: 102 },
     {
       ...mapping,
-      rank: "harbinger",
+      rank: "wyrm",
       scope: "restless-horizons",
       packageId: 103,
     },
@@ -282,7 +297,7 @@ test("server ranks require a server and checkout uses that server's package", as
   for (const scope of [undefined, "", "server", "network", "unknown"])
     await assert.rejects(
       service.checkout(
-        { ...request, rank: "harbinger", scope },
+        { ...request, rank: "wyrm", scope },
         "192.0.2.5",
         settings.origin,
       ),
@@ -292,7 +307,7 @@ test("server ranks require a server and checkout uses that server's package", as
   for (const { scope, packageId } of mappings) {
     calls.length = 0;
     await service.checkout(
-      { ...request, rank: "harbinger", scope, packageId: 999 },
+      { ...request, rank: "wyrm", scope, packageId: 999 },
       "192.0.2.5",
       settings.origin,
     );
@@ -496,7 +511,7 @@ test("an individual command checkout adds only its verified package and preserve
   );
   for (const input of [
     { ...selected, command: "ban" },
-    { ...selected, rank: "monarch" },
+    { ...selected, rank: "archdrake" },
     { ...selected, username: "<script>" },
   ])
     await assert.rejects(
@@ -505,7 +520,7 @@ test("an individual command checkout adds only its verified package and preserve
     );
   assert.equal(calls.length, 0);
   const catalog = await service.catalog();
-  assert.equal(catalog.products.length, 32);
+  assert.equal(catalog.products.length, 24);
   assert.equal(
     catalog.commands.filter((product) => product.available).length,
     1,
