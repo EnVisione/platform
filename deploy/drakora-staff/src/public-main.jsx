@@ -7,6 +7,8 @@ import {
   helpSections,
 } from "../shared/website.js";
 import logo from "./assets/drakora-logo.png";
+import storePaypal from "./assets/store-paypal.png";
+import storePaymentCards from "./assets/store-payment-cards.png";
 import castle from "./assets/medieval-castle.svg";
 import forest from "./assets/medieval-forest.svg";
 import prominence from "./assets/prominence-logo.png";
@@ -782,9 +784,41 @@ function PublicSite() {
         )}
       </main>
       <footer className="public-footer">
+        {storePage && (
+          <div className="store-footer-payments">
+            <div>
+              <span className="store-payment-label">
+                Payment options at launch
+              </span>
+              <div className="store-payment-logos">
+                <img
+                  src={storePaypal}
+                  alt="PayPal"
+                  width="280"
+                  height="180"
+                  loading="lazy"
+                />
+                <img
+                  src={storePaymentCards}
+                  alt="Mastercard, Visa, JCB and American Express"
+                  width="280"
+                  height="180"
+                  loading="lazy"
+                />
+              </div>
+              <small>Available methods are shown at Tebex checkout.</small>
+            </div>
+            <p className="store-affiliation-note">
+              <em>
+                Drakora is not affiliated with or endorsed by Minecraft, Mojang,
+                or Microsoft.
+              </em>
+            </p>
+          </div>
+        )}
         <div>
           <strong>Drakora Network</strong>
-          <p>Not affiliated with Mojang or Microsoft.</p>
+          {!storePage && <p>Not affiliated with Mojang or Microsoft.</p>}
         </div>
         <nav aria-label="Footer links">
           <a href="/privacy">Privacy Policy</a>

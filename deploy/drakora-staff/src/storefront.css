@@ -8,6 +8,46 @@
   color: #bdbdbd;
   padding-bottom: 24px;
 }
+.store-site .public-footer {
+  flex-wrap: wrap;
+}
+.store-footer-payments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px 32px;
+  flex-basis: 100%;
+  width: 100%;
+  min-width: 0;
+}
+.store-payment-label {
+  color: #bdbdbd;
+  font-size: 12px;
+}
+.store-payment-logos {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  width: 280px;
+  max-width: 100%;
+}
+.store-payment-logos img {
+  display: block;
+  width: calc((100% - 20px) / 2);
+  height: auto;
+}
+.store-footer-payments small {
+  display: block;
+  color: #999;
+  font-size: 11px;
+}
+.store-site .public-footer .store-affiliation-note {
+  margin: 0;
+  max-width: 430px;
+  font-size: 12px;
+  line-height: 1.7;
+}
 .storefront *,
 .storefront *::before,
 .storefront *::after {
