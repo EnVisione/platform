@@ -20,12 +20,14 @@ function SupporterFace({ player }) {
   );
 }
 
-export function StoreSupportMessage() {
+export function StoreWelcome() {
   return (
-    <section
-      className="store-support-message"
-      aria-labelledby="store-support-title"
-    >
+    <section className="store-welcome" aria-labelledby="store-welcome-title">
+      <header>
+        <p className="store-welcome-eyebrow">Welcome to the official</p>
+        <h1 id="store-welcome-title">Drakora Store</h1>
+        <p>Thank you for supporting our modded Minecraft community.</p>
+      </header>
       <h2 id="store-support-title">
         No pay-to-win. Every contribution gives back.
       </h2>
@@ -136,7 +138,7 @@ export function TopCustomers({ community, storeHref, compact = false }) {
             <a href={storeHref}>Top 3 supporters</a>
           </h2>
         ) : (
-          <h1 id="store-top-title">Top 3 supporters</h1>
+          <h2 id="store-top-title">Top 3 supporters</h2>
         )}
         <div
           className="store-periods"

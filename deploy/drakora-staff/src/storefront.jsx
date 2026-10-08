@@ -4,7 +4,7 @@ import {
   useStoreCommunity,
   RecentPayments,
   TopCustomers,
-  StoreSupportMessage,
+  StoreWelcome,
 } from "./store-community.jsx";
 import { StoreGiftCards, useStoreWallet } from "./store-gift-cards.jsx";
 import { StorePlayer, validUsername } from "./store-player.jsx";
@@ -629,6 +629,7 @@ export function Storefront({
         </aside>
         <div className="store-main">
           {homePage && <TopCustomers community={community} compact />}
+          {homePage && <StoreWelcome />}
           {location.pathname.endsWith("/thank-you") && (
             <p className="store-notice" role="status">
               You’ve returned from checkout. Check your Tebex receipt for
@@ -744,7 +745,6 @@ export function Storefront({
               </div>
             </section>
           )}
-          {homePage && <StoreSupportMessage />}
         </div>
       </div>
       {drawer && (
