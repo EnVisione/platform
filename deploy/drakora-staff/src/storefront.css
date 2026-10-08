@@ -249,9 +249,11 @@
 }
 .username-box strong {
   display: block;
-  font-size: 16px;
+  font-size: 14px;
   color: #f2f3f5;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .username-box .store-button {
   margin-top: 12px;

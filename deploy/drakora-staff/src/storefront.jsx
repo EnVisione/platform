@@ -534,7 +534,7 @@ export function Storefront({
           <div className="username-box">
             <StorePlayer username={username} body />
             <div className="store-player-text">
-              <strong>{username || "Guest"}</strong>
+              <strong title={username || "Guest"}>{username || "Guest"}</strong>
               <button
                 className="store-button secondary"
                 type="button"
