@@ -154,12 +154,7 @@ export function StoreGiftCards({ username, onLogin, wallet }) {
       aria-labelledby="store-gift-title"
     >
       <h2 id="store-gift-title">Gift cards</h2>
-      <p>
-        {username
-          ? "Register an existing card."
-          : "Log in with Minecraft to register a card."}{" "}
-        Gift card purchases are coming soon.
-      </p>
+      <p>Register an existing card.</p>
       {!username ? (
         <>
           <button className="store-button" type="button" onClick={onLogin}>

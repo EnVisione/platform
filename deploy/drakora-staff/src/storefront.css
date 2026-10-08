@@ -257,8 +257,8 @@
   letter-spacing: 1.5px;
 }
 .store-sidebar-help {
-  padding: 20px 0;
-  background: transparent;
+  padding: 20px;
+  background: #161616;
   border-radius: 4px;
 }
 .storefront .store-sidebar-help h2 {
@@ -267,11 +267,6 @@
     sans-serif;
   color: var(--gold);
   margin: 0 0 12px;
-}
-.store-sidebar-help p {
-  font-size: 13px;
-  line-height: 1.7;
-  margin: 0 0 16px;
 }
 .store-sidebar-help a {
   display: flex;
@@ -327,8 +322,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 0;
-  background: transparent;
+  padding: 22px 24px;
+  background: #161616;
   border-radius: 4px;
   margin-bottom: 20px;
 }
@@ -338,12 +333,7 @@
     600 22px Arial,
     sans-serif;
   color: var(--gold);
-  margin: 0 0 8px;
-}
-.store-category-header p {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
 }
 .store-billing {
   display: flex;
@@ -365,8 +355,8 @@
   color: #fff;
 }
 .store-comparison-heading {
-  padding: 0;
-  background: transparent;
+  padding: 24px;
+  background: #161616;
   border-radius: 4px;
   margin-bottom: 24px;
 }
@@ -454,10 +444,6 @@
 .store-comparison-table .store-detail-button {
   white-space: nowrap;
 }
-.store-catalog-note a {
-  color: var(--gold);
-  white-space: nowrap;
-}
 .store-products {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -543,14 +529,8 @@
 .store-detail-button:hover {
   color: var(--gold);
 }
-.store-catalog-note {
-  font-size: 12px;
-  margin: 16px 0 0;
-  color: #999;
-}
 .store-support-message,
-.store-community-panel,
-.store-policies {
+.store-community-panel {
   background: #161616;
   padding: 28px;
   border-radius: 4px;
@@ -558,8 +538,8 @@
 }
 .store-support-message {
   margin: 0;
-  padding: 8px 0;
-  background: transparent;
+  padding: 24px;
+  background: #161616;
 }
 .storefront .store-support-message h2 {
   color: var(--gold);
@@ -577,16 +557,14 @@
   margin: 0;
 }
 .storefront .store-community-panel h1,
-.storefront .store-community-panel h2,
-.storefront .store-policies h2 {
+.storefront .store-community-panel h2 {
   font:
     600 21px/1.4 Arial,
     sans-serif;
   color: var(--gold);
   margin: 0 0 12px;
 }
-.store-community-panel p,
-.store-policies p {
+.store-community-panel p {
   font-size: 13px;
   line-height: 1.8;
   margin: 0 0 16px;
@@ -719,29 +697,6 @@
 .store-gift-card form > p {
   margin: 12px 0 0;
 }
-.store-policies {
-  margin: 0;
-  padding: 20px 0 0;
-  background: transparent;
-}
-.store-policies a {
-  color: var(--gold);
-}
-.store-policy-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-  margin-top: 16px;
-  font-size: 12px;
-}
-.store-buying-details summary {
-  cursor: pointer;
-  font-size: 13px;
-}
-.store-buying-details p {
-  margin: 12px 0 0;
-  max-width: 70ch;
-}
 @media (max-width: 650px) {
   .store-community-panel {
     padding: 22px;
@@ -765,16 +720,16 @@
   margin: 0;
 }
 .storefront .store-top-panel .store-community-empty {
-  margin: 0 0 18px;
+  margin: 0;
 }
 .storefront .store-top-customers {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 .store-sidebar .store-community-panel {
-  padding: 20px 0;
-  background: transparent;
+  padding: 20px;
+  background: #161616;
 }
 .store-sidebar .store-community-panel h2 {
   font-size: 18px;
@@ -884,9 +839,6 @@
   }
   .store-sidebar-help {
     order: 6;
-  }
-  .store-main > .store-policies {
-    order: 7;
   }
   .store-shell .store-community-panel,
   .store-sidebar-help,
@@ -1214,7 +1166,7 @@
     display: none;
   }
   .store-comparison-heading {
-    padding: 0;
+    padding: 18px;
   }
   .store-compare-scroll {
     display: block;
@@ -1292,7 +1244,7 @@
     margin-top: 10px;
   }
   .store-category-header {
-    padding: 0;
+    padding: 18px;
   }
   .store-drawer-inner {
     padding: 24px;

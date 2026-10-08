@@ -281,7 +281,6 @@ export function Storefront({
         : "home";
   });
   const storeHome = storefrontHost ? "/" : "/store";
-  const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
   const scope = category === "home" ? "network" : category;
   const homePage = !comparePage && !commandsPage && category === "home";
@@ -357,7 +356,6 @@ export function Storefront({
   const detailItem = details && storeItem(details);
   const detailNeedsServer = detailItem?.coverage === "modpack";
   const cartItem = cart && storeItem(cart);
-  const currentScope = storeScopes.find(({ id }) => id === scope);
   const purchaseReady = !loading && !catalogError && cartProduct?.available;
   const giftCards = wallet.data.cards.filter(
     (card) =>
@@ -621,7 +619,6 @@ export function Storefront({
           />
           <div className="store-sidebar-help">
             <h2>Need a hand?</h2>
-            <p>Questions about the store? Our staff can help.</p>
             <a href="https://drakora.org/help">
               <PublicIcon name="help" /> Get support
             </a>
@@ -664,11 +661,6 @@ export function Storefront({
                   ) : (
                     <h2 id="store-category-title">Featured ranks</h2>
                   )}
-                  <p>
-                    {commandsPage
-                      ? `Choose a single command for ${currentScope.name}.`
-                      : "Network-wide support. Choose a rank to explore."}
-                  </p>
                 </div>
                 {commandsPage && (
                   <div
@@ -750,44 +742,9 @@ export function Storefront({
                   );
                 })}
               </div>
-              <p className="store-catalog-note">
-                {commandsPage
-                  ? "These are previews. Command behavior, prices and access terms will be confirmed before purchases open."
-                  : "Prices and perks are coming soon."}{" "}
-                {!commandsPage && (
-                  <a href={`${compareHref}?scope=${scope}`}>
-                    Compare {scope === "network" ? "network" : "server"} ranks{" "}
-                    <PublicIcon name="arrow" />
-                  </a>
-                )}
-              </p>
             </section>
           )}
           {homePage && <StoreSupportMessage />}
-          <section
-            className="store-policies"
-            aria-labelledby="store-policies-title"
-          >
-            <h2 id="store-policies-title">Before you buy</h2>
-            <details className="store-buying-details">
-              <summary>Coverage, payment options & checkout</summary>
-              <p>
-                Network ranks cover both modpacks. Server ranks apply only to
-                the modpack you choose. Monthly subscriptions renew each month;
-                lifetime is one payment without a monthly renewal.
-              </p>
-              <p>
-                Checkout is handled by Tebex. Drakora does not collect your card
-                details. Tebex’s checkout terms and privacy information also
-                apply. Full purchase terms will be available before launch.
-                Drakora is not affiliated with Mojang or Microsoft.
-              </p>
-            </details>
-            <div className="store-policy-links">
-              <a href="/terms">Terms of Service</a>
-              <a href="/privacy">Privacy Policy</a>
-            </div>
-          </section>
         </div>
       </div>
       {drawer && (

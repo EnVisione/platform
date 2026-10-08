@@ -107,7 +107,7 @@ export function RecentPayments({ community }) {
             ? "Loading payments…"
             : error
               ? "Payment updates are temporarily unavailable."
-              : "No payments yet. Thank you for supporting Drakora."}
+              : "No payments yet."}
         </p>
       )}
       {error && (
@@ -193,11 +193,11 @@ export function TopCustomers({ community, storeHref, compact = false }) {
                 : `No supporters to show for ${periods[period].toLowerCase()} yet.`}
         </p>
       )}
-      <p className="store-community-caption">
-        {compact
-          ? "Completed purchases · UTC"
-          : "Ranked by completed purchases. Week and month follow UTC."}
-      </p>
+      {!compact && (
+        <p className="store-community-caption">
+          Ranked by completed purchases. Week and month follow UTC.
+        </p>
+      )}
       {error && (
         <p className="store-community-retry" role="alert">
           We couldn’t load the latest supporter updates.{" "}
