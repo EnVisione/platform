@@ -221,6 +221,11 @@
   color: var(--gold);
   background: #29221b;
 }
+.user-nav a.store-category-home,
+.user-nav a.store-category-home:hover,
+.user-nav a.store-category-home:focus-visible {
+  background: transparent;
+}
 .user-nav a.store-back-home {
   background: var(--red);
   color: #fff;
