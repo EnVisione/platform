@@ -129,6 +129,13 @@
   display: grid;
   gap: 12px;
 }
+.store-account-row,
+.store-navigation {
+  min-width: 0;
+}
+.store-menu-toggle {
+  display: none;
+}
 .storefront .username-box {
   display: flex;
   align-items: center;
@@ -883,8 +890,8 @@
   .store-main {
     display: contents;
   }
-  .store-shell .username-box,
-  .store-shell .user-nav {
+  .store-shell .store-account-row,
+  .store-shell .store-navigation {
     order: 0;
     width: 100%;
   }
@@ -896,9 +903,6 @@
   .store-main-top .store-top-panel {
     flex-basis: 100%;
     order: 1;
-  }
-  .store-main-top .store-cart-button {
-    order: 0;
   }
   .store-recent-panel {
     order: 4;
@@ -1161,8 +1165,8 @@
     padding-top: 40px;
   }
   .store-cart-button {
-    width: 96px;
-    height: 96px;
+    width: 100%;
+    height: 112px;
   }
   .store-cart-button > .public-icon {
     width: 26px;
@@ -1176,12 +1180,54 @@
   .store-sidebar {
     gap: 14px;
   }
+  .store-account-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
   .storefront .username-box {
-    padding: 0 22px 0 16px;
+    height: 112px;
+    gap: 8px;
+    padding: 0 10px 0 6px;
+  }
+  .username-box .store-player-preview.full-body {
+    width: clamp(40px, 14vw, 64px);
+    height: 112px;
+    padding-top: 12px;
+  }
+  .username-box .full-body img.store-player {
+    width: 100%;
+  }
+  .username-box strong {
+    font-size: 12px;
+  }
+  .username-box .store-button {
+    padding: 6px 10px;
+  }
+  .store-navigation {
+    background: #161616;
+    border-radius: 4px;
+  }
+  .store-menu-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 16px;
+    background: transparent;
+    color: #d6d6d6;
+    text-align: left;
+    font-size: 14px;
+    border-radius: 4px;
   }
   .storefront .user-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: none;
+    grid-template-columns: 1fr;
     padding: 8px;
+  }
+  .storefront .user-nav.open {
+    display: grid;
   }
   .user-nav > .store-back-home,
   .user-nav > .store-category-home,

@@ -152,6 +152,120 @@ const ranksForCategory = (category) =>
     ({ coverage }) =>
       coverage === (category === "server" ? "modpack" : "network"),
   );
+const mobileStoreQuery = "(max-width: 760px)";
+
+function StoreCartButton({ count, onClick }) {
+  return (
+    <button
+      className="store-cart-button"
+      type="button"
+      aria-label={`Cart ${count}`}
+      onClick={onClick}
+    >
+      <PublicIcon name="store" />
+      <span className="store-cart-label">
+        Cart <span className="store-cart-count">{count}</span>
+      </span>
+    </button>
+  );
+}
+
+function StoreNavigation({
+  page,
+  homePage,
+  mobile,
+  storefrontHost,
+  onNavigate,
+}) {
+  const [open, setOpen] = useState(false);
+  const navigation = useRef(null);
+  const toggle = useRef(null);
+  useEffect(() => setOpen(false), [page, mobile]);
+  useEffect(() => {
+    if (!open || !mobile) return;
+    const dismiss = (event) => {
+      if (!navigation.current?.contains(event.target)) setOpen(false);
+    };
+    const escape = (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open, mobile]);
+  function follow(event, target) {
+    setOpen(false);
+    onNavigate(event, storePageHref(target, storefrontHost));
+  }
+  return (
+    <div
+      ref={navigation}
+      className="store-navigation"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <button
+        ref={toggle}
+        className="store-menu-toggle"
+        type="button"
+        aria-label={open ? "Close store menu" : "Open store menu"}
+        aria-expanded={open}
+        aria-controls="store-category-links"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <PublicIcon name={open ? "close" : "menu"} /> Store menu
+      </button>
+      <nav
+        id="store-category-links"
+        className={`user-nav${open ? " open" : ""}`}
+        aria-label="Store categories"
+      >
+        <a
+          className="store-back-home"
+          href="https://drakora.org/"
+          onClick={() => setOpen(false)}
+        >
+          <PublicIcon name="home" /> Back to home
+        </a>
+        <a
+          href={storePageHref("home", storefrontHost)}
+          className={`store-category-home${homePage ? " active" : ""}`}
+          aria-current={homePage ? "page" : undefined}
+          onClick={(event) => follow(event, "home")}
+        >
+          <PublicIcon name="home" /> Store home
+        </a>
+        <span className="store-nav-label">RANKS</span>
+        {rankCategories.map((item) => (
+          <a
+            key={item.id}
+            href={storePageHref(item.id, storefrontHost)}
+            className={page === item.id ? "active" : ""}
+            aria-current={page === item.id ? "page" : undefined}
+            onClick={(event) => follow(event, item.id)}
+          >
+            <PublicIcon name="servers" /> {item.name}
+          </a>
+        ))}
+        <a
+          href={storePageHref("commands", storefrontHost)}
+          className={page === "commands" ? "active" : ""}
+          aria-current={page === "commands" ? "page" : undefined}
+          onClick={(event) => follow(event, "commands")}
+        >
+          <PublicIcon name="play" /> Commands
+        </a>
+      </nav>
+    </div>
+  );
+}
 
 function StoreDrawer({ title, onClose, children }) {
   const dialog = useRef(null);
@@ -270,6 +384,15 @@ export function Storefront({
   onNavigate,
   storefrontHost = false,
 }) {
+  const [mobile, setMobile] = useState(
+    () => matchMedia(mobileStoreQuery).matches,
+  );
+  useEffect(() => {
+    const query = matchMedia(mobileStoreQuery);
+    const resize = () => setMobile(query.matches);
+    query.addEventListener("change", resize);
+    return () => query.removeEventListener("change", resize);
+  }, []);
   const [scope, setScope] = useState("network");
   const storeHome = storePageHref("home", storefrontHost);
   const homePage = page === "home" || page === "thank-you";
@@ -501,56 +624,36 @@ export function Storefront({
     <div className="storefront">
       <div className="store-shell">
         <aside className="store-sidebar" aria-label="Store navigation">
-          <div className="username-box">
-            <StorePlayer username={username} body />
-            <div className="store-player-text">
-              <strong title={username || "Guest"}>{username || "Guest"}</strong>
-              <button
-                className="store-button secondary"
-                type="button"
-                onClick={username ? logout : openLogin}
-              >
-                {username ? "Logout" : "Login"}
-              </button>
+          <div className="store-account-row">
+            <div className="username-box">
+              <StorePlayer username={username} body />
+              <div className="store-player-text">
+                <strong title={username || "Guest"}>
+                  {username || "Guest"}
+                </strong>
+                <button
+                  className="store-button secondary"
+                  type="button"
+                  onClick={username ? logout : openLogin}
+                >
+                  {username ? "Logout" : "Login"}
+                </button>
+              </div>
             </div>
+            {mobile && (
+              <StoreCartButton
+                count={cart ? 1 : 0}
+                onClick={() => setDrawer("cart")}
+              />
+            )}
           </div>
-          <nav className="user-nav" aria-label="Store categories">
-            <a className="store-back-home" href="https://drakora.org/">
-              <PublicIcon name="home" /> Back to home
-            </a>
-            <a
-              href={storeHome}
-              className={`store-category-home${homePage ? " active" : ""}`}
-              aria-current={homePage ? "page" : undefined}
-              onClick={(event) => navigate(event, storeHome)}
-            >
-              <PublicIcon name="home" /> Store home
-            </a>
-            <span className="store-nav-label">RANKS</span>
-            {rankCategories.map((item) => (
-              <a
-                key={item.id}
-                href={storePageHref(item.id, storefrontHost)}
-                className={page === item.id ? "active" : ""}
-                aria-current={page === item.id ? "page" : undefined}
-                onClick={(event) =>
-                  navigate(event, storePageHref(item.id, storefrontHost))
-                }
-              >
-                <PublicIcon name="servers" /> {item.name}
-              </a>
-            ))}
-            <a
-              href={storePageHref("commands", storefrontHost)}
-              className={commandsPage ? "active" : ""}
-              aria-current={commandsPage ? "page" : undefined}
-              onClick={(event) =>
-                navigate(event, storePageHref("commands", storefrontHost))
-              }
-            >
-              <PublicIcon name="play" /> Commands
-            </a>
-          </nav>
+          <StoreNavigation
+            page={page}
+            homePage={homePage}
+            mobile={mobile}
+            storefrontHost={storefrontHost}
+            onNavigate={navigate}
+          />
           <RecentPayments community={community} />
           <StoreGiftCards
             username={username}
@@ -576,17 +679,12 @@ export function Storefront({
             {drawer !== "cart" && (
               <TopCustomers community={community} compact />
             )}
-            <button
-              className="store-cart-button"
-              type="button"
-              aria-label={`Cart ${cart ? 1 : 0}`}
-              onClick={() => setDrawer("cart")}
-            >
-              <PublicIcon name="store" />
-              <span className="store-cart-label">
-                Cart <span className="store-cart-count">{cart ? 1 : 0}</span>
-              </span>
-            </button>
+            {!mobile && (
+              <StoreCartButton
+                count={cart ? 1 : 0}
+                onClick={() => setDrawer("cart")}
+              />
+            )}
           </div>
           {homePage && <StoreWelcome />}
           {page === "thank-you" && (
