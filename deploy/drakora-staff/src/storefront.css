@@ -221,6 +221,13 @@
   color: var(--gold);
   background: #29221b;
 }
+.user-nav a.store-back-home {
+  background: var(--red);
+  color: #fff;
+}
+.user-nav a.store-back-home:hover {
+  background: #bf4a3b;
+}
 .store-nav-label {
   padding: 16px 12px 6px;
   color: #858585;
@@ -1174,7 +1181,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 8px;
   }
-  .user-nav > :first-child,
+  .user-nav > .store-back-home,
+  .user-nav > .store-category-home,
   .user-nav > a:last-child {
     grid-column: 1 / -1;
   }

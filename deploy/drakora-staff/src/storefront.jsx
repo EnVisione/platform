@@ -515,9 +515,12 @@ export function Storefront({
             </div>
           </div>
           <nav className="user-nav" aria-label="Store categories">
+            <a className="store-back-home" href="https://drakora.org/">
+              <PublicIcon name="home" /> Back to home
+            </a>
             <a
               href={storeHome}
-              className={homePage ? "active" : ""}
+              className={`store-category-home${homePage ? " active" : ""}`}
               aria-current={homePage ? "page" : undefined}
               onClick={(event) => navigate(event, storeHome)}
             >
@@ -566,9 +569,6 @@ export function Storefront({
               )}
             </a>
             <div className="store-server-address">{join}</div>
-            <a href="https://drakora.org">
-              <PublicIcon name="home" /> Back to home
-            </a>
           </div>
         </aside>
         <div className="store-main">
