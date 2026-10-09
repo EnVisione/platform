@@ -231,19 +231,23 @@ button {
   padding-bottom: 36px;
 }
 .public-header::before,
-.public-header::after {
+.public-header::after,
+.store-background::before,
+.store-background::after {
   content: "";
   position: absolute;
   pointer-events: none;
 }
-.public-header::before {
+.public-header::before,
+.store-background::before {
   inset: -20px;
   z-index: -2;
   background: #252727 url("./assets/medieval-castle.svg") center 55% / cover
     no-repeat;
   filter: blur(5px);
 }
-.public-header::after {
+.public-header::after,
+.store-background::after {
   inset: 0;
   z-index: -1;
   background: linear-gradient(rgba(20, 12, 12, 0.62), #101010);

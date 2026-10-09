@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
+import logo from "./assets/drakora-logo.png";
+import storePaypal from "./assets/store-paypal.png";
+import storePaymentCards from "./assets/store-payment-cards.png";
 
 const periods = { week: "This week", month: "This month", all: "All time" };
 
@@ -25,7 +28,16 @@ export function StoreWelcome() {
     <section className="store-welcome" aria-labelledby="store-welcome-title">
       <header>
         <p className="store-welcome-eyebrow">Welcome to the official</p>
-        <h1 id="store-welcome-title">Drakora Store</h1>
+        <h1
+          id="store-welcome-title"
+          className="store-welcome-brand"
+          aria-label="Drakora Store"
+        >
+          <img src={logo} alt="" width="80" height="80" />
+          <span>
+            DRAKORA<small>NETWORK STORE</small>
+          </span>
+        </h1>
         <p>Thank you for supporting our modded Minecraft community.</p>
       </header>
       <h2 id="store-support-title">
@@ -37,6 +49,19 @@ export function StoreWelcome() {
         gameplay and less lag. Supporting Drakora never buys an unfair
         advantage.
       </p>
+      <div
+        className="store-payment-logos"
+        role="group"
+        aria-label="Payment methods"
+      >
+        <img src={storePaypal} alt="PayPal" width="280" height="180" />
+        <img
+          src={storePaymentCards}
+          alt="Mastercard, Visa, JCB and American Express"
+          width="280"
+          height="180"
+        />
+      </div>
     </section>
   );
 }

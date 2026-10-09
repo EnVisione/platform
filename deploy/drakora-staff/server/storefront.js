@@ -343,10 +343,10 @@ export function storefrontRouter(service, origins, wallet, options = {}) {
           storeCsrf: randomBytes(32).toString("base64url"),
         });
         await saveSession(req);
-        res.redirect(`${origin}/store#store-gift-cards`);
+        res.redirect(`${origin}/store/gift-cards`);
       } catch {
         res.redirect(
-          `${origin}/store?giftCardError=discord_link_failed#store-gift-cards`,
+          `${origin}/store/gift-cards?giftCardError=discord_link_failed`,
         );
       }
     });

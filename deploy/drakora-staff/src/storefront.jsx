@@ -18,7 +18,6 @@ import {
   storeProductKey,
   validStoreSelection,
 } from "../shared/storefront.js";
-import logo from "./assets/drakora-logo.png";
 import "./storefront.css";
 
 const money = (product) =>
@@ -267,6 +266,7 @@ export function Storefront({
   join,
   comparePage = false,
   commandsPage = false,
+  giftCardsPage = false,
   storefrontHost = false,
 }) {
   const [category, setCategory] = useState(() => {
@@ -281,19 +281,18 @@ export function Storefront({
   });
   const storeHome = storefrontHost ? "/" : "/store";
   const commandsHref = storefrontHost ? "/commands" : "/store/commands";
+  const giftCardsHref = storefrontHost ? "/gift-cards" : "/store/gift-cards";
+  const compareHref = storefrontHost ? "/compare" : "/store/compare";
   const scope = category === "home" ? "network" : category;
-  const homePage = !comparePage && !commandsPage && category === "home";
-  const showComparison = !commandsPage && (comparePage || category !== "home");
-  const [giftRequested, setGiftRequested] = useState(
-    () => location.hash === "#store-gift-cards",
-  );
+  const homePage =
+    !comparePage && !commandsPage && !giftCardsPage && category === "home";
+  const showComparison =
+    !commandsPage && !giftCardsPage && (comparePage || category !== "home");
   useEffect(() => {
-    if (!homePage || !giftRequested) return;
-    document
-      .getElementById("store-gift-cards")
-      ?.scrollIntoView({ block: "start" });
-    setGiftRequested(false);
-  }, [homePage, giftRequested]);
+    if (location.hash === "#store-gift-cards") {
+      location.replace(`${giftCardsHref}${location.search}`);
+    }
+  }, [giftCardsHref]);
   const [billing, setBilling] = useState("monthly");
   const [catalog, setCatalog] = useState(initialCatalog);
   const [loading, setLoading] = useState(true);
@@ -485,50 +484,6 @@ export function Storefront({
   }
   return (
     <div className="storefront">
-      <header className="public-header store-header">
-        <div className="store-topbar">
-          <a href="https://drakora.org" className="store-home-link">
-            <PublicIcon name="home" /> Back to home
-          </a>
-          <div className="public-masthead">
-            <div className="public-join">{join}</div>
-            <a
-              href="https://store.drakora.org"
-              className="public-brand"
-              aria-label="Drakora Store home"
-            >
-              <img src={logo} alt="" />
-              <span>
-                DRAKORA<small>NETWORK STORE</small>
-              </span>
-            </a>
-            <a
-              href={discordInvite || "https://drakora.org/discord"}
-              className="public-discord"
-            >
-              <span className="public-status-icon">
-                <PublicIcon name="discord" />
-              </span>
-              <span className="public-status-copy">
-                <span className="public-eyebrow">
-                  {discordCount == null
-                    ? "OUR COMMUNITY"
-                    : `${discordCount.toLocaleString()} TOTAL MEMBERS`}
-                </span>
-                <strong>
-                  Join our Discord <PublicIcon name="external" />
-                </strong>
-                <span>Chat, updates & support</span>
-              </span>
-            </a>
-          </div>
-          <div className="store-account-actions">
-            <button type="button" onClick={() => setDrawer("cart")}>
-              <PublicIcon name="store" /> Cart <span>{cart ? 1 : 0}</span>
-            </button>
-          </div>
-        </div>
-      </header>
       <div className="store-shell">
         <aside className="store-sidebar" aria-label="Store navigation">
           <div className="username-box">
@@ -545,7 +500,7 @@ export function Storefront({
             </div>
           </div>
           <nav className="user-nav" aria-label="Store categories">
-            {comparePage || commandsPage ? (
+            {comparePage || commandsPage || giftCardsPage ? (
               <a href={storeHome}>
                 <PublicIcon name="home" /> Store home
               </a>
@@ -562,24 +517,32 @@ export function Storefront({
             <span className="store-nav-label">
               {commandsPage ? "COMMAND COVERAGE" : "RANKS"}
             </span>
-            {(commandsPage ? storeScopes : rankCategories).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={category === item.id ? "active" : ""}
-                aria-current={
-                  !comparePage && !commandsPage && category === item.id
-                    ? "page"
-                    : undefined
-                }
-                aria-pressed={
-                  comparePage || commandsPage ? category === item.id : undefined
-                }
-                onClick={() => selectCategory(item.id)}
-              >
-                <PublicIcon name="servers" /> {item.name}
-              </button>
-            ))}
+            {(commandsPage ? storeScopes : rankCategories).map((item) =>
+              giftCardsPage ? (
+                <a key={item.id} href={`${compareHref}?scope=${item.id}`}>
+                  <PublicIcon name="servers" /> {item.name}
+                </a>
+              ) : (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={category === item.id ? "active" : ""}
+                  aria-current={
+                    !comparePage && !commandsPage && category === item.id
+                      ? "page"
+                      : undefined
+                  }
+                  aria-pressed={
+                    comparePage || commandsPage
+                      ? category === item.id
+                      : undefined
+                  }
+                  onClick={() => selectCategory(item.id)}
+                >
+                  <PublicIcon name="servers" /> {item.name}
+                </button>
+              ),
+            )}
             <a
               href={commandsHref}
               className={commandsPage ? "active" : ""}
@@ -587,28 +550,15 @@ export function Storefront({
             >
               <PublicIcon name="play" /> Commands
             </a>
-            {comparePage || commandsPage ? (
-              <a href={`${storeHome}#store-gift-cards`}>
-                <PublicIcon name="gift" /> Gift cards
-              </a>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  selectCategory("home");
-                  setGiftRequested(true);
-                }}
-              >
-                <PublicIcon name="gift" /> Gift cards
-              </button>
-            )}
+            <a
+              href={giftCardsHref}
+              className={giftCardsPage ? "active" : ""}
+              aria-current={giftCardsPage ? "page" : undefined}
+            >
+              <PublicIcon name="gift" /> Gift cards
+            </a>
           </nav>
           <RecentPayments community={community} />
-          <StoreGiftCards
-            username={username}
-            onLogin={openLogin}
-            wallet={wallet}
-          />
           <div className="store-sidebar-help">
             <h2>Need a hand?</h2>
             <a href="https://drakora.org/help">
@@ -616,12 +566,35 @@ export function Storefront({
             </a>
             <a href={discordInvite || "https://drakora.org/discord"}>
               <PublicIcon name="discord" /> Join Discord
+              {discordCount != null && (
+                <small>{discordCount.toLocaleString()} members</small>
+              )}
+            </a>
+            <div className="store-server-address">{join}</div>
+            <a href="https://drakora.org">
+              <PublicIcon name="home" /> Back to home
             </a>
           </div>
         </aside>
         <div className="store-main">
-          {homePage && <TopCustomers community={community} compact />}
+          <div className="store-main-top">
+            {homePage && <TopCustomers community={community} compact />}
+            <button
+              className="store-cart-button"
+              type="button"
+              onClick={() => setDrawer("cart")}
+            >
+              <PublicIcon name="store" /> Cart <span>{cart ? 1 : 0}</span>
+            </button>
+          </div>
           {homePage && <StoreWelcome />}
+          {giftCardsPage && (
+            <StoreGiftCards
+              username={username}
+              onLogin={openLogin}
+              wallet={wallet}
+            />
+          )}
           {location.pathname.endsWith("/thank-you") && (
             <p className="store-notice" role="status">
               You’ve returned from checkout. Check your Tebex receipt for

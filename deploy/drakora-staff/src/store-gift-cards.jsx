@@ -153,7 +153,7 @@ export function StoreGiftCards({ username, onLogin, wallet }) {
       id="store-gift-cards"
       aria-labelledby="store-gift-title"
     >
-      <h2 id="store-gift-title">Gift cards</h2>
+      <h1 id="store-gift-title">Gift cards</h1>
       <p>Register an existing card.</p>
       {!username ? (
         <>

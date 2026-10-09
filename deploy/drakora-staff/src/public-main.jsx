@@ -7,8 +7,6 @@ import {
   helpSections,
 } from "../shared/website.js";
 import logo from "./assets/drakora-logo.png";
-import storePaypal from "./assets/store-paypal.png";
-import storePaymentCards from "./assets/store-payment-cards.png";
 import castle from "./assets/medieval-castle.svg";
 import forest from "./assets/medieval-forest.svg";
 import prominence from "./assets/prominence-logo.png";
@@ -454,7 +452,7 @@ function PublicSite() {
     [status, setStatus] = useState(null);
   const storefrontHost = content?.storefrontOrigin === location.origin;
   const pathname = location.pathname.replace(/\/$/, "") || "/";
-  const path = ["/compare", "/commands"].includes(pathname)
+  const path = ["/compare", "/commands", "/gift-cards"].includes(pathname)
     ? `/store${pathname}`
     : storefrontHost && pathname === "/"
       ? "/store"
@@ -514,36 +512,41 @@ function PublicSite() {
     helpPage = path === "/help",
     comparePage = path === "/store/compare",
     commandsPage = path === "/store/commands",
+    giftCardsPage = path === "/store/gift-cards",
     storePage =
       path === "/store" ||
       path === "/store/thank-you" ||
       comparePage ||
-      commandsPage;
-  const title = commandsPage
-    ? "Commands"
-    : comparePage
-      ? "Compare ranks"
-      : storePage
-        ? "Store"
-        : home
-          ? "Home"
-          : staffPage
-            ? "Staff"
-            : partnershipPage
-              ? "Partnerships"
-              : serversPage
-                ? "Servers"
-                : applyPage
-                  ? "Apply"
-                  : helpPage
-                    ? "Need help?"
-                    : (server?.name ??
-                      (rulesPage ? "Rules" : "Page not found"));
+      commandsPage ||
+      giftCardsPage;
+  const title = giftCardsPage
+    ? "Gift cards"
+    : commandsPage
+      ? "Commands"
+      : comparePage
+        ? "Compare ranks"
+        : storePage
+          ? "Store"
+          : home
+            ? "Home"
+            : staffPage
+              ? "Staff"
+              : partnershipPage
+                ? "Partnerships"
+                : serversPage
+                  ? "Servers"
+                  : applyPage
+                    ? "Apply"
+                    : helpPage
+                      ? "Need help?"
+                      : (server?.name ??
+                        (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
   return (
     <div className={`public-site${storePage ? " store-site" : ""}`}>
+      {storePage && <div className="store-background" aria-hidden="true" />}
       {content && !storePage && <AmbientFire ready intro={home} />}
       <a href="#main" className="public-skip">
         Skip to content
@@ -610,10 +613,11 @@ function PublicSite() {
           <Storefront
             comparePage={comparePage}
             commandsPage={commandsPage}
+            giftCardsPage={giftCardsPage}
             storefrontHost={storefrontHost}
             discordInvite={content.discordInvite}
             discordCount={status?.discord.total}
-            join={<CopyAddress large />}
+            join={<CopyAddress />}
           />
         ) : home ? (
           <HomePage home={content.home} discordInvite={content.discordInvite} />
@@ -785,36 +789,12 @@ function PublicSite() {
       </main>
       <footer className="public-footer">
         {storePage && (
-          <div className="store-footer-payments">
-            <div>
-              <span className="store-payment-label">
-                Payment options at launch
-              </span>
-              <div className="store-payment-logos">
-                <img
-                  src={storePaypal}
-                  alt="PayPal"
-                  width="280"
-                  height="180"
-                  loading="lazy"
-                />
-                <img
-                  src={storePaymentCards}
-                  alt="Mastercard, Visa, JCB and American Express"
-                  width="280"
-                  height="180"
-                  loading="lazy"
-                />
-              </div>
-              <small>Available methods are shown at Tebex checkout.</small>
-            </div>
-            <p className="store-affiliation-note">
-              <em>
-                Drakora is not affiliated with or endorsed by Minecraft, Mojang,
-                or Microsoft.
-              </em>
-            </p>
-          </div>
+          <p className="store-affiliation-note">
+            <em>
+              Drakora is not affiliated with or endorsed by Minecraft, Mojang,
+              or Microsoft.
+            </em>
+          </p>
         )}
         <div>
           <strong>Drakora Network</strong>

@@ -46,6 +46,8 @@ export function publicWebsiteRouter(service, status, dist, staffDirectory) {
       "/compare",
       "/commands",
       "/store/commands",
+      "/gift-cards",
+      "/store/gift-cards",
       "/store/thank-you",
     ],
     (_req, res) => res.sendFile(`${dist}/public.html`),

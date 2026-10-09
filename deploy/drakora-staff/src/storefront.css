@@ -6,45 +6,36 @@
 }
 .storefront {
   color: #bdbdbd;
-  padding-bottom: 24px;
+  padding: 32px 0 24px;
 }
 .store-site .public-footer {
   flex-wrap: wrap;
 }
-.store-footer-payments {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px 32px;
-  flex-basis: 100%;
-  width: 100%;
-  min-width: 0;
-}
-.store-payment-label {
-  color: #bdbdbd;
-  font-size: 12px;
+.store-background {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 440px;
+  overflow: hidden;
+  z-index: -1;
+  pointer-events: none;
 }
 .store-payment-logos {
   display: flex;
   align-items: center;
-  gap: 20px;
-  width: 280px;
+  justify-content: center;
+  gap: 24px;
+  width: 300px;
   max-width: 100%;
+  margin: 24px auto 0;
 }
 .store-payment-logos img {
   display: block;
-  width: calc((100% - 20px) / 2);
+  width: calc((100% - 24px) / 2);
   height: auto;
 }
-.store-footer-payments small {
-  display: block;
-  color: #999;
-  font-size: 11px;
-}
 .store-site .public-footer .store-affiliation-note {
+  flex-basis: 100%;
   margin: 0;
-  max-width: 430px;
   font-size: 12px;
   line-height: 1.7;
 }
@@ -76,119 +67,41 @@
 .storefront select:focus-visible {
   background: #32302b;
 }
-.storefront .store-header {
-  padding-bottom: 12px;
-}
-.store-topbar,
-.store-shell {
-  width: 100%;
-  max-width: 1320px;
-  margin: 0 auto;
-}
-.store-topbar {
-  padding: 20px 24px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto repeat(
-      2,
-      minmax(0, 1fr)
-    );
-  align-items: center;
-  gap: 32px;
-}
-.store-home-link {
-  justify-self: start;
-}
-.store-account-actions {
+.store-main-top {
   display: flex;
-  gap: 10px;
-  justify-self: end;
-  width: max-content;
-  max-width: 100%;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 24px;
   min-width: 0;
 }
-.store-topbar .store-home-link,
-.store-account-actions button {
+.store-main-top .store-top-panel {
+  flex: 1;
+  min-width: 0;
+}
+.store-cart-button {
   display: inline-flex;
+  flex-shrink: 0;
   gap: 8px;
   align-items: center;
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 14px;
   background: #202020;
   color: #d6d6d6;
   border-radius: 4px;
   font-size: 13px;
-}
-.store-account-actions button {
-  flex-shrink: 0;
   white-space: nowrap;
 }
-.store-account-actions button > span {
+.store-cart-button > span {
   background: var(--red);
   color: #fff;
   border-radius: 3px;
   padding: 2px 6px;
   font-size: 11px;
 }
-.store-site .public-masthead {
-  display: contents;
-  min-height: 0;
-  padding: 0;
-  gap: 24px;
-}
-.store-site .public-join,
-.store-site .public-discord {
-  padding: 0;
-  justify-self: center;
-}
-.store-site .public-discord,
-.store-site .public-address button {
-  gap: 10px;
-}
-.store-site .public-brand {
-  grid-column: auto;
-  grid-row: auto;
-  gap: 10px;
-}
-.store-site .public-brand img {
-  width: 44px;
-  height: 44px;
-}
-.store-site .public-brand > span {
-  font-size: 24px;
-}
-.store-site .public-brand small {
-  margin-top: 5px;
-  font-size: 7px;
-  letter-spacing: 3px;
-}
-.store-site .public-address.large strong,
-.store-site .public-discord strong {
-  font-size: 13px;
-}
-.store-site .public-address.large .public-eyebrow,
-.store-site .public-discord .public-eyebrow {
-  font-size: 8px;
-  margin-bottom: 5px;
-}
-.store-site .public-address-hint,
-.store-site .public-status-copy > span:last-child {
-  font-size: 8px;
-  margin-top: 4px;
-}
-.store-site .public-status-icon {
-  width: 36px;
-  height: 36px;
-}
-.store-site .public-status-icon > .public-icon {
-  width: 18px;
-  height: 18px;
-}
-.store-site .public-status-icon::after {
-  width: 18px;
-  height: 3px;
-  bottom: -8px;
-}
 .store-shell {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   align-items: start;
@@ -317,6 +230,33 @@
   font-size: 13px;
   color: var(--gold);
   padding: 6px 0;
+}
+.store-sidebar-help small {
+  color: #999;
+  font-size: 10px;
+  margin-left: auto;
+}
+.store-server-address {
+  margin: 12px 0 6px;
+}
+.store-sidebar-help .public-address button {
+  width: 100%;
+  padding: 10px;
+  background: #202020;
+  color: #d6d6d6;
+}
+.store-sidebar-help .public-address strong {
+  font-size: 13px;
+}
+.store-sidebar-help .public-address-hint {
+  font-size: 10px;
+}
+.storefront .store-gift-card h1 {
+  font:
+    600 28px/1.4 Arial,
+    sans-serif;
+  color: var(--gold);
+  margin: 0 0 12px;
 }
 .store-main {
   min-width: 0;
@@ -595,11 +535,32 @@
   margin-bottom: 10px;
 }
 .storefront .store-welcome h1 {
-  margin: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin: 0 0 20px;
   color: var(--gold);
   font:
-    700 40px/1.15 Arial,
+    700 42px/1.1 Georgia,
+    serif;
+}
+.store-welcome-brand img {
+  width: 80px;
+  height: 80px;
+  image-rendering: pixelated;
+}
+.store-welcome-brand span {
+  text-align: left;
+}
+.store-welcome-brand small {
+  display: block;
+  margin-top: 10px;
+  font:
+    700 10px/1.4 Arial,
     sans-serif;
+  letter-spacing: 5px;
+  color: #bdbdbd;
 }
 .storefront .store-welcome h2 {
   color: var(--gold);
@@ -762,7 +723,16 @@
     padding: 22px;
   }
   .storefront .store-welcome h1 {
-    font-size: 32px;
+    font-size: 28px;
+    gap: 12px;
+  }
+  .store-welcome-brand img {
+    width: 48px;
+    height: 48px;
+  }
+  .store-welcome-brand small {
+    font-size: 8px;
+    letter-spacing: 3px;
   }
   .storefront .store-welcome h2 {
     font-size: 20px;
@@ -804,9 +774,6 @@
 .store-sidebar .store-recent-payments {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px 8px;
-}
-.store-sidebar .store-gift-input {
-  flex-direction: column;
 }
 .store-gift-card p {
   margin: 0;
@@ -884,17 +851,22 @@
     order: 0;
     width: 100%;
   }
-  .store-top-panel {
+  .store-main > .store-main-top {
     order: 1;
-    margin: 0;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .store-main-top .store-top-panel {
+    flex-basis: 100%;
+    order: 1;
+  }
+  .store-main-top .store-cart-button {
+    order: 0;
   }
   .store-recent-panel {
     order: 4;
   }
-  .store-gift-card {
-    order: 5;
-  }
-  .store-main > :not(.store-top-panel) {
+  .store-main > :not(.store-main-top) {
     order: 2;
   }
   .store-main > .store-catalog {
@@ -1129,35 +1101,6 @@
     transform: translateX(0);
   }
 }
-@media (max-width: 1220px) {
-  .store-topbar {
-    grid-template-columns: 1fr auto;
-    gap: 20px;
-  }
-  .store-home-link {
-    grid-column: 1;
-    grid-row: 1;
-    justify-self: start;
-  }
-  .store-account-actions {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-  }
-  .store-site .public-masthead {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-content: center;
-  }
-  .store-site .public-join {
-    justify-self: end;
-  }
-  .store-site .public-discord {
-    justify-self: start;
-  }
-}
 @media (max-width: 1100px) {
   .store-shell {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -1171,24 +1114,6 @@
   }
 }
 @media (max-width: 760px) {
-  .store-site .public-masthead {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 14px 12px;
-    width: 100%;
-  }
-  .store-site .public-brand {
-    grid-column: 1 / -1;
-    grid-row: 1;
-  }
-  .store-site .public-join,
-  .store-site .public-discord {
-    justify-self: start;
-    margin: 0;
-  }
-  .store-site .public-address.large strong,
-  .store-site .public-discord strong {
-    font-size: 13px;
-  }
   .store-shell {
     grid-template-columns: 1fr;
     gap: 22px;
@@ -1235,32 +1160,8 @@
     width: 115px;
     padding-left: 12px;
   }
-  .store-topbar {
-    padding: 16px 20px 20px;
-    gap: 18px 8px;
-  }
-  .store-topbar .store-home-link,
-  .store-account-actions button {
-    padding: 8px 10px;
-    font-size: 12px;
-  }
-  .store-account-actions {
-    gap: 6px;
-  }
 }
 @media (max-width: 450px) {
-  .store-site .public-status-icon {
-    width: 28px;
-    height: 28px;
-  }
-  .store-site .public-discord,
-  .store-site .public-address button {
-    gap: 8px;
-  }
-  .store-site .public-address.large strong,
-  .store-site .public-discord strong {
-    font-size: 11px;
-  }
   .store-shell {
     padding: 0 16px;
   }
@@ -1297,17 +1198,6 @@
   }
   .store-drawer-inner {
     padding: 24px;
-  }
-  .store-topbar {
-    padding: 14px 16px 20px;
-  }
-  .store-topbar .store-home-link {
-    font-size: 0;
-    gap: 0;
-  }
-  .store-home-link > .public-icon {
-    width: 18px;
-    height: 18px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

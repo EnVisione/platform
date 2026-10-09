@@ -259,6 +259,45 @@ test("wallet routes reject missing CSRF, foreign origins, and missing Minecraft 
   const stranger = await fetch(`${origin}/store/api/wallet`);
   assert.equal((await stranger.json()).cards.length, 0);
   assert.equal(lookups, 1);
+  const linking = await fetch(`${origin}/store/api/wallet/connect`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: origin,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf,
+    },
+    body: JSON.stringify({ username: "PlayerOne" }),
+  });
+  assert.equal(linking.status, 200);
+  const challenge = new URL((await linking.json()).url).searchParams.get(
+    "challenge",
+  );
+  const handoff = new URL(wallet.handoff(challenge, alice));
+  const completed = await fetch(
+    `${origin}${handoff.pathname}${handoff.search}`,
+    {
+      headers: { Cookie: cookie },
+      redirect: "manual",
+    },
+  );
+  assert.equal(completed.status, 302);
+  assert.equal(completed.headers.get("location"), `${origin}/store/gift-cards`);
+  const linkedCookie = completed.headers.get("set-cookie").split(";")[0];
+  const linked = await fetch(`${origin}/store/api/wallet`, {
+    headers: { Cookie: linkedCookie },
+  });
+  const linkedData = await linked.json();
+  assert.equal(linkedData.identity.id, alice.id);
+  assert.equal(linkedData.cards.length, 1);
+  const rejected = await fetch(`${origin}/store/auth/consume?handoff=expired`, {
+    headers: { Cookie: linkedCookie },
+    redirect: "manual",
+  });
+  assert.equal(
+    rejected.headers.get("location"),
+    `${origin}/store/gift-cards?giftCardError=discord_link_failed`,
+  );
 });
 
 test("checkout applies only the server selected card to the Tebex basket", async () => {
