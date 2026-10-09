@@ -1064,7 +1064,7 @@ app.get("/auth/discord/callback", async (req, res) => {
       );
     } catch {
       return res.redirect(
-        `${challenge.origin}/store/gift-cards?giftCardError=discord_cancelled`,
+        `${challenge.origin}/store?giftCardError=discord_cancelled#store-gift-cards`,
       );
     }
   }

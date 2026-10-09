@@ -6,7 +6,7 @@
 }
 .storefront {
   color: #bdbdbd;
-  padding: 32px 0 24px;
+  padding: 72px 0 24px;
 }
 .store-site .public-footer {
   flex-wrap: wrap;
@@ -80,18 +80,30 @@
 }
 .store-cart-button {
   display: inline-flex;
+  flex-direction: column;
   flex-shrink: 0;
-  gap: 8px;
+  justify-content: center;
+  gap: 12px;
   align-items: center;
-  min-height: 44px;
-  padding: 10px 14px;
+  width: 132px;
+  height: 132px;
+  padding: 16px;
   background: #202020;
   color: #d6d6d6;
   border-radius: 4px;
   font-size: 13px;
   white-space: nowrap;
 }
-.store-cart-button > span {
+.store-cart-button > .public-icon {
+  width: 30px;
+  height: 30px;
+}
+.store-cart-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.store-cart-count {
   background: var(--red);
   color: #fff;
   border-radius: 3px;
@@ -250,13 +262,6 @@
 }
 .store-sidebar-help .public-address-hint {
   font-size: 10px;
-}
-.storefront .store-gift-card h1 {
-  font:
-    600 28px/1.4 Arial,
-    sans-serif;
-  color: var(--gold);
-  margin: 0 0 12px;
 }
 .store-main {
   min-width: 0;
@@ -775,6 +780,9 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px 8px;
 }
+.store-sidebar .store-gift-input {
+  flex-direction: column;
+}
 .store-gift-card p {
   margin: 0;
 }
@@ -865,6 +873,9 @@
   }
   .store-recent-panel {
     order: 4;
+  }
+  .store-gift-card {
+    order: 5;
   }
   .store-main > :not(.store-main-top) {
     order: 2;
@@ -1102,6 +1113,9 @@
   }
 }
 @media (max-width: 1100px) {
+  .storefront .store-supporters-header {
+    flex-wrap: wrap;
+  }
   .store-shell {
     grid-template-columns: 220px minmax(0, 1fr);
   }
@@ -1114,6 +1128,17 @@
   }
 }
 @media (max-width: 760px) {
+  .storefront {
+    padding-top: 40px;
+  }
+  .store-cart-button {
+    width: 96px;
+    height: 96px;
+  }
+  .store-cart-button > .public-icon {
+    width: 26px;
+    height: 26px;
+  }
   .store-shell {
     grid-template-columns: 1fr;
     gap: 22px;
@@ -1129,7 +1154,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 8px;
   }
-  .user-nav > :first-child {
+  .user-nav > :first-child,
+  .user-nav > a:last-child {
     grid-column: 1 / -1;
   }
   .user-nav button,

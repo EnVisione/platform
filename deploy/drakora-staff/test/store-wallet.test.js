@@ -282,7 +282,10 @@ test("wallet routes reject missing CSRF, foreign origins, and missing Minecraft 
     },
   );
   assert.equal(completed.status, 302);
-  assert.equal(completed.headers.get("location"), `${origin}/store/gift-cards`);
+  assert.equal(
+    completed.headers.get("location"),
+    `${origin}/store#store-gift-cards`,
+  );
   const linkedCookie = completed.headers.get("set-cookie").split(";")[0];
   const linked = await fetch(`${origin}/store/api/wallet`, {
     headers: { Cookie: linkedCookie },
@@ -296,7 +299,7 @@ test("wallet routes reject missing CSRF, foreign origins, and missing Minecraft 
   });
   assert.equal(
     rejected.headers.get("location"),
-    `${origin}/store/gift-cards?giftCardError=discord_link_failed`,
+    `${origin}/store?giftCardError=discord_link_failed#store-gift-cards`,
   );
 });
 
