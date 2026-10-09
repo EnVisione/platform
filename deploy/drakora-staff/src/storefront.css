@@ -221,17 +221,14 @@
   color: var(--gold);
   background: #29221b;
 }
-.user-nav a.store-category-home,
-.user-nav a.store-category-home:hover,
-.user-nav a.store-category-home:focus-visible {
-  background: transparent;
-}
 .user-nav a.store-back-home {
-  background: var(--red);
-  color: #fff;
+  background: transparent;
+  color: var(--heading-red);
 }
-.user-nav a.store-back-home:hover {
-  background: #bf4a3b;
+.user-nav a.store-back-home:hover,
+.user-nav a.store-back-home:focus-visible {
+  background: transparent;
+  color: #ed8e83;
 }
 .store-nav-label {
   padding: 16px 12px 6px;
