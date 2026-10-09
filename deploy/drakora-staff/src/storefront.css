@@ -33,6 +33,11 @@
   width: calc((100% - 24px) / 2);
   height: auto;
 }
+.store-welcome .store-affiliation-note {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.7;
+}
 .store-site .public-footer .store-affiliation-note {
   flex-basis: 100%;
   margin: 0;
@@ -330,6 +335,21 @@
   border-radius: 4px;
   flex-shrink: 0;
 }
+.store-command-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+.store-command-scope select {
+  padding: 8px;
+  background: #222;
+  color: #d6d6d6;
+  border-radius: 3px;
+  max-width: 100%;
+}
 .store-billing button {
   padding: 9px 12px;
   background: transparent;
@@ -572,7 +592,7 @@
   font:
     600 24px/1.4 Arial,
     sans-serif;
-  margin: 0 0 12px;
+  margin: 24px 0 12px;
 }
 .store-welcome p {
   font-size: 13px;

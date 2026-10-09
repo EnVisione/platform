@@ -73,6 +73,39 @@ export const storeBilling = [
   },
 ];
 
+export function storePageFor(pathname, search = "", storefrontHost = false) {
+  const path = pathname.replace(/\/$/, "") || "/";
+  const storePath =
+    path === "/store" ? "/" : path.startsWith("/store/") ? path.slice(6) : path;
+  if (storePath === "/")
+    return path === "/store" || storefrontHost ? "home" : null;
+  if (storePath === "/network-ranks") return "network";
+  if (storePath === "/server-ranks") return "server";
+  if (storePath === "/commands") return "commands";
+  if (storePath === "/gift-cards") return "gift-cards";
+  if (storePath === "/thank-you" && path.startsWith("/store/"))
+    return "thank-you";
+  if (storePath === "/compare") {
+    const scope = new URLSearchParams(search).get("scope");
+    return scope === "server" ||
+      storeScopes.some(({ id }) => id !== "network" && id === scope)
+      ? "server"
+      : "network";
+  }
+  return null;
+}
+
+export function storePageHref(page, storefrontHost = false) {
+  const path = {
+    home: "",
+    network: "/network-ranks",
+    server: "/server-ranks",
+    commands: "/commands",
+  }[page];
+  if (typeof path !== "string") return null;
+  return `${storefrontHost ? "" : "/store"}${path}` || "/";
+}
+
 export function validStoreSelection(selection) {
   return Boolean(
     selection &&

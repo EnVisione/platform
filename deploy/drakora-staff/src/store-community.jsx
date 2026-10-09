@@ -23,6 +23,17 @@ function SupporterFace({ player }) {
   );
 }
 
+export function StoreAffiliation() {
+  return (
+    <p className="store-affiliation-note">
+      <em>
+        Drakora is not affiliated with or endorsed by Minecraft, Mojang, or
+        Microsoft.
+      </em>
+    </p>
+  );
+}
+
 export function StoreWelcome() {
   return (
     <section className="store-welcome" aria-labelledby="store-welcome-title">
@@ -32,14 +43,24 @@ export function StoreWelcome() {
           id="store-welcome-title"
           className="store-welcome-brand"
           aria-label="Drakora Store"
+          tabIndex={-1}
         >
           <img src={logo} alt="" width="80" height="80" />
           <span>
             DRAKORA<small>NETWORK STORE</small>
           </span>
         </h1>
-        <p>Thank you for supporting our modded Minecraft community.</p>
+        <p>
+          A home for modded Minecraft adventures, from Prominence II to Restless
+          Horizons. Thank you for helping our community grow.
+        </p>
       </header>
+      <h2>Support the way you play.</h2>
+      <p>
+        Explore network ranks for both modpacks, server-specific ranks for your
+        favorite modpack, or individual commands. Choose monthly or lifetime
+        options in the item details and make your next adventure your own.
+      </p>
       <h2 id="store-support-title">
         No pay-to-win. Every contribution gives back.
       </h2>
@@ -49,6 +70,7 @@ export function StoreWelcome() {
         gameplay and less lag. Supporting Drakora never buys an unfair
         advantage.
       </p>
+      <StoreAffiliation />
       <div
         className="store-payment-logos"
         role="group"

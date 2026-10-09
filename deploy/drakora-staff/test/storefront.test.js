@@ -7,6 +7,8 @@ import {
   storeRanksForScope,
   validStoreSelection,
   storeProductKey,
+  storePageFor,
+  storePageHref,
 } from "../shared/storefront.js";
 import {
   validateStorefront,
@@ -44,6 +46,33 @@ const reply = (data) =>
   new Response(JSON.stringify({ data }), {
     headers: { "Content-Type": "application/json" },
   });
+
+test("store page links resolve on both hosts and legacy comparisons retain coverage", () => {
+  for (const separateHost of [false, true]) {
+    for (const page of ["home", "network", "server", "commands"]) {
+      const href = storePageHref(page, separateHost);
+      assert.equal(storePageFor(href, "", separateHost), page);
+      assert.equal(storePageFor(`${href}/`, "", separateHost), page);
+    }
+  }
+  assert.equal(storePageHref("network", true), "/network-ranks");
+  assert.equal(storePageHref("server", false), "/store/server-ranks");
+  assert.equal(storePageFor("/", "", false), null);
+  assert.equal(storePageFor("/store/compare", "?scope=network"), "network");
+  for (const scope of ["server", "prom2", "restless-horizons"])
+    assert.equal(storePageFor("/compare", `?scope=${scope}`), "server");
+  assert.equal(storePageFor("/compare", "?scope=unknown"), "network");
+  assert.equal(storePageFor("/store/thank-you"), "thank-you");
+  assert.equal(storePageFor("/gift-cards"), "gift-cards");
+  for (const path of [
+    "/staff",
+    "/rules",
+    "/store/api/catalog",
+    "/network-ranks/extra",
+  ])
+    assert.equal(storePageFor(path, "", true), null);
+  assert.equal(storePageHref("unknown"), null);
+});
 
 test("coming-soon catalog separates four network tiers and four modpack tiers without creating baskets", async () => {
   const catalog = emptyStoreCatalog();

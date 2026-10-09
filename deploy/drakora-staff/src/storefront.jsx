@@ -15,6 +15,7 @@ import {
   storeRanks,
   storeScopes,
   storeBilling,
+  storePageHref,
   storeProductKey,
   validStoreSelection,
 } from "../shared/storefront.js";
@@ -201,7 +202,7 @@ function RankComparison({ category, viewRank }) {
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
       <header className="store-comparison-heading">
-        <h1 id="store-compare-title">
+        <h1 id="store-compare-title" tabIndex={-1}>
           Compare {network ? "network" : "server"} ranks
         </h1>
         <p>
@@ -264,37 +265,27 @@ export function Storefront({
   discordInvite,
   discordCount,
   join,
-  comparePage = false,
-  commandsPage = false,
-  giftCardsPage = false,
+  page = "home",
+  locationKey,
+  onNavigate,
   storefrontHost = false,
 }) {
-  const [category, setCategory] = useState(() => {
-    const requested = new URLSearchParams(location.search).get("scope");
-    return comparePage &&
-      (requested === "server" ||
-        serverScopes.some(({ id }) => id === requested))
-      ? "server"
-      : comparePage || commandsPage
-        ? "network"
-        : "home";
-  });
-  const storeHome = storefrontHost ? "/" : "/store";
-  const commandsHref = storefrontHost ? "/commands" : "/store/commands";
-  const scope = category === "home" ? "network" : category;
-  const homePage =
-    !comparePage && !commandsPage && !giftCardsPage && category === "home";
-  const showComparison =
-    !commandsPage && !giftCardsPage && (comparePage || category !== "home");
+  const [scope, setScope] = useState("network");
+  const storeHome = storePageHref("home", storefrontHost);
+  const homePage = page === "home" || page === "thank-you";
+  const commandsPage = page === "commands";
+  const showComparison = page === "network" || page === "server";
   useEffect(() => {
-    if (giftCardsPage) {
-      location.replace(`${storeHome}${location.search}#store-gift-cards`);
+    if (page === "gift-cards") {
+      onNavigate(`${storeHome}${location.search}#store-gift-cards`, {
+        replace: true,
+      });
     } else if (location.hash === "#store-gift-cards") {
       document
         .getElementById("store-gift-cards")
         ?.scrollIntoView({ block: "start" });
     }
-  }, [giftCardsPage, storeHome]);
+  }, [page, storeHome, locationKey, onNavigate]);
   const [billing, setBilling] = useState("monthly");
   const [catalog, setCatalog] = useState(initialCatalog);
   const [loading, setLoading] = useState(true);
@@ -312,6 +303,16 @@ export function Storefront({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [checkoutUrl, setCheckoutUrl] = useState("");
+  const previousPage = useRef(page);
+  useEffect(() => {
+    if (previousPage.current !== page) {
+      setDrawer(null);
+      setError("");
+      setCheckoutUrl("");
+      document.querySelector(".store-main h1")?.focus({ preventScroll: true });
+    }
+    previousPage.current = page;
+  }, [page]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -398,10 +399,22 @@ export function Storefront({
     setError("");
     setCheckoutUrl("");
   }
-  function selectCategory(value) {
-    setCategory(value);
+  function selectScope(value) {
+    setScope(value);
     setError("");
     setCheckoutUrl("");
+  }
+  function navigate(event, href) {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    onNavigate(href);
   }
   function viewRank(rank) {
     viewProduct({ rank });
@@ -502,45 +515,35 @@ export function Storefront({
             </div>
           </div>
           <nav className="user-nav" aria-label="Store categories">
-            {comparePage || commandsPage || giftCardsPage ? (
-              <a href={storeHome}>
-                <PublicIcon name="home" /> Store home
-              </a>
-            ) : (
-              <button
-                type="button"
-                className={category === "home" ? "active" : ""}
-                aria-current={category === "home" ? "page" : undefined}
-                onClick={() => selectCategory("home")}
-              >
-                <PublicIcon name="home" /> Store home
-              </button>
-            )}
-            <span className="store-nav-label">
-              {commandsPage ? "COMMAND COVERAGE" : "RANKS"}
-            </span>
-            {(commandsPage ? storeScopes : rankCategories).map((item) => (
-              <button
+            <a
+              href={storeHome}
+              className={homePage ? "active" : ""}
+              aria-current={homePage ? "page" : undefined}
+              onClick={(event) => navigate(event, storeHome)}
+            >
+              <PublicIcon name="home" /> Store home
+            </a>
+            <span className="store-nav-label">RANKS</span>
+            {rankCategories.map((item) => (
+              <a
                 key={item.id}
-                type="button"
-                className={category === item.id ? "active" : ""}
-                aria-current={
-                  !comparePage && !commandsPage && category === item.id
-                    ? "page"
-                    : undefined
+                href={storePageHref(item.id, storefrontHost)}
+                className={page === item.id ? "active" : ""}
+                aria-current={page === item.id ? "page" : undefined}
+                onClick={(event) =>
+                  navigate(event, storePageHref(item.id, storefrontHost))
                 }
-                aria-pressed={
-                  comparePage || commandsPage ? category === item.id : undefined
-                }
-                onClick={() => selectCategory(item.id)}
               >
                 <PublicIcon name="servers" /> {item.name}
-              </button>
+              </a>
             ))}
             <a
-              href={commandsHref}
+              href={storePageHref("commands", storefrontHost)}
               className={commandsPage ? "active" : ""}
               aria-current={commandsPage ? "page" : undefined}
+              onClick={(event) =>
+                navigate(event, storePageHref("commands", storefrontHost))
+              }
             >
               <PublicIcon name="play" /> Commands
             </a>
@@ -570,7 +573,9 @@ export function Storefront({
         </aside>
         <div className="store-main">
           <div className="store-main-top">
-            {homePage && <TopCustomers community={community} compact />}
+            {drawer !== "cart" && (
+              <TopCustomers community={community} compact />
+            )}
             <button
               className="store-cart-button"
               type="button"
@@ -584,7 +589,7 @@ export function Storefront({
             </button>
           </div>
           {homePage && <StoreWelcome />}
-          {location.pathname.endsWith("/thank-you") && (
+          {page === "thank-you" && (
             <p className="store-notice" role="status">
               You’ve returned from checkout. Check your Tebex receipt for
               payment confirmation and delivery information.
@@ -603,7 +608,7 @@ export function Storefront({
             </div>
           )}
           {showComparison ? (
-            <RankComparison category={category} viewRank={viewRank} />
+            <RankComparison category={page} viewRank={viewRank} />
           ) : commandsPage ? (
             <section
               className="store-catalog"
@@ -611,7 +616,22 @@ export function Storefront({
             >
               <header className="store-category-header">
                 <div>
-                  <h1 id="store-category-title">Individual commands</h1>
+                  <h1 id="store-category-title" tabIndex={-1}>
+                    Individual commands
+                  </h1>
+                  <label className="store-command-scope">
+                    Coverage
+                    <select
+                      value={scope}
+                      onChange={(event) => selectScope(event.target.value)}
+                    >
+                      {storeScopes.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div
                   className="store-billing"

@@ -406,6 +406,10 @@ app.use((req, res, next) => {
         (req.headers.host === applicationHost &&
           (req.path.startsWith("/store") ||
             [
+              "/network-ranks",
+              "/network-ranks/",
+              "/server-ranks",
+              "/server-ranks/",
               "/compare",
               "/compare/",
               "/commands",

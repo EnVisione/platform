@@ -1,5 +1,5 @@
 import { LegalNotice } from "./legal-notice.jsx";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ruleSections,
@@ -18,7 +18,12 @@ import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
 import { StaffDirectory } from "./staff-directory.jsx";
 import { Storefront } from "./storefront.jsx";
-import { TopCustomers, useStoreCommunity } from "./store-community.jsx";
+import {
+  TopCustomers,
+  StoreAffiliation,
+  useStoreCommunity,
+} from "./store-community.jsx";
+import { storePageFor } from "../shared/storefront.js";
 
 const artwork = {
   castle,
@@ -450,13 +455,31 @@ function PublicSite() {
   const [content, setContent] = useState(null),
     [error, setError] = useState(false),
     [status, setStatus] = useState(null);
+  const [route, setRoute] = useState(() => location.href);
+  const currentLocation = new URL(route);
   const storefrontHost = content?.storefrontOrigin === location.origin;
-  const pathname = location.pathname.replace(/\/$/, "") || "/";
-  const path = ["/compare", "/commands", "/gift-cards"].includes(pathname)
-    ? `/store${pathname}`
-    : storefrontHost && pathname === "/"
-      ? "/store"
-      : pathname;
+  const path = currentLocation.pathname.replace(/\/$/, "") || "/";
+  const storeView = storePageFor(path, currentLocation.search, storefrontHost);
+  const navigateStore = useCallback(
+    (href, { replace = false } = {}) => {
+      const next = new URL(href, location.origin);
+      if (
+        next.origin !== location.origin ||
+        !storePageFor(next.pathname, next.search, storefrontHost)
+      )
+        return;
+      if (next.href !== location.href)
+        history[replace ? "replaceState" : "pushState"](null, "", next.href);
+      setRoute(location.href);
+      window.scrollTo({ top: 0 });
+    },
+    [storefrontHost],
+  );
+  useEffect(() => {
+    const receive = () => setRoute(location.href);
+    window.addEventListener("popstate", receive);
+    return () => window.removeEventListener("popstate", receive);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     fetch("/site/api/content", { signal: controller.signal })
@@ -505,42 +528,35 @@ function PublicSite() {
     ruleSections.find((section) => path === `/rules/${section.id}`) ??
     (path === "/rules" ? ruleSections[0] : null);
   const staffPage = path === "/staff";
-  const home = path === "/",
+  const home = path === "/" && !storefrontHost,
     serversPage = path === "/servers",
     partnershipPage = path === "/partners",
     applyPage = path === "/apply",
     helpPage = path === "/help",
-    comparePage = path === "/store/compare",
-    commandsPage = path === "/store/commands",
-    giftCardsPage = path === "/store/gift-cards",
-    storePage =
-      path === "/store" ||
-      path === "/store/thank-you" ||
-      comparePage ||
-      commandsPage ||
-      giftCardsPage;
-  const title = giftCardsPage
-    ? "Gift cards"
-    : commandsPage
-      ? "Commands"
-      : comparePage
-        ? "Compare ranks"
-        : storePage
-          ? "Store"
-          : home
-            ? "Home"
-            : staffPage
-              ? "Staff"
-              : partnershipPage
-                ? "Partnerships"
-                : serversPage
-                  ? "Servers"
-                  : applyPage
-                    ? "Apply"
-                    : helpPage
-                      ? "Need help?"
-                      : (server?.name ??
-                        (rulesPage ? "Rules" : "Page not found"));
+    storePage = Boolean(storeView);
+  const title =
+    storeView === "gift-cards"
+      ? "Gift cards"
+      : storeView === "commands"
+        ? "Commands"
+        : storeView === "network" || storeView === "server"
+          ? `Compare ${storeView} ranks`
+          : storePage
+            ? "Store"
+            : home
+              ? "Home"
+              : staffPage
+                ? "Staff"
+                : partnershipPage
+                  ? "Partnerships"
+                  : serversPage
+                    ? "Servers"
+                    : applyPage
+                      ? "Apply"
+                      : helpPage
+                        ? "Need help?"
+                        : (server?.name ??
+                          (rulesPage ? "Rules" : "Page not found"));
   useEffect(() => {
     document.title = `${title} · Drakora Network`;
   }, [title]);
@@ -611,9 +627,9 @@ function PublicSite() {
           </p>
         ) : storePage ? (
           <Storefront
-            comparePage={comparePage}
-            commandsPage={commandsPage}
-            giftCardsPage={giftCardsPage}
+            page={storeView}
+            locationKey={route}
+            onNavigate={navigateStore}
             storefrontHost={storefrontHost}
             discordInvite={content.discordInvite}
             discordCount={status?.discord.total}
@@ -788,13 +804,8 @@ function PublicSite() {
         )}
       </main>
       <footer className="public-footer">
-        {storePage && (
-          <p className="store-affiliation-note">
-            <em>
-              Drakora is not affiliated with or endorsed by Minecraft, Mojang,
-              or Microsoft.
-            </em>
-          </p>
+        {storePage && !["home", "thank-you"].includes(storeView) && (
+          <StoreAffiliation />
         )}
         <div>
           <strong>Drakora Network</strong>
