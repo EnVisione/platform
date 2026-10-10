@@ -686,6 +686,9 @@
   border-radius: 0 0 6px 6px;
   background: #202020;
 }
+.store-comparison-actions .store-comparison-spacer {
+  background: #101010;
+}
 .store-about-ranks {
   padding: 24px;
   margin-top: 24px;

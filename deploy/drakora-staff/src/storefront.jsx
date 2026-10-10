@@ -430,11 +430,11 @@ function RankComparison({
             ? "Cover Prominence II and Restless Horizons with one network rank."
             : `Compare perks for ${serverName}. Ranks apply only to this server.`}
         </p>
-        {!network && mobile && serverSwitch()}
         <p className="store-perks-preview-note">
           <strong>Preview perks.</strong> The features and prefix styles below
           are examples, not final benefits. Purchases are coming soon.
         </p>
+        {!network && mobile && serverSwitch()}
       </header>
       {mobile && (
         <>
