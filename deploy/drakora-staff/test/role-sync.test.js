@@ -6,6 +6,54 @@ import { openStore } from "../server/store.js";
 import { validateConfig } from "../server/config.js";
 import { config as fixture } from "./fixture.js";
 
+test("intent listeners preserve explicit game origin and stop after unsubscribing", async (t) => {
+  const s = setup(t, [snapshot("1", ["20"]), snapshot("2", ["120"])]);
+  const intents = [];
+  const unsubscribe = s.sync.onIntent((value) => intents.push(value));
+  await s.sync.initialize();
+  const initial = intents.length;
+  await s.sync.setDesired("42", ["22"], "minecraft:verified-player");
+  assert.equal(intents.length, initial + 1);
+  assert.equal(intents.at(-1).origin, "minecraft:verified-player");
+  assert.deepEqual(intents.at(-1).roles, ["22"]);
+  assert.deepEqual(s.roles("1"), ["22"]);
+  assert.deepEqual(s.roles("2"), ["122"]);
+  unsubscribe();
+  await s.sync.assign("42", ["23"]);
+  assert.equal(intents.length, initial + 1);
+});
+test(
+  "adding another role cannot restore Admin during an in flight game revocation",
+  { timeout: 2000 },
+  async (t) => {
+    let release, entered;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise((resolve) => {
+      entered = resolve;
+    });
+    t.after(() => release());
+    const s = setup(t, [snapshot("1", ["22"]), snapshot("2", ["122"])]);
+    await s.sync.initialize();
+    const change = s.transport.change;
+    s.transport.change = async (guild, id, role, add) => {
+      if (guild === "1" && role === "22" && !add) {
+        entered();
+        await held;
+      }
+      return change(guild, id, role, add);
+    };
+    const revoking = s.sync.setDesired("42", [], "minecraft:verified-player");
+    await started;
+    const adding = s.update(snapshot("1", ["22", "23"]));
+    release();
+    await Promise.all([revoking, adding]);
+    assert.deepEqual(s.roles("1"), ["23"]);
+    assert.deepEqual(s.roles("2"), ["123"]);
+  },
+);
+
 const config = {
   ...fixture,
   roleSync: {

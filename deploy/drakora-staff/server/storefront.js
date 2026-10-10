@@ -344,7 +344,11 @@ export function storefrontRouter(service, origins, wallet, options = {}) {
           throw failure("minecraft_login_required", 401);
         req.session.storeMinecraft = req.body.username;
         await saveSession(req);
-        const challenge = wallet.challenge(req.sessionID, origin);
+        const challenge = wallet.challenge(
+          req.sessionID,
+          origin,
+          req.body?.returnTo,
+        );
         res.json({
           url: `${options.staffOrigin}/auth/discord?purpose=store&challenge=${challenge}`,
         });
@@ -368,7 +372,9 @@ export function storefrontRouter(service, origins, wallet, options = {}) {
           storeCsrf: randomBytes(32).toString("base64url"),
         });
         await saveSession(req);
-        res.redirect(`${origin}/store#store-gift-cards`);
+        res.redirect(
+          `${origin}${identity.returnTo ?? "/store#store-gift-cards"}`,
+        );
       } catch {
         res.redirect(
           `${origin}/store?giftCardError=discord_link_failed#store-gift-cards`,

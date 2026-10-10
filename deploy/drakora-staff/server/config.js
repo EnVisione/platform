@@ -1,9 +1,11 @@
 import { validMailAddress } from "./mail-address.js";
 import { isIP } from "node:net";
 import { validateStorefront } from "./storefront.js";
+import { validateMinecraftBridge } from "./minecraft-bridge-config.js";
 
 export function validateConfig(config) {
   validateStorefront(config);
+  validateMinecraftBridge(config);
   if (config.privacy !== undefined) {
     const privacy = config.privacy;
     if (

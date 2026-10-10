@@ -63,7 +63,7 @@ function SyncStatus({ member }) {
             " · Waiting for the bot's role hierarchy or a retry"}
         </p>
       )}
-      <p>Minecraft: Not connected</p>
+      <p>Minecraft: {member.minecraft ?? "Not configured"}</p>
     </div>
   );
 }

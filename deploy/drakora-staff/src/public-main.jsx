@@ -18,6 +18,7 @@ import { PartnershipForm } from "./partnerships.jsx";
 import { AmbientFire, BannerTorches, FireScenery } from "./public-fire.jsx";
 import { StaffDirectory } from "./staff-directory.jsx";
 import { Storefront } from "./storefront.jsx";
+import { MinecraftLink } from "./minecraft-link.jsx";
 import {
   TopCustomers,
   StoreAffiliation,
@@ -853,5 +854,11 @@ function PublicSite() {
   );
 }
 createRoot(document.getElementById("root")).render(
-  location.pathname.startsWith("/help/") ? <PublicTickets /> : <PublicSite />,
+  location.pathname === "/minecraft/link" ? (
+    <MinecraftLink />
+  ) : location.pathname.startsWith("/help/") ? (
+    <PublicTickets />
+  ) : (
+    <PublicSite />
+  ),
 );

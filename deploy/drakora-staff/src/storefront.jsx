@@ -1177,6 +1177,10 @@ export function Storefront({
                   {username ? "Change" : "Login"}
                 </button>
               </div>
+              <p className="store-notice">
+                Run <strong>/link</strong> in Minecraft to connect Discord and
+                keep your cosmetic ranks in sync.
+              </p>
               {cartItem.requiresRank && (
                 <p>
                   Requires{" "}

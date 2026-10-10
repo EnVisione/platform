@@ -14,6 +14,23 @@ import { discordClient } from "../server/discord.js";
 const alice = { id: "111111111111111111", name: "Alice" };
 const bob = { id: "222222222222222222", name: "Bob" };
 const code = "PRIVATE-CARD-ABC123";
+test("a public Discord handoff preserves only an approved fragment return without granting staff identity", (t) => {
+  const { wallet } = fixture(t);
+  const origin = "https://store.example.test",
+    returnTo = `/minecraft/link#challenge=${randomBytes(32).toString("base64url")}`;
+  assert.throws(
+    () => wallet.challenge("session", origin, "https://attacker.test"),
+    { code: "invalid_store_return" },
+  );
+  const challenge = wallet.challenge("session", origin, returnTo);
+  const handoff = new URL(wallet.handoff(challenge, alice)).searchParams.get(
+    "handoff",
+  );
+  const linked = wallet.consume(handoff, "session", origin);
+  assert.equal(linked.returnTo === returnTo, true);
+  assert.equal(Object.hasOwn(linked, "roles"), false);
+  assert.equal(Object.hasOwn(linked, "tokens"), false);
+});
 test("store linking reads only the Discord profile and persists no staff identity or tokens", async () => {
   const calls = [];
   const client = discordClient(
@@ -113,7 +130,9 @@ test("Discord linking preserves cards across sessions without allowing another a
   });
   await assert.rejects(
     wallet.register({ storeIdentity: bob }, { username: "PlayerOne", code }),
-    { code: "gift_card_already_saved" },
+    {
+      code: "gift_card_already_saved",
+    },
   );
   assert.ok(
     !readFileSync(join(scratch, "wallet.sqlite-wal")).includes(

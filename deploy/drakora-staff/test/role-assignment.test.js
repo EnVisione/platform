@@ -374,3 +374,48 @@ test("specialist changes wait for hierarchy and screening without discarding the
   await app.assignments.retry();
   assert.ok(app.roster.get("1:42").roles.includes("51"));
 });
+
+test("Minecraft delivery status requires verified staff consent and distinguishes queued jobs", async (t) => {
+  const settings = {
+    ...config,
+    minecraftBridge: { enabled: true, rankSyncEnabled: true },
+  };
+  const s = setup(t, [member("1", "42", ["10", "26"])], settings);
+  const delivery = async () =>
+    (await s.assignments.list(actor("20"), "42")).members[0].minecraft;
+  s.store.set(
+    "minecraft-link",
+    "42",
+    { name: "ClaimedName", status: "pending" },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(await delivery(), "Awaiting /stafflink verification");
+  const uuid = "12345678-1234-4234-8234-123456789012";
+  s.store.set(
+    "minecraft-discord-owner",
+    "42",
+    { uuid },
+    Number.MAX_SAFE_INTEGER,
+  );
+  s.store.set(
+    "minecraft-owner",
+    uuid,
+    { uuid, memberLinked: true, staffLinked: false },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(await delivery(), "Awaiting /stafflink verification");
+  s.store.set(
+    "minecraft-owner",
+    uuid,
+    { uuid, memberLinked: true, staffLinked: true },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(await delivery(), "Verified. Automatic synchronization enabled");
+  s.store.set(
+    "minecraft-rank-job",
+    `${uuid}:staff`,
+    { status: "pending" },
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(await delivery(), "Verified. Synchronization pending");
+});

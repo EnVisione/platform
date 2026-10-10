@@ -16,6 +16,7 @@ import { StaffTicketStats } from "./staff-ticket-stats.jsx";
 import { WebsiteEditor } from "./website-editor.jsx";
 import { StaffReview, StaffLogs, AccountReview } from "./staff-reviews.jsx";
 import { Moderation } from "./moderation.jsx";
+import { MinecraftLink } from "./minecraft-link.jsx";
 import {
   DashboardClock,
   LocalClock,
@@ -35,6 +36,8 @@ const messages = {
   minecraft_name_locked:
     "Your Minecraft name is already linked. Request a change in Settings.",
   minecraft_name_unchanged: "Enter a different Minecraft name.",
+  minecraft_verification_required:
+    "Your UUID is verified. Run /stafflink in Minecraft again to update your username.",
   discord_cancelled:
     "Discord sign-in was cancelled. You can try again when you are ready.",
   verified_email_required:
@@ -77,6 +80,7 @@ function safeTarget(value) {
       "/tickets",
       "/logs",
       "/moderation",
+      "/minecraft/link",
     ].includes(value)
   )
     return value;
@@ -337,13 +341,18 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
       <div className="settings-heading">
         <h2 id="minecraft-settings-title">Minecraft account</h2>
         <p>
-          Your linked Minecraft name is locked until a Founder or Manager
-          approves a change.
+          {link.uuid
+            ? "Your Minecraft UUID is verified. If you change your username, run /stafflink again to update it."
+            : "Your linked Minecraft name is locked until a Founder or Manager approves a change."}
         </p>
       </div>
       <div className="linked-name">
         <strong>{link.name}</strong>
-        <span>Awaiting in-game verification</span>
+        <span>
+          {link.status === "verified"
+            ? "Verified in Minecraft"
+            : "Awaiting in-game verification"}
+        </span>
       </div>
       {link.changeRequest && (
         <p className="settings-help">
@@ -351,7 +360,7 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
           Founder or Manager approval
         </p>
       )}
-      {canChange && (
+      {canChange && !link.uuid && (
         <form onSubmit={request}>
           <label htmlFor="new-minecraft-name">Request a different name</label>
           <div className="change-name-row">
@@ -581,9 +590,11 @@ function Accounts({
                   {account.minecraft?.name || "Minecraft name not linked"}
                 </strong>
                 <span>
-                  {account.minecraft
-                    ? "Awaiting in-game verification"
-                    : "Not registered yet"}
+                  {account.minecraft?.status === "verified"
+                    ? "Verified in Minecraft"
+                    : account.minecraft
+                      ? "Awaiting in-game verification"
+                      : "Not registered yet"}
                 </span>
                 {account.minecraft?.changeRequest && (
                   <div className="change-request">
@@ -1243,7 +1254,10 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")).render(
-  location.pathname === "/apply" || location.pathname.startsWith("/apply/") ? (
+  location.pathname === "/minecraft/link" ? (
+    <MinecraftLink />
+  ) : location.pathname === "/apply" ||
+    location.pathname.startsWith("/apply/") ? (
     <PublicApplication />
   ) : (
     <App />

@@ -159,12 +159,22 @@ export function storeWalletService(store, lookup, now = Date.now) {
       session.storeIdentity = linked.storeIdentity;
       delete session.storeCards;
     },
-    challenge(sessionId, origin) {
+    challenge(sessionId, origin, returnTo) {
+      if (
+        returnTo !== undefined &&
+        !/^\/minecraft\/link#challenge=[A-Za-z0-9_-]{43}$/.test(returnTo)
+      )
+        throw failure("invalid_store_return");
       const value = token();
       store.set(
         "store-challenge",
         hash(value),
-        { session: hash(sessionId), origin, until: now() + 600000 },
+        {
+          session: hash(sessionId),
+          origin,
+          until: now() + 600000,
+          ...(returnTo ? { returnTo } : {}),
+        },
         now() + 600000,
       );
       return value;
@@ -207,7 +217,10 @@ export function storeWalletService(store, lookup, now = Date.now) {
       )
         throw failure("invalid_handoff");
       store.delete("store-handoff", hash(value));
-      return pending.identity;
+      return {
+        ...pending.identity,
+        ...(pending.returnTo ? { returnTo: pending.returnTo } : {}),
+      };
     },
   };
 }

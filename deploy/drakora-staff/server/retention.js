@@ -1,4 +1,5 @@
 import { monthsAfter, inactivityMonths } from "../shared/privacy.js";
+import { eraseMinecraftStaffIdentity } from "./minecraft-bridge.js";
 
 const forever = Number.MAX_SAFE_INTEGER;
 const day = 86400000;
@@ -103,6 +104,7 @@ export function retentionService(
           )
             continue;
           store.transaction(() => {
+            eraseMinecraftStaffIdentity(store, id);
             for (const kind of [
               "user",
               "minecraft-link",

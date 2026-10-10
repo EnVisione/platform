@@ -79,6 +79,7 @@ export function staffRoleSync(config, store, transport) {
   const settings = config.roleSync;
   const guildIds = [config.guildId, settings.guildId];
   const workers = new Map();
+  const intentListeners = new Set();
   const specialistIds = new Set(
     Object.values(config.applications?.specialistRoles ?? {}),
   );
@@ -95,6 +96,15 @@ export function staffRoleSync(config, store, transport) {
       .map((role) => role.staffId);
   };
   const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const applyObservedChanges = (previous, actual, desired) => {
+    const next = new Set(desired);
+    for (const id of mappedIds)
+      if (previous.includes(id) !== actual.includes(id)) {
+        if (actual.includes(id)) next.add(id);
+        else next.delete(id);
+      }
+    return mappedIds.filter((id) => next.has(id));
+  };
   const valid = (member) =>
     !stopped &&
     member &&
@@ -102,8 +112,12 @@ export function staffRoleSync(config, store, transport) {
     guildIds.includes(member.guildId) &&
     /^\d{1,20}$/.test(member.id) &&
     Array.isArray(member.roles);
-  const save = (state) =>
+  const save = (state) => {
+    const previous = store.get(kind, state.id)?.version ?? 0;
     store.set(kind, state.id, state, Number.MAX_SAFE_INTEGER);
+    if (state.roles !== null && state.version > previous)
+      for (const listener of intentListeners) listener(structuredClone(state));
+  };
   const observation = (member, previous) => ({
     roles: canonical(member),
     joinedAt: member.joinedAt ?? previous?.joinedAt,
@@ -117,11 +131,12 @@ export function staffRoleSync(config, store, transport) {
     ];
     save(state);
   }
-  function intent(state, guildId, roles) {
+  function intent(state, guildId, roles, origin) {
     state.roles = roles;
     state.sourceGuildId = guildId;
     state.version++;
     state.delivery = {};
+    state.origin = origin ?? null;
   }
   function mark(id, guildId, version, status, member, error) {
     const state = store.get(kind, id);
@@ -263,7 +278,11 @@ export function staffRoleSync(config, store, transport) {
         ? queue(member.id)
         : Promise.resolve();
     }
-    intent(state, member.guildId, roles);
+    const desired =
+      previous && Array.isArray(state.roles)
+        ? applyObservedChanges(previous, roles, state.roles)
+        : roles;
+    intent(state, member.guildId, desired);
     save(state);
     return queue(member.id);
   }
@@ -385,7 +404,18 @@ export function staffRoleSync(config, store, transport) {
             state.version++;
           }
         }
-        const desired = source ? observedRoles(source) : state.roles;
+        let desired = source ? observedRoles(source) : state.roles;
+        const previous = source && state.observed[source.guildId];
+        if (
+          source &&
+          previous?.joinedAt === source.joinedAt &&
+          Array.isArray(state.roles)
+        )
+          desired = applyObservedChanges(
+            knownRoles(previous.roles),
+            observedRoles(source),
+            knownRoles(state.roles),
+          );
         if (desired !== null) {
           const roles = new Set(desired);
           for (const member of members)
@@ -414,7 +444,14 @@ export function staffRoleSync(config, store, transport) {
     initialize,
     update,
     join,
-    async assign(id, roles) {
+    onIntent(listener) {
+      intentListeners.add(listener);
+      return () => intentListeners.delete(listener);
+    },
+    async setDesired(id, roles, origin) {
+      return this.assign(id, roles, origin);
+    },
+    async assign(id, roles, origin) {
       if (
         stopped ||
         !/^\d{1,20}$/.test(id) ||
@@ -431,6 +468,7 @@ export function staffRoleSync(config, store, transport) {
         settings.roles
           .filter((role) => roles.includes(role.staffId))
           .map((role) => role.staffId),
+        origin,
       );
       save(state);
       await queue(id);

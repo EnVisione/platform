@@ -36,6 +36,7 @@ export function minecraftRegistry(store) {
   function requestChange(id, value) {
     const link = get(id);
     if (!link) throw new AuthError("minecraft_name_required", 428);
+    if (link.uuid) throw new AuthError("minecraft_verification_required", 409);
     const name = nameFrom(value);
     if (name.toLowerCase() === link.name.toLowerCase())
       throw new AuthError("minecraft_name_unchanged", 400);
@@ -50,6 +51,8 @@ export function minecraftRegistry(store) {
     if (!link?.changeRequest)
       throw new AuthError("minecraft_change_not_found", 404);
     if (approve) {
+      if (link.uuid)
+        throw new AuthError("minecraft_verification_required", 409);
       available(link.changeRequest.name, id);
       link.name = link.changeRequest.name;
       link.status = "pending";
@@ -65,6 +68,22 @@ export function minecraftRegistry(store) {
     register,
     requestChange,
     decide,
+    verify(id, player) {
+      const current = get(id);
+      if (current?.uuid && current.uuid !== player.uuid)
+        throw new AuthError("minecraft_ownership_conflict", 409);
+      const name = nameFrom(player.name);
+      const link = {
+        ...current,
+        name,
+        uuid: player.uuid,
+        status: "verified",
+        verifiedAt: Date.now(),
+      };
+      delete link.changeRequest;
+      store.set("minecraft-link", id, link, expires);
+      return link;
+    },
     entries: () => store.entries("minecraft-link"),
   };
 }

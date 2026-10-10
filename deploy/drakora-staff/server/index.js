@@ -69,6 +69,13 @@ import { retentionService, privacyActivity } from "./retention.js";
 import { legalRouter } from "./legal.js";
 import { storefrontService, storefrontRouter } from "./storefront.js";
 import { storeWalletService } from "./store-wallet.js";
+import {
+  minecraftLinkService,
+  proxyAuthenticator,
+} from "./minecraft-bridge.js";
+import { minecraftRankBridge } from "./minecraft-bridge-ranks.js";
+import { minecraftRoleTransport } from "./minecraft-bridge-discord.js";
+import { minecraftBridgeRouter } from "./minecraft-bridge-routes.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -170,6 +177,37 @@ async function workspaceConfig() {
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
+let minecraftLinks, minecraftRanks, minecraftProxyAuth, minecraftBridgeTimer;
+let minecraftBridgeListener;
+if (config.minecraftBridge?.enabled) {
+  const transport = minecraftRoleTransport(config, office.gateway);
+  minecraftLinks = minecraftLinkService(config, store, minecraft, {
+    assertStaff: transport.assertStaff,
+    onLinked: (value, kind, first) => minecraftRanks.linked(value, kind, first),
+  });
+  minecraftRanks = minecraftRankBridge(
+    config,
+    store,
+    minecraftLinks,
+    transport,
+    office.roleSync,
+  );
+  minecraftProxyAuth = proxyAuthenticator(config.minecraftBridge, store);
+  minecraftBridgeListener = (packet) =>
+    void minecraftRanks
+      .observe(packet)
+      .catch(() => console.error("Minecraft rank observation is pending."));
+  office.gateway.on("raw", minecraftBridgeListener);
+  minecraftBridgeTimer = setInterval(
+    () =>
+      void minecraftRanks
+        .retry()
+        .catch(() =>
+          console.error("Minecraft rank synchronization is pending."),
+        ),
+    60000,
+  ).unref();
+}
 const honeypot = config.honeypot
   ? discordHoneypot(config, store, office.gateway, rolePolicy)
   : undefined;
@@ -369,6 +407,9 @@ app.use((req, res, next) => {
 app.use((req, res, next) =>
   [applicationHost, storefrontHost].includes(req.headers.host) &&
   (req.path.startsWith("/store/api/wallet") ||
+    (config.minecraftBridge?.enabled &&
+      (req.path === "/minecraft/link" ||
+        req.path.startsWith("/api/minecraft/link"))) ||
     req.path === "/store/api/gift-card" ||
     req.path === "/store/api/checkout" ||
     req.path === "/store/auth/consume")
@@ -429,6 +470,25 @@ app.use((req, res, next) =>
     ? legalPages(req, res, next)
     : next(),
 );
+
+if (minecraftLinks)
+  app.use(
+    minecraftBridgeRouter(
+      config,
+      minecraftLinks,
+      minecraftRanks,
+      minecraftProxyAuth,
+      {
+        signedIn,
+        dist,
+      },
+    ),
+  );
+else
+  app.post("/api/minecraft/proxy", (req, res, next) => {
+    if (req.headers.host !== staffHost) return next();
+    res.status(503).json({ ok: false, error: "minecraft_bridge_disabled" });
+  });
 
 if (website) {
   const shop = storefrontRouter(
@@ -507,6 +567,7 @@ function safeNext(value) {
       "/tickets",
       "/logs",
       "/moderation",
+      "/minecraft/link",
     ].includes(value)
   )
     return value;
@@ -1136,7 +1197,7 @@ app.get("/auth/discord/callback", async (req, res) => {
   });
   await save(req);
   res.redirect(
-    minecraft.get(user.id)
+    next === "/minecraft/link" || minecraft.get(user.id)
       ? next
       : `/minecraft?next=${encodeURIComponent(next)}`,
   );
@@ -1827,6 +1888,10 @@ partnerships?.start();
 ticketEmails?.start();
 ticketStaffNotices?.start();
 async function stop() {
+  clearInterval(minecraftBridgeTimer);
+  if (minecraftBridgeListener)
+    office.gateway.off("raw", minecraftBridgeListener);
+  await minecraftRanks?.close();
   await reviews?.close();
   await retention.close();
   clearInterval(sweep);

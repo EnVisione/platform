@@ -127,6 +127,22 @@ export function roleAssignments(config, store, policy, transport, sync) {
   function status(id) {
     const request = store.get("role-assignment", id);
     const ranks = store.get("discord-role-sync", id);
+    const identity = store.get("minecraft-discord-owner", id);
+    const owner = identity && store.get("minecraft-owner", identity.uuid);
+    let minecraft = "Not configured";
+    if (config.minecraftBridge?.enabled) {
+      if (!owner?.staffLinked) minecraft = "Awaiting /stafflink verification";
+      else if (!config.minecraftBridge.rankSyncEnabled)
+        minecraft = "Verified. Rank synchronization is disabled";
+      else {
+        const job = store.get("minecraft-rank-job", `${owner.uuid}:staff`);
+        const state = store.get("minecraft-ranks", owner.uuid);
+        minecraft =
+          state?.error || (job && job.status !== "done")
+            ? "Verified. Synchronization pending"
+            : "Verified. Automatic synchronization enabled";
+      }
+    }
     return {
       request: request
         ? {
@@ -144,7 +160,7 @@ export function roleAssignments(config, store, policy, transport, sync) {
           .filter(([, id]) => ranks?.delivery?.[id])
           .map(([name, id]) => [name, ranks.delivery[id]]),
       ),
-      minecraft: "Not connected",
+      minecraft,
     };
   }
   async function summarize(id, members) {
