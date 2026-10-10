@@ -415,6 +415,7 @@
   color: #bdbdbd;
 }
 .store-comparison-scroll {
+  position: relative;
   overflow: auto;
   max-height: 78vh;
   isolation: isolate;
@@ -553,6 +554,7 @@
   color: #f3b45d;
 }
 .store-feature-status {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
