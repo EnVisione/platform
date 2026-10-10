@@ -720,6 +720,12 @@
   padding: 12px 18px;
   background: transparent;
 }
+.store-comparison-actions
+  .store-comparison-table
+  td:not(.store-comparison-spacer) {
+  background: #161616;
+  border-radius: 0 0 6px 6px;
+}
 .store-comparison-actions .store-rank-action {
   pointer-events: auto;
 }
