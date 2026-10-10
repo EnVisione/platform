@@ -10,11 +10,8 @@ import { StoreGiftCards, useStoreWallet } from "./store-gift-cards.jsx";
 import { StorePlayer, validUsername } from "./store-player.jsx";
 import {
   emptyStoreCatalog,
-  emptyCommandCatalog,
-  storeCommands,
   storeRanks,
   storeScopes,
-  storeBilling,
   storePageHref,
   storeProductKey,
   validStoreSelection,
@@ -32,7 +29,6 @@ const errors = {
   invalid_store_selection:
     "Enter your Minecraft Java username and select a store item.",
   rank_unavailable: "This rank option is not available to purchase yet.",
-  command_unavailable: "This command option is not available to purchase yet.",
   tebex_rejected_checkout:
     "Tebex could not start checkout. Check your Minecraft username and try again.",
   gift_card_not_found:
@@ -112,36 +108,9 @@ function RankArtwork({ rank }) {
   );
 }
 
-const commandArtwork = {
-  hat: "M18 12h28v28H18zM6 40h52v10H6z",
-  nick: "M8 12h48v32H28L16 56V44H8z",
-  particles: "M28 4h8v16h16v8H36v16h-8V28H12v-8h16zM48 44h8v8h-8zM8 44h8v8H8z",
-  emote: "M12 8h40v48H12zM20 20v8h8v-8zM36 20v8h8v-8zM20 36v8h8v8h8v-8h8v-8z",
-  sit: "M12 8h10v30h30v10H22v12H12zM42 48h10v12H42z",
-};
-function ProductArtwork({ selection }) {
-  return selection.command ? (
-    <svg
-      className="store-rank-art store-command-art"
-      viewBox="0 0 64 64"
-      aria-hidden="true"
-      shapeRendering="crispEdges"
-    >
-      <path
-        fill="currentColor"
-        fillRule="evenodd"
-        d={commandArtwork[selection.command]}
-      />
-    </svg>
-  ) : (
-    <RankArtwork rank={selection.rank} />
-  );
-}
 const storeItem = (selection) =>
-  selection.command
-    ? storeCommands.find(({ id }) => id === selection.command)
-    : storeRanks.find(({ id }) => id === selection.rank);
-const initialCatalog = () => [...emptyStoreCatalog(), ...emptyCommandCatalog()];
+  storeRanks.find(({ id }) => id === selection.rank);
+const initialCatalog = emptyStoreCatalog;
 const rankCategories = [
   { id: "network", name: "Network ranks" },
   { id: "server", name: "Server-specific ranks" },
@@ -255,12 +224,12 @@ function StoreNavigation({
           </a>
         ))}
         <a
-          href={storePageHref("commands", storefrontHost)}
-          className={page === "commands" ? "active" : ""}
-          aria-current={page === "commands" ? "page" : undefined}
-          onClick={(event) => follow(event, "commands")}
+          href={storePageHref("prefixes", storefrontHost)}
+          className={page === "prefixes" ? "active" : ""}
+          aria-current={page === "prefixes" ? "page" : undefined}
+          onClick={(event) => follow(event, "prefixes")}
         >
-          <PublicIcon name="play" /> Commands
+          <PublicIcon name="play" /> Prefixes
         </a>
       </nav>
     </div>
@@ -310,7 +279,7 @@ function StoreDrawer({ title, onClose, children }) {
   );
 }
 
-function RankComparison({ category, viewRank }) {
+function RankComparison({ category, viewRank, productFor }) {
   const network = category === "network";
   const ranks = ranksForCategory(category);
   return (
@@ -325,8 +294,10 @@ function RankComparison({ category, viewRank }) {
             : "All four ranks apply to one modpack. Choose your server before adding a rank to your cart."}
         </p>
         <p>
-          Monthly and lifetime options share the same perks. Prices and perks
-          will be announced before purchases open.
+          Three permanent ranks, plus an optional monthly bonus. Upgrade by
+          paying the difference; the bonus requires{" "}
+          {network ? "ArchWyvern" : "Wyvern"}
+          {network ? "." : " on the same server."}
         </p>
       </header>
       <p id="store-compare-scroll" className="store-compare-scroll">
@@ -348,6 +319,21 @@ function RankComparison({ category, viewRank }) {
                 <th scope="col" key={rank.id}>
                   <RankArtwork rank={rank.id} />
                   <span>{rank.name}</span>
+                  <strong className="store-compare-price">
+                    {money(
+                      productFor({
+                        rank: rank.id,
+                        scope: network ? "network" : "prom2",
+                        billing: rank.billing,
+                      }),
+                    )}
+                    <small>
+                      {rank.billing === "monthly" ? " / month" : " once"}
+                    </small>
+                  </strong>
+                  <small className="store-rank-kind">
+                    {rank.requiresRank ? "Monthly bonus" : "Permanent rank"}
+                  </small>
                 </th>
               ))}
             </tr>
@@ -393,10 +379,9 @@ export function Storefront({
     query.addEventListener("change", resize);
     return () => query.removeEventListener("change", resize);
   }, []);
-  const [scope, setScope] = useState("network");
   const storeHome = storePageHref("home", storefrontHost);
   const homePage = page === "home" || page === "thank-you";
-  const commandsPage = page === "commands";
+  const prefixesPage = page === "prefixes";
   const showComparison = page === "network" || page === "server";
   useEffect(() => {
     if (page === "gift-cards") {
@@ -409,7 +394,6 @@ export function Storefront({
         ?.scrollIntoView({ block: "start" });
     }
   }, [page, storeHome, locationKey, onNavigate]);
-  const [billing, setBilling] = useState("monthly");
   const [catalog, setCatalog] = useState(initialCatalog);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
@@ -447,12 +431,7 @@ export function Storefront({
         if (!response.ok) throw new Error();
         const data = await response.json();
         if (!Array.isArray(data.products)) throw new Error();
-        setCatalog([
-          ...data.products,
-          ...(Array.isArray(data.commands)
-            ? data.commands
-            : emptyCommandCatalog()),
-        ]);
+        setCatalog(data.products);
       })
       .catch(() => {
         if (!disposed) {
@@ -476,7 +455,13 @@ export function Storefront({
       (product) => storeProductKey(product) === storeProductKey(selection),
     );
   const cartProduct = productFor(cart);
-  const detailProduct = productFor(details);
+  const detailProduct =
+    productFor(details) ??
+    (details && {
+      ...storeItem(details),
+      currency: "EUR",
+      available: false,
+    });
   const detailItem = details && storeItem(details);
   const detailNeedsServer = detailItem?.coverage === "modpack";
   const cartItem = cart && storeItem(cart);
@@ -522,11 +507,6 @@ export function Storefront({
     setError("");
     setCheckoutUrl("");
   }
-  function selectScope(value) {
-    setScope(value);
-    setError("");
-    setCheckoutUrl("");
-  }
   function navigate(event, href) {
     if (
       event.button !== 0 ||
@@ -543,11 +523,11 @@ export function Storefront({
     viewProduct({ rank });
   }
   function viewProduct(selection) {
-    const rank = selection.rank && storeItem(selection);
+    const rank = storeItem(selection);
     setDetails({
       ...selection,
-      scope: rank ? (rank.coverage === "network" ? "network" : "") : scope,
-      billing,
+      scope: rank.coverage === "network" ? "network" : "",
+      billing: rank.billing,
     });
     setDrawer("product");
   }
@@ -706,8 +686,12 @@ export function Storefront({
             </div>
           )}
           {showComparison ? (
-            <RankComparison category={page} viewRank={viewRank} />
-          ) : commandsPage ? (
+            <RankComparison
+              category={page}
+              viewRank={viewRank}
+              productFor={productFor}
+            />
+          ) : prefixesPage ? (
             <section
               className="store-catalog"
               aria-labelledby="store-category-title"
@@ -715,82 +699,18 @@ export function Storefront({
               <header className="store-category-header">
                 <div>
                   <h1 id="store-category-title" tabIndex={-1}>
-                    Individual commands
+                    Prefixes
                   </h1>
-                  <label className="store-command-scope">
-                    Coverage
-                    <select
-                      value={scope}
-                      onChange={(event) => selectScope(event.target.value)}
-                    >
-                      {storeScopes.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <p>Make your name your own with a cosmetic chat prefix.</p>
                 </div>
-                <div
-                  className="store-billing"
-                  role="group"
-                  aria-label="Payment period"
-                >
-                  {storeBilling.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      className={billing === item.id ? "active" : ""}
-                      aria-pressed={billing === item.id}
-                      onClick={() => setBilling(item.id)}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
+                <span className="store-prefix-status">Coming soon</span>
               </header>
-              <div className="store-products" aria-busy={loading}>
-                {storeCommands.map((item) => {
-                  const selection = { command: item.id };
-                  const product = productFor({
-                    ...selection,
-                    scope,
-                    billing,
-                  });
-                  const available = product?.available;
-                  return (
-                    <article className="package" key={item.id}>
-                      <div className="store-product-image" aria-hidden="true">
-                        <ProductArtwork selection={selection} />
-                      </div>
-                      <div className="store-product-info">
-                        <h3>{item.invocation}</h3>
-                        <p className="store-command-description">
-                          {item.description}
-                        </p>
-                        <span>
-                          {loading ? "Loading…" : money(product)}
-                          {product?.price != null && (
-                            <small>
-                              {billing === "monthly" ? " / month" : " once"}
-                            </small>
-                          )}
-                        </span>
-                      </div>
-                      <div className="store-product-actions">
-                        <button
-                          className="store-detail-button"
-                          type="button"
-                          aria-label={`View ${item.invocation} command`}
-                          onClick={() => viewProduct(selection)}
-                        >
-                          {available ? "Choose command" : "View command"}
-                          <PublicIcon name="arrow" />
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })}
+              <div
+                className="store-prefix-preview"
+                aria-label="Example chat prefix"
+              >
+                <span>[Your prefix]</span> Player
+                <p>Designs and prices will be announced here.</p>
               </div>
             </section>
           ) : null}
@@ -804,7 +724,7 @@ export function Storefront({
               ? "Login"
               : drawer === "cart"
                 ? `Your cart (${cart ? 1 : 0})`
-                : (detailItem.invocation ?? detailItem.name)
+                : detailItem.name
           }
           onClose={() => setDrawer(null)}
         >
@@ -846,9 +766,8 @@ export function Storefront({
             </form>
           ) : drawer === "product" ? (
             <div className="store-product-details">
-              <ProductArtwork selection={details} />
-              <h3>{detailItem.invocation ?? detailItem.name}</h3>
-              {details.command && <p>{detailItem.description}</p>}
+              <RankArtwork rank={details.rank} />
+              <h3>{detailItem.name}</h3>
               {detailNeedsServer && (
                 <div className="store-server-choice">
                   <label htmlFor="store-rank-server">
@@ -888,44 +807,35 @@ export function Storefront({
                 <div>
                   <dt>Payment</dt>
                   <dd>
-                    <div
-                      className="store-billing"
-                      role="group"
-                      aria-label="Payment period"
-                    >
-                      {storeBilling.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          className={
-                            details.billing === item.id ? "active" : ""
-                          }
-                          aria-pressed={details.billing === item.id}
-                          onClick={() => {
-                            setDetails({ ...details, billing: item.id });
-                            setBilling(item.id);
-                          }}
-                        >
-                          {item.name}
-                        </button>
-                      ))}
-                    </div>
+                    {details.billing === "monthly"
+                      ? "Monthly bonus subscription"
+                      : "One-time payment · permanent rank"}
                   </dd>
                 </div>
               </dl>
               <strong className="store-detail-price">
                 {money(detailProduct)}
+                {details.billing === "monthly" && " / month"}
               </strong>
-              <p>
-                {details.scope === "network"
-                  ? "Applies across both current Drakora modpacks."
-                  : "Applies to the selected modpack’s Drakora worlds."}
-              </p>
-              <p>
-                {details.command
-                  ? "Includes this individual command, without a rank bundle. Command behavior and access terms will be confirmed before purchases open."
-                  : "Rank perks have not been announced yet."}
-              </p>
+              {detailItem.requiresRank ? (
+                <p>
+                  Requires{" "}
+                  {
+                    storeRanks.find(({ id }) => id === detailItem.requiresRank)
+                      .name
+                  }
+                  {detailNeedsServer ? " on the same server" : ""}. This adds a
+                  monthly bonus to your permanent rank. Cancel the subscription
+                  and keep your permanent rank. Bonus perks are coming soon.
+                </p>
+              ) : (
+                <p>
+                  Keep this rank permanently. Upgrades credit your previous
+                  permanent rank within the same{" "}
+                  {detailNeedsServer ? "server" : "network"} rank line. Perks
+                  are coming soon.
+                </p>
+              )}
               <button
                 className="store-button"
                 type="button"
@@ -947,12 +857,12 @@ export function Storefront({
           ) : cart ? (
             <div className="store-cart-content">
               <div className="store-cart-item">
-                <ProductArtwork selection={cart} />
+                <RankArtwork rank={cart.rank} />
                 <div>
-                  <h3>{cartItem.invocation ?? cartItem.name}</h3>
+                  <h3>{cartItem.name}</h3>
                   <p>
                     {storeScopes.find(({ id }) => id === cart.scope).name} ·{" "}
-                    {cart.billing === "monthly" ? "Monthly" : "Lifetime"}
+                    {cart.billing === "monthly" ? "Monthly bonus" : "Permanent"}
                   </p>
                   <strong>{money(cartProduct)}</strong>
                 </div>
@@ -965,11 +875,7 @@ export function Storefront({
                     setError("");
                     setCheckoutUrl("");
                   }}
-                  aria-label={
-                    cart.command
-                      ? "Remove command from cart"
-                      : "Remove rank from cart"
-                  }
+                  aria-label="Remove rank from cart"
                 >
                   <PublicIcon name="close" />
                 </button>
@@ -1050,10 +956,7 @@ export function Storefront({
             <div className="store-empty-cart">
               <PublicIcon name="store" />
               <h3>Your cart is empty</h3>
-              <p>
-                Ranks and individual commands are coming soon. Browse the
-                categories to see what’s planned.
-              </p>
+              <p>Browse ranks and prefixes to find your next addition.</p>
               <button
                 className="store-button"
                 type="button"

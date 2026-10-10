@@ -9,7 +9,6 @@ import {
 } from "./store-community.js";
 import {
   emptyStoreCatalog,
-  emptyCommandCatalog,
   validStoreSelection,
   storeProductKey,
 } from "../shared/storefront.js";
@@ -57,10 +56,9 @@ export function validateStorefront(config) {
     !Array.isArray(settings.products) ||
     settings.products.length > emptyStoreCatalog().length ||
     !Array.isArray(commandProducts) ||
-    commandProducts.length > 30 ||
+    commandProducts.length !== 0 ||
     (settings.allowPurchases &&
-      (!settings.publicToken ||
-        !(settings.products.length + commandProducts.length)))
+      (!settings.publicToken || !settings.products.length))
   )
     throw new Error(
       "Configure the Tebex public token, purchase switch and store products",
@@ -68,26 +66,64 @@ export function validateStorefront(config) {
   const keys = new Set(),
     packages = new Set();
   validateStoreCommunity(settings);
-  const mappings = [...settings.products, ...commandProducts];
+  const mappings = settings.products;
+  const categories = new Map();
   for (const product of mappings) {
     const key = validStoreSelection(product)
       ? storeProductKey(product)
       : undefined;
     if (
       !key ||
-      (settings.products.includes(product)
-        ? product.rank === undefined
-        : product.command === undefined) ||
+      product.rank === undefined ||
       keys.has(key) ||
       !Number.isSafeInteger(product.packageId) ||
       product.packageId < 1 ||
       packages.has(product.packageId) ||
       product.deliveryVerified !== true ||
-      (product.billing === "monthly" && product.interval !== "P1M")
+      (product.billing === "monthly" && product.interval !== "P1M") ||
+      (product.billing === "lifetime" &&
+        (product.cumulativeVerified !== true ||
+          !Number.isSafeInteger(product.categoryId) ||
+          product.categoryId < 1))
     )
       throw new Error(
-        "Map each store option to a unique, verified Tebex package; monthly products require P1M",
+        "Map verified rank packages with cumulative categories and monthly P1M prerequisites",
       );
+    const slot = emptyStoreCatalog().find(
+      (item) => storeProductKey(item) === key,
+    );
+    if (slot.requiresRank) {
+      const prerequisite = mappings.find(
+        (item) =>
+          item.rank === slot.requiresRank &&
+          item.scope === product.scope &&
+          item.billing === "lifetime",
+      );
+      if (
+        !prerequisite ||
+        product.requiredPackageId !== prerequisite.packageId ||
+        product.prerequisiteVerified !== true
+      )
+        throw new Error(
+          "Verify the matching top permanent rank requirement in Tebex before selling a monthly bonus",
+        );
+    } else {
+      const previous = categories.get(product.scope);
+      if (previous !== undefined && previous !== product.categoryId)
+        throw new Error(
+          "Keep each scope's permanent ranks in one cumulative Tebex category",
+        );
+      if (
+        [...categories].some(
+          ([scope, category]) =>
+            scope !== product.scope && category === product.categoryId,
+        )
+      )
+        throw new Error(
+          "Use separate cumulative Tebex categories for the network and each modpack",
+        );
+      categories.set(product.scope, product.categoryId);
+    }
     keys.add(key);
     packages.add(product.packageId);
   }
@@ -95,10 +131,7 @@ export function validateStorefront(config) {
 
 export function storefrontService(settings = {}, fetcher = fetch) {
   const account = `${apiOrigin}/api/accounts/${settings.publicToken}`;
-  const mappings = [
-    ...(settings.products ?? []),
-    ...(settings.commandProducts ?? []),
-  ];
+  const mappings = settings.products ?? [];
   let cache;
   async function api(path, body, basket = false) {
     const response = await fetcher(
@@ -127,7 +160,6 @@ export function storefrontService(settings = {}, fetcher = fetch) {
     if (!settings.publicToken || !mappings.length)
       return {
         products: emptyStoreCatalog(),
-        commands: emptyCommandCatalog(),
         acceptingPayments: false,
       };
     if (!fresh && cache && cache.until > Date.now()) return cache.value;
@@ -148,7 +180,8 @@ export function storefrontService(settings = {}, fetcher = fetch) {
       const validPrice =
         Number.isFinite(product?.base_price) &&
         product.base_price > 0 &&
-        /^[A-Z]{3}$/.test(product.currency ?? "");
+        product.currency === slot.currency &&
+        Math.round(product.base_price * 100) === Math.round(slot.price * 100);
       if (
         !mapping?.deliveryVerified ||
         !correctBilling ||
@@ -158,19 +191,13 @@ export function storefrontService(settings = {}, fetcher = fetch) {
         return slot;
       return {
         ...slot,
-        price: product.base_price,
-        currency: product.currency,
         available: settings.allowPurchases === true,
       };
     };
     const products = emptyStoreCatalog().map(priceProduct);
-    const commands = emptyCommandCatalog().map(priceProduct);
     const value = {
       products,
-      commands,
-      acceptingPayments: [...products, ...commands].some(
-        (product) => product.available,
-      ),
+      acceptingPayments: products.some((product) => product.available),
     };
     cache = { value, until: Date.now() + 15000 };
     return value;
@@ -188,11 +215,9 @@ export function storefrontService(settings = {}, fetcher = fetch) {
       const ip = String(ipAddress).replace(/^::ffff:/, "");
       if (!isIP(ip)) throw failure("invalid_checkout_address", 400);
       const current = await catalog(true);
-      const unavailable = input.command
-        ? "command_unavailable"
-        : "rank_unavailable";
+      const unavailable = "rank_unavailable";
       if (
-        ![...current.products, ...current.commands].some(
+        !current.products.some(
           (product) =>
             storeProductKey(product) === storeProductKey(input) &&
             product.available,
@@ -207,7 +232,7 @@ export function storefrontService(settings = {}, fetcher = fetch) {
           username: input.username,
           ip_address: ip,
           complete_url: `${origin}/store/thank-you`,
-          cancel_url: `${origin}/store${input.command ? "/commands" : ""}`,
+          cancel_url: `${origin}/store/${input.scope === "network" ? "network-ranks" : "server-ranks"}`,
           complete_auto_redirect: true,
         })
       ).data;

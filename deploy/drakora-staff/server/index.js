@@ -412,8 +412,8 @@ app.use((req, res, next) => {
               "/server-ranks/",
               "/compare",
               "/compare/",
-              "/commands",
-              "/commands/",
+              "/prefixes",
+              "/prefixes/",
               "/gift-cards",
               "/gift-cards/",
             ].includes(req.path)))

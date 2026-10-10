@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import express from "express";
 import {
   emptyStoreCatalog,
-  emptyCommandCatalog,
   storeRanksForScope,
   validStoreSelection,
   storeProductKey,
@@ -19,9 +18,10 @@ import {
 const mapping = {
   rank: "archdrake",
   scope: "network",
-  billing: "monthly",
+  billing: "lifetime",
   packageId: 101,
-  interval: "P1M",
+  categoryId: 201,
+  cumulativeVerified: true,
   deliveryVerified: true,
 };
 const settings = {
@@ -32,14 +32,14 @@ const settings = {
 };
 const remoteProduct = {
   id: 101,
-  type: "subscription",
-  base_price: 12,
-  currency: "USD",
+  type: "single",
+  base_price: 49.99,
+  currency: "EUR",
 };
 const request = {
   rank: "archdrake",
   scope: "network",
-  billing: "monthly",
+  billing: "lifetime",
   username: "Test_Player",
 };
 const reply = (data) =>
@@ -49,7 +49,7 @@ const reply = (data) =>
 
 test("store page links resolve on both hosts and legacy comparisons retain coverage", () => {
   for (const separateHost of [false, true]) {
-    for (const page of ["home", "network", "server", "commands"]) {
+    for (const page of ["home", "network", "server", "prefixes"]) {
       const href = storePageHref(page, separateHost);
       assert.equal(storePageFor(href, "", separateHost), page);
       assert.equal(storePageFor(`${href}/`, "", separateHost), page);
@@ -85,10 +85,13 @@ test("coming-soon catalog separates four network tiers and four modpack tiers wi
       storeRanksForScope(scope).map(({ name }) => name),
       ["Wyrm", "Drake", "Wyvern", "Dragon"],
     );
-  assert.equal(catalog.length, 24);
-  assert.equal(new Set(catalog.map(storeProductKey)).size, 24);
+  assert.equal(catalog.length, 12);
+  assert.equal(new Set(catalog.map(storeProductKey)).size, 12);
   assert.ok(
-    catalog.every((product) => !product.available && product.price === null),
+    catalog.every(
+      (product) =>
+        !product.available && product.price > 0 && product.currency === "EUR",
+    ),
   );
   const service = storefrontService(
     { ...settings, allowPurchases: false, products: [] },
@@ -97,18 +100,28 @@ test("coming-soon catalog separates four network tiers and four modpack tiers wi
     },
   );
   assert.equal((await service.catalog()).acceptingPayments, false);
-  const commands = (await service.catalog()).commands;
-  assert.equal(commands.length, 30);
-  assert.ok(
-    commands.every((product) => !product.available && product.price === null),
+  assert.equal((await service.catalog()).commands, undefined);
+  assert.deepEqual(
+    catalog
+      .filter(({ scope }) => scope === "network")
+      .map(({ price, billing }) => [price, billing]),
+    [
+      [17.99, "lifetime"],
+      [49.99, "lifetime"],
+      [99.99, "lifetime"],
+      [5.99, "monthly"],
+    ],
   );
   assert.deepEqual(
-    [...new Set(commands.map(({ invocation }) => invocation))],
-    ["/hat", "/nick", "/particles", "/emote", "/sit"],
-  );
-  assert.equal(
-    new Set([...catalog, ...emptyCommandCatalog()].map(storeProductKey)).size,
-    54,
+    catalog
+      .filter(({ scope }) => scope === "prom2")
+      .map(({ price, billing }) => [price, billing]),
+    [
+      [6.99, "lifetime"],
+      [19.99, "lifetime"],
+      [39.99, "lifetime"],
+      [10.99, "monthly"],
+    ],
   );
   await assert.rejects(
     service.checkout(
@@ -121,7 +134,7 @@ test("coming-soon catalog separates four network tiers and four modpack tiers wi
       "192.0.2.5",
       settings.origin,
     ),
-    { code: "command_unavailable" },
+    { code: "invalid_store_selection" },
   );
   await assert.rejects(
     service.checkout(request, "192.0.2.5", settings.origin),
@@ -184,7 +197,7 @@ test("configuration rejects overlapping hosts, duplicate packages, unverified de
     { ...settings, origin: "http://store.example.com" },
     { ...settings, products: [mapping, { ...mapping, scope: "prom2" }] },
     { ...settings, products: [{ ...mapping, deliveryVerified: false }] },
-    { ...settings, products: [{ ...mapping, interval: "P1Y" }] },
+    { ...settings, products: [{ ...mapping, cumulativeVerified: false }] },
     { ...settings, products: [{ ...mapping, rank: "founder" }] },
     { ...settings, products: [{ ...mapping, rank: "drake" }] },
     { ...settings, products: [{ ...mapping, title: "ArchDrake" }] },
@@ -194,7 +207,7 @@ test("configuration rejects overlapping hosts, duplicate packages, unverified de
 
 test("catalog cannot sell single-payment products as monthly or unpriced and disabled products", async () => {
   for (const product of [
-    { ...remoteProduct, type: "single" },
+    { ...remoteProduct, type: "subscription" },
     { ...remoteProduct, base_price: 0 },
     { ...remoteProduct, currency: "invalid" },
     { ...remoteProduct, disabled: true },
@@ -218,7 +231,7 @@ test("catalog cannot sell single-payment products as monthly or unpriced and dis
     catalog.products.find(
       (slot) => storeProductKey(slot) === storeProductKey(mapping),
     ).price,
-    12,
+    49.99,
   );
 });
 
@@ -231,7 +244,7 @@ test("checkout uses the configured package and customer IP, ignores client price
       return reply([remoteProduct]);
     if (url.endsWith("/baskets")) return reply({ ident });
     return reply({
-      packages: [{ id: 101, type: "subscription" }],
+      packages: [{ id: 101, type: "single" }],
       links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
     });
   });
@@ -309,6 +322,7 @@ test("server ranks require a server and checkout uses that server's package", as
           mappings.map(({ packageId }) => ({
             ...remoteProduct,
             id: packageId,
+            base_price: 6.99,
           })),
         );
       if (url.endsWith("/baskets")) return reply({ ident });
@@ -316,7 +330,7 @@ test("server ranks require a server and checkout uses that server's package", as
         packages: [
           {
             id: Number(JSON.parse(options.body).package_id),
-            type: "subscription",
+            type: "single",
           },
         ],
         links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
@@ -462,132 +476,91 @@ test("store player preview validates names and returns profiles without creating
   assert.deepEqual(await failed.json(), { error: "store_unavailable" });
 });
 
-test("command mappings validate category, unique packages, delivery and monthly interval", () => {
-  const command = {
-    command: "hat",
-    scope: "prom2",
-    billing: "lifetime",
-    packageId: 102,
+test("monthly bonuses require the matching permanent rank and verified provider rules", async () => {
+  const top = { ...mapping, rank: "archwyvern", packageId: 103 };
+  const bonus = {
+    rank: "archdragon",
+    scope: "network",
+    billing: "monthly",
+    packageId: 104,
+    interval: "P1M",
     deliveryVerified: true,
+    requiredPackageId: 103,
+    prerequisiteVerified: true,
   };
-  const base = {
-    staffOrigin: "https://staff.example.com",
-    todoOrigin: "https://todo.example.com",
-    applications: { publicOrigin: "https://public.example.com" },
-    website: {},
-  };
-  assert.doesNotThrow(() =>
-    validateStorefront({
-      ...base,
-      storefront: { ...settings, products: [], commandProducts: [command] },
-    }),
-  );
-  for (const commandProducts of [
-    null,
-    {},
-    [mapping],
-    [{ ...command, command: "ban" }],
-    [{ ...command, packageId: 101 }],
-    [{ ...command, deliveryVerified: false }],
-    [{ ...command, billing: "monthly" }],
-    [command, { ...command, packageId: 103 }],
+  const configured = { ...settings, products: [top, bonus] };
+  const base = { website: {}, storefront: configured };
+  assert.doesNotThrow(() => validateStorefront(base));
+  for (const products of [
+    [bonus],
+    [top, { ...bonus, prerequisiteVerified: false }],
+    [top, { ...bonus, requiredPackageId: 101 }],
+    [top, { ...bonus, interval: "P1Y" }],
+    [top, { ...mapping, rank: "archwyrm", packageId: 105, categoryId: 999 }],
+    [top, { ...mapping, rank: "wyrm", scope: "prom2", packageId: 106 }],
   ])
     assert.throws(() =>
-      validateStorefront({
-        ...base,
-        storefront: { ...settings, commandProducts },
+      validateStorefront({ ...base, storefront: { ...configured, products } }),
+    );
+  for (const item of emptyStoreCatalog()) {
+    assert.equal(
+      validStoreSelection({
+        ...item,
+        billing: item.billing === "monthly" ? "lifetime" : "monthly",
       }),
+      false,
     );
-  assert.throws(() =>
-    validateStorefront({
-      ...base,
-      storefront: { ...settings, products: [command] },
-    }),
-  );
-});
-
-test("an individual command checkout adds only its verified package and preserves rank catalog", async () => {
-  const command = {
-    command: "nick",
-    scope: "prom2",
-    billing: "lifetime",
-    packageId: 202,
-    deliveryVerified: true,
-  };
-  const selected = {
-    command: "nick",
-    scope: "prom2",
-    billing: "lifetime",
-    username: "Test_Player",
-  };
-  const ident = "command-12345678901234567890";
+  }
   const calls = [];
-  const service = storefrontService(
-    { ...settings, commandProducts: [command] },
-    async (url, options) => {
-      calls.push({ url, options });
-      if (options.method === "GET")
-        return reply([
-          remoteProduct,
-          { id: 202, type: "single", base_price: 5, currency: "USD" },
-        ]);
-      if (url.endsWith("/baskets")) return reply({ ident });
-      return reply({
-        packages: [{ id: 202, type: "single" }],
-        links: { checkout: `https://checkout.tebex.io/checkout/${ident}` },
-      });
-    },
-  );
-  for (const input of [
-    { ...selected, command: "ban" },
-    { ...selected, rank: "archdrake" },
-    { ...selected, username: "<script>" },
-  ])
-    await assert.rejects(
-      service.checkout(input, "192.0.2.5", settings.origin),
-      { code: "invalid_store_selection" },
-    );
-  assert.equal(calls.length, 0);
-  const catalog = await service.catalog();
-  assert.equal(catalog.products.length, 24);
-  assert.equal(
-    catalog.commands.filter((product) => product.available).length,
-    1,
-  );
-  assert.equal(
-    catalog.commands.find(
-      (product) => storeProductKey(product) === storeProductKey(selected),
-    ).price,
-    5,
-  );
-  calls.length = 0;
-  assert.equal(
-    (
-      await service.checkout(
-        { ...selected, packageId: 101, price: 0 },
-        "192.0.2.5",
-        settings.origin,
-      )
-    ).ident,
-    ident,
-  );
-  assert.equal(
-    JSON.parse(calls[1].options.body).cancel_url,
-    `${settings.origin}/store/commands`,
+  const service = storefrontService(configured, async (url, options) => {
+    calls.push({ url, options });
+    if (options.method === "GET")
+      return reply([
+        { id: 103, type: "single", base_price: 99.99, currency: "EUR" },
+        { id: 104, type: "subscription", base_price: 5.99, currency: "EUR" },
+      ]);
+    if (url.endsWith("/baskets"))
+      return reply({ ident: "bonus-12345678901234567890" });
+    return new Response("{}", { status: 422 });
+  });
+  await assert.rejects(
+    service.checkout(
+      { ...bonus, username: "Test_Player", ownsRank: "archwyvern", price: 0 },
+      "192.0.2.5",
+      settings.origin,
+    ),
+    { code: "tebex_rejected_checkout" },
   );
   assert.deepEqual(JSON.parse(calls[2].options.body), {
-    package_id: "202",
+    package_id: "104",
     quantity: 1,
   });
-  const unavailable = storefrontService(
-    { ...settings, products: [], commandProducts: [command] },
-    async () =>
-      reply([
-        { id: 202, type: "subscription", base_price: 5, currency: "USD" },
-      ]),
-  );
-  await assert.rejects(
-    unavailable.checkout(selected, "192.0.2.5", settings.origin),
-    { code: "command_unavailable" },
+});
+
+test("catalog refuses prices or currencies that differ from the approved EUR prices", async () => {
+  for (const remote of [
+    { ...remoteProduct, currency: "USD" },
+    { ...remoteProduct, base_price: 12 },
+  ]) {
+    const catalog = await storefrontService(settings, async () =>
+      reply([remote]),
+    ).catalog();
+    assert.equal(catalog.acceptingPayments, false);
+    assert.equal(
+      catalog.products.find((item) => item.rank === "archdrake").price,
+      49.99,
+    );
+  }
+});
+
+test("retired command mappings cannot enable sales", () => {
+  assert.throws(() =>
+    validateStorefront({
+      website: {},
+      storefront: {
+        ...settings,
+        commandProducts: [{ command: "hat", packageId: 999 }],
+      },
+    }),
   );
 });

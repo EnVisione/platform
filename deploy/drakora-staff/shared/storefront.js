@@ -1,12 +1,62 @@
 export const storeRanks = [
-  { id: "archwyrm", name: "ArchWyrm", coverage: "network" },
-  { id: "archdrake", name: "ArchDrake", coverage: "network" },
-  { id: "archwyvern", name: "ArchWyvern", coverage: "network" },
-  { id: "archdragon", name: "ArchDragon", coverage: "network" },
-  { id: "wyrm", name: "Wyrm", coverage: "modpack" },
-  { id: "drake", name: "Drake", coverage: "modpack" },
-  { id: "wyvern", name: "Wyvern", coverage: "modpack" },
-  { id: "dragon", name: "Dragon", coverage: "modpack" },
+  {
+    id: "archwyrm",
+    name: "ArchWyrm",
+    coverage: "network",
+    billing: "lifetime",
+    price: 17.99,
+  },
+  {
+    id: "archdrake",
+    name: "ArchDrake",
+    coverage: "network",
+    billing: "lifetime",
+    price: 49.99,
+  },
+  {
+    id: "archwyvern",
+    name: "ArchWyvern",
+    coverage: "network",
+    billing: "lifetime",
+    price: 99.99,
+  },
+  {
+    id: "archdragon",
+    name: "ArchDragon",
+    coverage: "network",
+    billing: "monthly",
+    price: 5.99,
+    requiresRank: "archwyvern",
+  },
+  {
+    id: "wyrm",
+    name: "Wyrm",
+    coverage: "modpack",
+    billing: "lifetime",
+    price: 6.99,
+  },
+  {
+    id: "drake",
+    name: "Drake",
+    coverage: "modpack",
+    billing: "lifetime",
+    price: 19.99,
+  },
+  {
+    id: "wyvern",
+    name: "Wyvern",
+    coverage: "modpack",
+    billing: "lifetime",
+    price: 39.99,
+  },
+  {
+    id: "dragon",
+    name: "Dragon",
+    coverage: "modpack",
+    billing: "monthly",
+    price: 10.99,
+    requiresRank: "wyvern",
+  },
 ];
 
 export const storeScopes = [
@@ -27,52 +77,6 @@ export const storeScopes = [
   },
 ];
 
-export const storeCommands = [
-  {
-    id: "hat",
-    name: "Hat",
-    invocation: "/hat",
-    description: "Wear an item as a hat.",
-  },
-  {
-    id: "nick",
-    name: "Nickname",
-    invocation: "/nick",
-    description: "Give yourself a custom display name.",
-  },
-  {
-    id: "particles",
-    name: "Particles",
-    invocation: "/particles",
-    description: "Add a little flair with cosmetic particle effects.",
-  },
-  {
-    id: "emote",
-    name: "Emotes",
-    invocation: "/emote",
-    description: "Express yourself with playful character emotes.",
-  },
-  {
-    id: "sit",
-    name: "Sit",
-    invocation: "/sit",
-    description: "Take a seat and relax with friends.",
-  },
-];
-
-export const storeBilling = [
-  {
-    id: "monthly",
-    name: "Monthly",
-    description: "Recurring payment every month",
-  },
-  {
-    id: "lifetime",
-    name: "Lifetime",
-    description: "One payment, no monthly renewal",
-  },
-];
-
 export function storePageFor(pathname, search = "", storefrontHost = false) {
   const path = pathname.replace(/\/$/, "") || "/";
   const storePath =
@@ -81,7 +85,7 @@ export function storePageFor(pathname, search = "", storefrontHost = false) {
     return path === "/store" || storefrontHost ? "home" : null;
   if (storePath === "/network-ranks") return "network";
   if (storePath === "/server-ranks") return "server";
-  if (storePath === "/commands") return "commands";
+  if (storePath === "/prefixes" || storePath === "/commands") return "prefixes";
   if (storePath === "/gift-cards") return "gift-cards";
   if (storePath === "/thank-you" && path.startsWith("/store/"))
     return "thank-you";
@@ -100,7 +104,7 @@ export function storePageHref(page, storefrontHost = false) {
     home: "",
     network: "/network-ranks",
     server: "/server-ranks",
-    commands: "/commands",
+    prefixes: "/prefixes",
   }[page];
   if (typeof path !== "string") return null;
   return `${storefrontHost ? "" : "/store"}${path}` || "/";
@@ -110,14 +114,11 @@ export function validStoreSelection(selection) {
   return Boolean(
     selection &&
     selection.title === undefined &&
-    ((selection.command === undefined &&
-      storeRanksForScope(selection.scope).some(
-        ({ id }) => id === selection.rank,
-      )) ||
-      (selection.rank === undefined &&
-        storeCommands.some(({ id }) => id === selection.command))) &&
-    storeScopes.some(({ id }) => id === selection.scope) &&
-    storeBilling.some(({ id }) => id === selection.billing),
+    selection.command === undefined &&
+    storeRanksForScope(selection.scope).some(
+      ({ id, billing }) =>
+        id === selection.rank && billing === selection.billing,
+    ),
   );
 }
 
@@ -127,40 +128,23 @@ export function storeRanksForScope(scope) {
   return storeRanks.filter((rank) => rank.coverage === coverage);
 }
 
-export function storeProductKey({ rank, command, scope, billing }) {
-  return `${scope}:${command ? `command-${command}` : rank}:${billing}`;
+export function storeProductKey({ rank, scope, billing }) {
+  return `${scope}:${rank}:${billing}`;
 }
 
 export function emptyStoreCatalog() {
   return storeScopes.flatMap(({ id: scope }) =>
-    storeRanksForScope(scope).flatMap(({ id: rank, name }) =>
-      storeBilling.map(({ id: billing }) => ({
+    storeRanksForScope(scope).map(
+      ({ id: rank, name, billing, price, requiresRank }) => ({
         rank,
         name,
         scope,
         billing,
+        requiresRank,
         available: false,
-        price: null,
-        currency: null,
-      })),
-    ),
-  );
-}
-
-export function emptyCommandCatalog() {
-  return storeScopes.flatMap(({ id: scope }) =>
-    storeCommands.flatMap(({ id: command, name, invocation, description }) =>
-      storeBilling.map(({ id: billing }) => ({
-        command,
-        name,
-        invocation,
-        description,
-        scope,
-        billing,
-        available: false,
-        price: null,
-        currency: null,
-      })),
+        price,
+        currency: "EUR",
+      }),
     ),
   );
 }

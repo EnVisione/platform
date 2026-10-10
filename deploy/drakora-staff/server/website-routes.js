@@ -33,6 +33,12 @@ export function publicWebsiteRouter(service, status, dist, staffDirectory) {
   router.get("/discord", (_req, res) =>
     res.redirect(service.publicContent().discordInvite),
   );
+  router.get(["/commands", "/store/commands"], (req, res) =>
+    res.redirect(
+      301,
+      req.path.startsWith("/store/") ? "/store/prefixes" : "/prefixes",
+    ),
+  );
   router.get(
     [
       "/",
@@ -48,8 +54,8 @@ export function publicWebsiteRouter(service, status, dist, staffDirectory) {
       "/store/server-ranks",
       "/store/compare",
       "/compare",
-      "/commands",
-      "/store/commands",
+      "/prefixes",
+      "/store/prefixes",
       "/gift-cards",
       "/store/gift-cards",
       "/store/thank-you",

@@ -58,8 +58,9 @@ export function StoreWelcome() {
       <h2>Support the way you play.</h2>
       <p>
         Explore network ranks for both modpacks, server-specific ranks for your
-        favorite modpack, or individual commands. Choose monthly or lifetime
-        options in the item details and make your next adventure your own.
+        favorite modpack, and cosmetic prefixes. Keep your rank permanently,
+        upgrade as you go, and add an optional monthly bonus after reaching the
+        top permanent tier.
       </p>
       <h2 id="store-support-title">
         No pay-to-win. Every contribution gives back.

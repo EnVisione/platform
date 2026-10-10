@@ -324,8 +324,8 @@ test("checkout applies only the server selected card to the Tebex basket", async
       const product = {
         id: 1,
         type: "single",
-        base_price: 10,
-        currency: "USD",
+        base_price: 49.99,
+        currency: "EUR",
       };
       const basket = {
         ident: "basket-ident-12345",

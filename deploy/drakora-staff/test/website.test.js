@@ -627,10 +627,10 @@ test("public routes expose published pages without a session and the staff edito
     "/store/compare/",
     "/compare",
     "/compare/",
-    "/commands",
-    "/commands/",
-    "/store/commands",
-    "/store/commands/",
+    "/prefixes",
+    "/prefixes/",
+    "/store/prefixes",
+    "/store/prefixes/",
     "/gift-cards",
     "/gift-cards/",
     "/store/gift-cards",
@@ -648,6 +648,16 @@ test("public routes expose published pages without a session and the staff edito
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("set-cookie"), null);
     assert.equal(await response.text(), "Public Drakora website");
+  }
+  for (const [path, target] of [
+    ["/commands", "/prefixes"],
+    ["/store/commands/", "/store/prefixes"],
+  ]) {
+    const response = await requestSite(origin + path, {
+      headers: { Host: "public.example" },
+    });
+    assert.equal(response.status, 301);
+    assert.equal(response.headers.get("location"), target);
   }
   const form = await requestSite(origin + "/apply/start", {
     headers: { Host: "public.example" },

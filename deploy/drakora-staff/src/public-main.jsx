@@ -537,8 +537,8 @@ function PublicSite() {
   const title =
     storeView === "gift-cards"
       ? "Gift cards"
-      : storeView === "commands"
-        ? "Commands"
+      : storeView === "prefixes"
+        ? "Prefixes"
         : storeView === "network" || storeView === "server"
           ? `Compare ${storeView} ranks`
           : storePage
