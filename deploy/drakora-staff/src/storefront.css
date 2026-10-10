@@ -594,7 +594,51 @@
 .storefront .store-more-features:focus-visible {
   background: #242424;
 }
-.store-more-features span {
+.store-more-features-label {
+  position: sticky;
+  left: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+.store-mobile-rank-cards {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 30px;
+}
+.store-mobile-rank-card {
+  padding: 30px 24px;
+  border-radius: 6px;
+  background: #202020;
+  text-align: center;
+}
+.store-mobile-rank-card .store-rank-art {
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 20px;
+}
+.storefront .store-mobile-rank-card h2 {
+  margin: 0 0 14px;
+  color: var(--gold);
+  font:
+    600 26px Georgia,
+    serif;
+}
+.store-mobile-rank-card p {
+  max-width: 260px;
+  margin: 0 auto 16px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.storefront .store-mobile-compare-title {
+  margin: 0 0 12px;
+  color: var(--gold);
+  font:
+    400 26px Georgia,
+    serif;
+}
+.store-more-chevron {
   font-size: 24px;
   line-height: 1;
 }
@@ -1345,6 +1389,10 @@
   }
   .store-nav-label {
     display: none;
+  }
+  .store-comparison-scroll {
+    max-height: none;
+    overflow-x: auto;
   }
   .store-comparison-heading {
     padding: 18px;

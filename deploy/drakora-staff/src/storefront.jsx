@@ -314,7 +314,7 @@ function RankFeatureValue({ value }) {
   );
 }
 
-function RankComparison({ category, viewRank, productFor }) {
+function RankComparison({ category, viewRank, productFor, mobile }) {
   const network = category === "network";
   const ranks = ranksForCategory(category);
   const [expanded, setExpanded] = useState(false);
@@ -328,6 +328,27 @@ function RankComparison({ category, viewRank, productFor }) {
     >
       <PublicIcon name="store" /> View rank
     </button>
+  );
+  const summary = (rank) =>
+    rank.requiresRank ? (
+      <>
+        Monthly bonus for <strong>{network ? "ArchWyvern" : "Wyvern"}</strong>{" "}
+        owners.
+      </>
+    ) : (
+      "A permanent rank. One purchase, no monthly renewal."
+    );
+  const price = (rank) => (
+    <strong className="store-compare-price">
+      {money(
+        productFor({
+          rank: rank.id,
+          scope: network ? "network" : "prom2",
+          billing: rank.billing,
+        }),
+      )}
+      {rank.billing === "monthly" && <small> / month</small>}
+    </strong>
   );
   const featureRows = (features) =>
     features.map(({ name, values }) => (
@@ -356,8 +377,30 @@ function RankComparison({ category, viewRank, productFor }) {
           are examples, not final benefits. Purchases are coming soon.
         </p>
       </header>
+      {mobile && (
+        <>
+          <div className="store-mobile-rank-cards">
+            {ranks.map((rank) => (
+              <article
+                className="store-mobile-rank-card"
+                key={rank.id}
+                aria-labelledby={`store-rank-card-${rank.id}`}
+              >
+                <RankArtwork rank={rank.id} />
+                <h2 id={`store-rank-card-${rank.id}`}>{rank.name}</h2>
+                <p>{summary(rank)}</p>
+                {price(rank)}
+                {action(rank)}
+              </article>
+            ))}
+          </div>
+          <h2 className="store-mobile-compare-title">Compare ranks</h2>
+        </>
+      )}
       <p id="store-compare-scroll" className="store-compare-scroll">
-        Scroll across to compare ranks, and down for more features.
+        {mobile
+          ? "Swipe across to compare the perks."
+          : "Scroll across to compare ranks, and down for more features."}
       </p>
       <div
         className="store-comparison-scroll"
@@ -371,14 +414,16 @@ function RankComparison({ category, viewRank, productFor }) {
             {network ? "Network" : "Server-specific"} rank preview
           </caption>
           <thead>
-            <tr className="store-rank-art-row" aria-hidden="true">
-              <td className="store-comparison-spacer" />
-              {ranks.map((rank) => (
-                <td key={rank.id}>
-                  <RankArtwork rank={rank.id} />
-                </td>
-              ))}
-            </tr>
+            {!mobile && (
+              <tr className="store-rank-art-row" aria-hidden="true">
+                <td className="store-comparison-spacer" />
+                {ranks.map((rank) => (
+                  <td key={rank.id}>
+                    <RankArtwork rank={rank.id} />
+                  </td>
+                ))}
+              </tr>
+            )}
             <tr className="store-rank-name-row">
               <th scope="col" className="store-comparison-spacer">
                 <span className="store-visually-hidden">Feature</span>
@@ -389,40 +434,25 @@ function RankComparison({ category, viewRank, productFor }) {
                 </th>
               ))}
             </tr>
-            <tr className="store-rank-summary-row">
-              <td className="store-comparison-spacer" />
-              {ranks.map((rank) => (
-                <td key={rank.id}>
-                  {rank.requiresRank ? (
-                    <>
-                      Monthly bonus for{" "}
-                      <strong>{network ? "ArchWyvern" : "Wyvern"}</strong>{" "}
-                      owners.
-                    </>
-                  ) : (
-                    "A permanent rank. One purchase, no monthly renewal."
-                  )}
-                </td>
-              ))}
-            </tr>
-            <tr className="store-rank-purchase-row">
-              <td className="store-comparison-spacer" />
-              {ranks.map((rank) => (
-                <td key={rank.id}>
-                  <strong className="store-compare-price">
-                    {money(
-                      productFor({
-                        rank: rank.id,
-                        scope: network ? "network" : "prom2",
-                        billing: rank.billing,
-                      }),
-                    )}
-                    {rank.billing === "monthly" && <small> / month</small>}
-                  </strong>
-                  {action(rank)}
-                </td>
-              ))}
-            </tr>
+            {!mobile && (
+              <>
+                <tr className="store-rank-summary-row">
+                  <td className="store-comparison-spacer" />
+                  {ranks.map((rank) => (
+                    <td key={rank.id}>{summary(rank)}</td>
+                  ))}
+                </tr>
+                <tr className="store-rank-purchase-row">
+                  <td className="store-comparison-spacer" />
+                  {ranks.map((rank) => (
+                    <td key={rank.id}>
+                      {price(rank)}
+                      {action(rank)}
+                    </td>
+                  ))}
+                </tr>
+              </>
+            )}
           </thead>
           <tbody>
             <tr className="store-chat-prefix-row">
@@ -450,9 +480,15 @@ function RankComparison({ category, viewRank, productFor }) {
                   aria-controls="store-extra-rank-features"
                   onClick={() => setExpanded((value) => !value)}
                 >
-                  <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
-                  {expanded ? "Show fewer features" : "Show more features"}
-                  <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+                  <span className="store-more-features-label">
+                    <span className="store-more-chevron" aria-hidden="true">
+                      {expanded ? "⌃" : "⌄"}
+                    </span>
+                    {expanded ? "Show fewer features" : "Show more features"}
+                    <span className="store-more-chevron" aria-hidden="true">
+                      {expanded ? "⌃" : "⌄"}
+                    </span>
+                  </span>
                 </button>
               </td>
             </tr>
@@ -817,6 +853,7 @@ export function Storefront({
               category={page}
               viewRank={viewRank}
               productFor={productFor}
+              mobile={mobile}
             />
           ) : prefixesPage ? (
             <section
