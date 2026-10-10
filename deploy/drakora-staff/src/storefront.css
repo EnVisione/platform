@@ -629,15 +629,6 @@
   }
 }
 .store-rank-art {
-  width: 46px;
-  height: 46px;
-  display: block;
-  margin: 0 auto 12px;
-}
-.store-comparison-table .store-detail-button {
-  white-space: nowrap;
-}
-.store-rank-art {
   display: block;
   width: 60px;
   height: 60px;
