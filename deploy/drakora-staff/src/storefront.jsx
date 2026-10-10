@@ -382,7 +382,7 @@ function RankComparison({
       <p>
         {network
           ? "Applies to the entire Drakora network."
-          : "Choose a server to compare its perks."}
+          : "Choose the server your rank will apply to."}
       </p>
       {network ? (
         <ul className="store-network-coverage">
@@ -397,7 +397,7 @@ function RankComparison({
         <div
           className="store-comparison-servers"
           role="group"
-          aria-label="Compare server ranks"
+          aria-label="Choose a server for your rank"
         >
           {serverScopes.map((server) => (
             <button
