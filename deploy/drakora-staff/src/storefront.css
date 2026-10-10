@@ -354,6 +354,7 @@
 }
 .store-comparison-coverage-card {
   padding: 30px 24px;
+  border: 2px solid #333;
   border-radius: 6px;
   background: #202020;
   text-align: center;
@@ -425,11 +426,13 @@
 }
 .store-comparison-table .store-coverage-cell {
   background: #202020;
+  border: 2px solid #333;
   border-radius: 6px;
   padding: 34px 14px 28px;
 }
 .store-coverage-cell .store-comparison-coverage-card {
   padding: 0;
+  border: 0;
 }
 .store-compare-scroll {
   display: none;
@@ -528,9 +531,18 @@
 .store-comparison-table thead th {
   background: #202020;
 }
+.store-comparison-table thead td:not(.store-coverage-cell),
+.store-comparison-table thead th:not(.store-comparison-spacer),
+.store-comparison-table tbody td:not([colspan]) {
+  border-left: 2px solid #333;
+  border-right: 2px solid #333;
+}
 .store-rank-art-row td {
   padding: 34px 14px 14px;
   border-radius: 6px 6px 0 0;
+}
+.store-comparison-table .store-rank-art-row td:not(.store-coverage-cell) {
+  border-top: 2px solid #333;
 }
 .store-comparison-table .store-rank-art-row .store-rank-art {
   width: 100px;
@@ -673,6 +685,7 @@
 }
 .store-mobile-rank-card {
   padding: 30px 24px;
+  border: 2px solid #333;
   border-radius: 6px;
   background: #202020;
   text-align: center;
@@ -708,7 +721,7 @@
 }
 .store-comparison-actions {
   position: sticky;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: 0;
   z-index: 4;
   overflow: hidden;
   background: transparent;
@@ -722,6 +735,9 @@
 .store-comparison-actions
   .store-comparison-table
   td:not(.store-comparison-spacer) {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  border: 2px solid #333;
+  border-top: 0;
   background: #161616;
   border-radius: 0 0 6px 6px;
 }
@@ -1474,6 +1490,12 @@
   .store-comparison-scroll {
     max-height: none;
     overflow-x: auto;
+  }
+  .store-comparison-table
+    .store-rank-name-row
+    th:not(.store-comparison-spacer) {
+    border-top: 2px solid #333;
+    border-radius: 6px 6px 0 0;
   }
   .store-comparison-coverage-card .store-comparison-servers {
     grid-template-columns: 1fr 1fr;
