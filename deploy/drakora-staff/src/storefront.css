@@ -484,8 +484,9 @@
     600 22px Georgia,
     serif;
 }
-.store-rank-name-row th:first-child {
+.store-comparison-table .store-rank-name-row th:first-child {
   z-index: 3;
+  background: #101010;
 }
 .store-rank-summary-row td {
   vertical-align: top;
