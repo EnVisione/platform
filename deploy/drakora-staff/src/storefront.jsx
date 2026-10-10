@@ -279,29 +279,85 @@ function StoreDrawer({ title, onClose, children }) {
   );
 }
 
+const previewRankFeatures = [
+  { name: "Game replays", values: [true, true, true, true] },
+  { name: "No chat cooldown", values: [true, true, true, true] },
+  { name: "Rank-specific cosmetics", values: [true, true, true, true] },
+  { name: "Saved outfits", values: [2, 4, 6, 6] },
+  { name: "Priority queue", values: [true, true, true, true] },
+  { name: "Create a guild", values: [false, true, true, true] },
+  { name: "Custom name colours", values: [false, false, true, true] },
+  { name: "Particle packs", values: [false, false, true, true] },
+  { name: "Seasonal cosmetics", values: [false, false, false, true] },
+  { name: "Nickname (/nick)", values: [false, false, false, true] },
+  { name: "Exclusive chat emojis", values: [false, false, false, true] },
+];
+const morePreviewRankFeatures = [
+  { name: "Flying in lobbies", values: [true, true, true, true] },
+  { name: "Click effects", values: [true, true, true, true] },
+  { name: "Emotes", values: [true, true, true, true] },
+  { name: "Gift ranks", values: [true, true, true, true] },
+  { name: "Cosmetic pets", values: [false, false, true, true] },
+  { name: "Custom join messages", values: [false, false, false, true] },
+];
+
+function RankFeatureValue({ value }) {
+  return typeof value === "boolean" ? (
+    <span className={`store-feature-status ${value ? "included" : "excluded"}`}>
+      <PublicIcon name={value ? "check" : "close"} />
+      <span className="store-visually-hidden">
+        {value ? "Included" : "Not included"}
+      </span>
+    </span>
+  ) : (
+    value
+  );
+}
+
 function RankComparison({ category, viewRank, productFor }) {
   const network = category === "network";
   const ranks = ranksForCategory(category);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => setExpanded(false), [category]);
+  const action = (rank) => (
+    <button
+      className="store-rank-action"
+      type="button"
+      aria-label={`View ${rank.name} rank`}
+      onClick={() => viewRank(rank.id)}
+    >
+      <PublicIcon name="store" /> View rank
+    </button>
+  );
+  const featureRows = (features) =>
+    features.map(({ name, values }) => (
+      <tr key={name}>
+        <th scope="row">{name}</th>
+        {ranks.map((rank, index) => (
+          <td key={rank.id}>
+            <RankFeatureValue value={values[index]} />
+          </td>
+        ))}
+      </tr>
+    ));
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
       <header className="store-comparison-heading">
         <h1 id="store-compare-title" tabIndex={-1}>
-          Compare {network ? "network" : "server"} ranks
+          {network ? "Network" : "Server-specific"} ranks
         </h1>
         <p>
           {network
-            ? "All four ranks cover Prominence II and Restless Horizons."
-            : "All four ranks apply to one modpack. Choose your server before adding a rank to your cart."}
+            ? "Cover Prominence II and Restless Horizons with one network rank."
+            : "Choose your modpack in the rank details before adding it to your cart."}
         </p>
-        <p>
-          Three permanent ranks, plus an optional monthly bonus. Upgrade by
-          paying the difference; the bonus requires{" "}
-          {network ? "ArchWyvern" : "Wyvern"}
-          {network ? "." : " on the same server."}
+        <p className="store-perks-preview-note">
+          <strong>Preview perks.</strong> The features and prefix styles below
+          are examples, not final benefits. Purchases are coming soon.
         </p>
       </header>
       <p id="store-compare-scroll" className="store-compare-scroll">
-        On smaller screens, scroll across to compare these four ranks.
+        Scroll across to compare ranks, and down for more features.
       </p>
       <div
         className="store-comparison-scroll"
@@ -311,14 +367,48 @@ function RankComparison({ category, viewRank, productFor }) {
         tabIndex={0}
       >
         <table className="store-comparison-table">
-          <caption>{network ? "Network" : "Server-specific"} ranks</caption>
+          <caption>
+            {network ? "Network" : "Server-specific"} rank preview
+          </caption>
           <thead>
-            <tr>
-              <th scope="col">Rank</th>
+            <tr className="store-rank-art-row" aria-hidden="true">
+              <td className="store-comparison-spacer" />
+              {ranks.map((rank) => (
+                <td key={rank.id}>
+                  <RankArtwork rank={rank.id} />
+                </td>
+              ))}
+            </tr>
+            <tr className="store-rank-name-row">
+              <th scope="col" className="store-comparison-spacer">
+                <span className="store-visually-hidden">Feature</span>
+              </th>
               {ranks.map((rank) => (
                 <th scope="col" key={rank.id}>
-                  <RankArtwork rank={rank.id} />
-                  <span>{rank.name}</span>
+                  {rank.name}
+                </th>
+              ))}
+            </tr>
+            <tr className="store-rank-summary-row">
+              <td className="store-comparison-spacer" />
+              {ranks.map((rank) => (
+                <td key={rank.id}>
+                  {rank.requiresRank ? (
+                    <>
+                      Monthly bonus for{" "}
+                      <strong>{network ? "ArchWyvern" : "Wyvern"}</strong>{" "}
+                      owners.
+                    </>
+                  ) : (
+                    "A permanent rank. One purchase, no monthly renewal."
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr className="store-rank-purchase-row">
+              <td className="store-comparison-spacer" />
+              {ranks.map((rank) => (
+                <td key={rank.id}>
                   <strong className="store-compare-price">
                     {money(
                       productFor({
@@ -327,35 +417,72 @@ function RankComparison({ category, viewRank, productFor }) {
                         billing: rank.billing,
                       }),
                     )}
-                    <small>
-                      {rank.billing === "monthly" ? " / month" : " once"}
-                    </small>
+                    {rank.billing === "monthly" && <small> / month</small>}
                   </strong>
-                  <small className="store-rank-kind">
-                    {rank.requiresRank ? "Monthly bonus" : "Permanent rank"}
-                  </small>
-                </th>
+                  {action(rank)}
+                </td>
               ))}
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <th scope="row">Explore rank</th>
-              {ranks.map((rank) => (
+            <tr className="store-chat-prefix-row">
+              <th scope="row">Chat Prefix</th>
+              {ranks.map((rank, index) => (
                 <td key={rank.id}>
-                  <button
-                    className="store-detail-button"
-                    type="button"
-                    aria-label={`View ${rank.name} rank`}
-                    onClick={() => viewRank(rank.id)}
+                  <span
+                    className={`store-chat-prefix tier-${index}`}
+                    aria-label={`${rank.name} chat prefix preview`}
                   >
-                    View rank
-                  </button>
+                    [{rank.name}]
+                  </span>
                 </td>
               ))}
             </tr>
+            {featureRows(previewRankFeatures)}
           </tbody>
+          <tbody>
+            <tr className="store-more-features-row">
+              <td colSpan={ranks.length + 1}>
+                <button
+                  type="button"
+                  className="store-more-features"
+                  aria-expanded={expanded}
+                  aria-controls="store-extra-rank-features"
+                  onClick={() => setExpanded((value) => !value)}
+                >
+                  <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+                  {expanded ? "Show fewer features" : "Show more features"}
+                  <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+          <tbody id="store-extra-rank-features" hidden={!expanded}>
+            {featureRows(morePreviewRankFeatures)}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td className="store-comparison-spacer" />
+              {ranks.map((rank) => (
+                <td key={rank.id}>{action(rank)}</td>
+              ))}
+            </tr>
+          </tfoot>
         </table>
+      </div>
+      <div className="store-about-ranks">
+        <h2>About ranks</h2>
+        <p>
+          Keep your permanent rank and upgrade by paying the difference within
+          the same {network ? "network" : "server"} rank line.
+        </p>
+        <p>
+          {network
+            ? "ArchDragon requires ArchWyvern"
+            : "Dragon requires Wyvern on the same modpack"}
+          . The monthly bonus renews until cancelled; cancelling it keeps your
+          permanent rank.
+        </p>
       </div>
     </section>
   );

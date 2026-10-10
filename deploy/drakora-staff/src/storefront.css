@@ -353,8 +353,8 @@
   margin: 0 0 12px;
   color: var(--gold);
   font:
-    600 28px Arial,
-    sans-serif;
+    600 28px Georgia,
+    serif;
 }
 .store-comparison-heading p {
   margin: 0;
@@ -362,7 +362,13 @@
   line-height: 1.7;
 }
 .store-comparison-heading p + p {
-  margin-top: 8px;
+  margin-top: 10px;
+}
+.store-perks-preview-note {
+  color: #aaa;
+}
+.store-perks-preview-note strong {
+  color: var(--gold);
 }
 .store-compare-scroll {
   display: none;
@@ -373,19 +379,21 @@
 }
 .store-compare-price {
   display: block;
-  margin-top: 10px;
-  color: var(--gold);
-  font-size: 17px;
+  color: #f2f3f5;
+  font-size: 21px;
+  margin-bottom: 14px;
 }
-.store-compare-price small,
-.store-rank-kind {
-  font-size: 11px;
+.store-compare-price small {
+  font-size: 12px;
   font-weight: 400;
+  white-space: nowrap;
 }
-.store-rank-kind {
-  display: block;
-  margin-top: 5px;
-  color: #aaa;
+.store-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 .store-prefix-status {
   color: var(--gold);
@@ -407,26 +415,24 @@
   color: #bdbdbd;
 }
 .store-comparison-scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 78vh;
   isolation: isolate;
   border-radius: 4px;
   overscroll-behavior-x: contain;
+  scroll-padding-top: 64px;
 }
 .store-comparison-scroll:focus-visible {
-  outline: none;
-}
-.store-comparison-scroll:focus-visible th[scope="col"] {
-  color: var(--gold);
-  text-decoration: underline;
+  background: #24211d;
 }
 .store-comparison-table {
   width: 100%;
-  min-width: 650px;
+  min-width: 940px;
   table-layout: fixed;
   border-collapse: separate;
-  border-spacing: 0;
-  font-size: 12px;
-  line-height: 1.6;
+  border-spacing: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .store-comparison-table caption {
   position: absolute;
@@ -437,7 +443,7 @@
 }
 .store-comparison-table th,
 .store-comparison-table td {
-  padding: 18px 10px;
+  padding: 17px 14px;
   border: 0;
   background: #161616;
   text-align: center;
@@ -447,19 +453,182 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  width: 140px;
+  width: 170px;
   text-align: left;
   padding-left: 18px;
 }
-.store-comparison-table tbody tr:nth-child(odd) > * {
+.store-comparison-table .store-comparison-spacer {
+  background: transparent;
+}
+.store-comparison-table thead td,
+.store-comparison-table thead th {
   background: #202020;
 }
-.store-comparison-table thead th {
-  color: #f2f3f5;
-  font-size: 14px;
-  vertical-align: bottom;
+.store-rank-art-row td {
+  padding: 34px 14px 14px;
+  border-radius: 6px 6px 0 0;
 }
-.store-comparison-table th .store-rank-art {
+.store-comparison-table .store-rank-art-row .store-rank-art {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto;
+}
+.store-rank-name-row th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 62px;
+  color: var(--gold);
+  font:
+    600 22px Georgia,
+    serif;
+}
+.store-rank-name-row th:first-child {
+  z-index: 3;
+}
+.store-rank-summary-row td {
+  vertical-align: top;
+  color: #bdbdbd;
+  font-weight: 400;
+  height: 72px;
+  padding: 4px 20px 16px;
+}
+.store-rank-purchase-row td {
+  padding: 4px 18px 28px;
+}
+.storefront .store-rank-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 160px;
+  min-height: 40px;
+  border-radius: 24px;
+  padding: 10px 12px;
+  background: var(--gold);
+  color: #2d2418;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.store-rank-action .public-icon {
+  width: 16px;
+  height: 16px;
+}
+.storefront .store-rank-action:hover,
+.storefront .store-rank-action:focus-visible {
+  background: #e6d2a8;
+  color: #2d2418;
+}
+.store-comparison-table tbody tr:nth-child(even) > * {
+  background: #1c1c1c;
+}
+.store-comparison-table tbody th {
+  font-weight: 400;
+  color: #e4e4e4;
+}
+.store-comparison-table .store-chat-prefix-row > * {
+  background: #121212;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+.store-chat-prefix {
+  display: inline-block;
+  padding: 5px 7px;
+  background: #080808;
+  font: 700 15px monospace;
+  white-space: nowrap;
+}
+.store-chat-prefix.tier-0 {
+  color: #91db67;
+}
+.store-chat-prefix.tier-1 {
+  color: #55de91;
+}
+.store-chat-prefix.tier-2 {
+  color: #65d7e8;
+}
+.store-chat-prefix.tier-3 {
+  color: #f3b45d;
+}
+.store-feature-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+.store-feature-status .public-icon {
+  width: 12px;
+  height: 12px;
+}
+.store-feature-status.included {
+  background: #7eae35;
+  color: #172409;
+}
+.store-feature-status.excluded {
+  background: #292929;
+  color: #909090;
+}
+.store-comparison-table .store-more-features-row td {
+  padding: 0;
+  position: static;
+}
+.storefront .store-more-features {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+  background: #161616;
+  color: #e4e4e4;
+  font-size: 16px;
+}
+.storefront .store-more-features:hover,
+.storefront .store-more-features:focus-visible {
+  background: #242424;
+}
+.store-more-features span {
+  font-size: 24px;
+  line-height: 1;
+}
+.store-comparison-table tfoot td {
+  padding: 20px 18px;
+  border-radius: 0 0 6px 6px;
+  background: #202020;
+}
+.store-about-ranks {
+  padding: 24px;
+  margin-top: 24px;
+  background: #161616;
+  border-radius: 4px;
+}
+.storefront .store-about-ranks h2 {
+  margin: 0 0 14px;
+  color: var(--gold);
+  font:
+    400 24px Georgia,
+    serif;
+}
+.store-about-ranks p {
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 8px 0;
+}
+@media (min-width: 1320px) {
+  .store-comparison-scroll {
+    overflow: visible;
+    max-height: none;
+  }
+  .store-comparison-table {
+    min-width: 0;
+  }
+}
+.store-rank-art {
   width: 46px;
   height: 46px;
   display: block;
@@ -1199,7 +1368,7 @@
     grid-template-columns: 1fr;
   }
   .store-comparison-table tr > :first-child {
-    width: 115px;
+    width: 140px;
     padding-left: 12px;
   }
 }
