@@ -370,6 +370,36 @@
 .store-perks-preview-note strong {
   color: var(--gold);
 }
+.store-comparison-servers {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.store-comparison-servers > span {
+  color: #aaa;
+  font-size: 12px;
+}
+.storefront .store-comparison-servers button {
+  background: #202020;
+  color: #bdbdbd;
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  white-space: normal;
+}
+.storefront .store-comparison-servers button[aria-pressed="true"] {
+  background: #2b241b;
+  color: var(--gold);
+}
+.storefront .store-comparison-servers button:hover,
+.storefront .store-comparison-servers button:focus-visible {
+  background: #352c20;
+  color: var(--gold);
+}
+.store-server-switch-cell {
+  vertical-align: top;
+}
 .store-compare-scroll {
   display: none;
   color: #999;
@@ -643,7 +673,15 @@
   font-size: 24px;
   line-height: 1;
 }
-.store-comparison-table tfoot td {
+.store-comparison-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  overflow: hidden;
+  background: #101010;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.store-comparison-actions tfoot td {
   padding: 20px 18px;
   border-radius: 0 0 6px 6px;
   background: #202020;
@@ -1397,6 +1435,13 @@
   }
   .store-comparison-heading {
     padding: 18px;
+  }
+  .store-comparison-heading .store-comparison-servers {
+    margin-top: 18px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .store-comparison-heading .store-comparison-servers > span {
+    grid-column: 1 / -1;
   }
   .store-compare-scroll {
     display: block;

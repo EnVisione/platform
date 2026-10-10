@@ -300,6 +300,26 @@ const morePreviewRankFeatures = [
   { name: "Cosmetic pets", values: [false, false, true, true] },
   { name: "Custom join messages", values: [false, false, false, true] },
 ];
+const serverPreviewRankFeatures = {
+  prom2: [
+    { name: "Rank-specific cosmetics", values: [true, true, true, true] },
+    { name: "Saved outfits", values: [2, 4, 6, 8] },
+    { name: "Particle packs", values: [false, true, true, true] },
+    { name: "Custom name colours", values: [false, false, true, true] },
+    { name: "Cosmetic pets", values: [false, false, true, true] },
+    { name: "Nickname (/nick)", values: [false, false, false, true] },
+    { name: "Exclusive chat emojis", values: [false, false, false, true] },
+  ],
+  "restless-horizons": [
+    { name: "Rank-specific cosmetics", values: [true, true, true, true] },
+    { name: "Saved outfits", values: [1, 3, 5, 7] },
+    { name: "Particle packs", values: [false, false, true, true] },
+    { name: "Custom name colours", values: [false, true, true, true] },
+    { name: "Cosmetic pets", values: [false, false, false, true] },
+    { name: "Nickname (/nick)", values: [false, false, false, true] },
+    { name: "Exclusive chat emojis", values: [false, false, true, true] },
+  ],
+};
 
 function RankFeatureValue({ value }) {
   return typeof value === "boolean" ? (
@@ -314,19 +334,57 @@ function RankFeatureValue({ value }) {
   );
 }
 
-function RankComparison({ category, viewRank, productFor, mobile }) {
+function RankComparison({
+  category,
+  serverScope,
+  selectServer,
+  addToCart,
+  cartLoading,
+  productFor,
+  mobile,
+}) {
   const network = category === "network";
   const ranks = ranksForCategory(category);
+  const scope = network ? "network" : serverScope;
+  const serverName = storeScopes.find(({ id }) => id === serverScope).name;
+  const features = network
+    ? previewRankFeatures
+    : serverPreviewRankFeatures[serverScope];
+  const extraFeatures = morePreviewRankFeatures.filter(
+    (feature) => !features.some(({ name }) => name === feature.name),
+  );
+  const comparisonScroll = useRef(null);
+  const actionsScroll = useRef(null);
   const [expanded, setExpanded] = useState(false);
-  useEffect(() => setExpanded(false), [category]);
+  useEffect(() => setExpanded(false), [category, serverScope]);
+  const serverSwitch = () => (
+    <div
+      className="store-comparison-servers"
+      role="group"
+      aria-label="Compare server ranks"
+    >
+      <span>Compare server</span>
+      {serverScopes.map((server) => (
+        <button
+          key={server.id}
+          type="button"
+          aria-pressed={server.id === serverScope}
+          onClick={() => selectServer(server.id)}
+        >
+          {server.name}
+        </button>
+      ))}
+    </div>
+  );
   const action = (rank) => (
     <button
       className="store-rank-action"
       type="button"
-      aria-label={`View ${rank.name} rank`}
-      onClick={() => viewRank(rank.id)}
+      aria-label={`Add ${rank.name}${network ? "" : ` for ${serverName}`} to cart`}
+      disabled={cartLoading}
+      onClick={() => addToCart({ rank: rank.id, scope, billing: rank.billing })}
     >
-      <PublicIcon name="store" /> View rank
+      <PublicIcon name="store" /> Add to cart
     </button>
   );
   const summary = (rank) =>
@@ -343,7 +401,7 @@ function RankComparison({ category, viewRank, productFor, mobile }) {
       {money(
         productFor({
           rank: rank.id,
-          scope: network ? "network" : "prom2",
+          scope,
           billing: rank.billing,
         }),
       )}
@@ -370,8 +428,9 @@ function RankComparison({ category, viewRank, productFor, mobile }) {
         <p>
           {network
             ? "Cover Prominence II and Restless Horizons with one network rank."
-            : "Choose your modpack in the rank details before adding it to your cart."}
+            : `Compare perks for ${serverName}. Ranks apply only to this server.`}
         </p>
+        {!network && mobile && serverSwitch()}
         <p className="store-perks-preview-note">
           <strong>Preview perks.</strong> The features and prefix styles below
           are examples, not final benefits. Purchases are coming soon.
@@ -402,109 +461,133 @@ function RankComparison({ category, viewRank, productFor, mobile }) {
           ? "Swipe across to compare the perks."
           : "Scroll across to compare ranks, and down for more features."}
       </p>
-      <div
-        className="store-comparison-scroll"
-        role="region"
-        aria-label={`${network ? "Network" : "Server"} rank comparison`}
-        aria-describedby="store-compare-scroll"
-        tabIndex={0}
-      >
-        <table className="store-comparison-table">
-          <caption>
-            {network ? "Network" : "Server-specific"} rank preview
-          </caption>
-          <thead>
-            {!mobile && (
-              <tr className="store-rank-art-row" aria-hidden="true">
-                <td className="store-comparison-spacer" />
-                {ranks.map((rank) => (
-                  <td key={rank.id}>
-                    <RankArtwork rank={rank.id} />
+      <div className="store-comparison-grid">
+        <div
+          className="store-comparison-scroll"
+          role="region"
+          aria-label={`${network ? "Network" : "Server"} rank comparison`}
+          aria-describedby="store-compare-scroll"
+          tabIndex={0}
+          ref={comparisonScroll}
+          onScroll={(event) => {
+            if (actionsScroll.current)
+              actionsScroll.current.scrollLeft = event.currentTarget.scrollLeft;
+          }}
+        >
+          <table className="store-comparison-table">
+            <caption>
+              {network ? "Network" : "Server-specific"} rank preview
+            </caption>
+            <thead>
+              {!mobile && (
+                <tr className="store-rank-art-row">
+                  <td className="store-comparison-spacer store-server-switch-cell">
+                    {!network && serverSwitch()}
                   </td>
-                ))}
-              </tr>
-            )}
-            <tr className="store-rank-name-row">
-              <th scope="col" className="store-comparison-spacer">
-                <span className="store-visually-hidden">Feature</span>
-              </th>
-              {ranks.map((rank) => (
-                <th scope="col" key={rank.id}>
-                  {rank.name}
-                </th>
-              ))}
-            </tr>
-            {!mobile && (
-              <>
-                <tr className="store-rank-summary-row">
-                  <td className="store-comparison-spacer" />
-                  {ranks.map((rank) => (
-                    <td key={rank.id}>{summary(rank)}</td>
-                  ))}
-                </tr>
-                <tr className="store-rank-purchase-row">
-                  <td className="store-comparison-spacer" />
                   {ranks.map((rank) => (
                     <td key={rank.id}>
-                      {price(rank)}
-                      {action(rank)}
+                      <RankArtwork rank={rank.id} />
                     </td>
                   ))}
                 </tr>
-              </>
-            )}
-          </thead>
-          <tbody>
-            <tr className="store-chat-prefix-row">
-              <th scope="row">Chat Prefix</th>
-              {ranks.map((rank, index) => (
-                <td key={rank.id}>
-                  <span
-                    className={`store-chat-prefix tier-${index}`}
-                    aria-label={`${rank.name} chat prefix preview`}
+              )}
+              <tr className="store-rank-name-row">
+                <th scope="col" className="store-comparison-spacer">
+                  <span className="store-visually-hidden">Feature</span>
+                </th>
+                {ranks.map((rank) => (
+                  <th scope="col" key={rank.id}>
+                    {rank.name}
+                  </th>
+                ))}
+              </tr>
+              {!mobile && (
+                <>
+                  <tr className="store-rank-summary-row">
+                    <td className="store-comparison-spacer" />
+                    {ranks.map((rank) => (
+                      <td key={rank.id}>{summary(rank)}</td>
+                    ))}
+                  </tr>
+                  <tr className="store-rank-purchase-row">
+                    <td className="store-comparison-spacer" />
+                    {ranks.map((rank) => (
+                      <td key={rank.id}>
+                        {price(rank)}
+                        {action(rank)}
+                      </td>
+                    ))}
+                  </tr>
+                </>
+              )}
+            </thead>
+            <tbody>
+              <tr className="store-chat-prefix-row">
+                <th scope="row">Chat Prefix</th>
+                {ranks.map((rank, index) => (
+                  <td key={rank.id}>
+                    <span
+                      className={`store-chat-prefix tier-${index}`}
+                      aria-label={`${rank.name} chat prefix preview`}
+                    >
+                      [{rank.name}]
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              {featureRows(features)}
+            </tbody>
+            <tbody>
+              <tr className="store-more-features-row">
+                <td colSpan={ranks.length + 1}>
+                  <button
+                    type="button"
+                    className="store-more-features"
+                    aria-expanded={expanded}
+                    aria-controls="store-extra-rank-features"
+                    onClick={() => setExpanded((value) => !value)}
                   >
-                    [{rank.name}]
-                  </span>
+                    <span className="store-more-features-label">
+                      <span className="store-more-chevron" aria-hidden="true">
+                        {expanded ? "⌃" : "⌄"}
+                      </span>
+                      {expanded ? "Show fewer features" : "Show more features"}
+                      <span className="store-more-chevron" aria-hidden="true">
+                        {expanded ? "⌃" : "⌄"}
+                      </span>
+                    </span>
+                  </button>
                 </td>
-              ))}
-            </tr>
-            {featureRows(previewRankFeatures)}
-          </tbody>
-          <tbody>
-            <tr className="store-more-features-row">
-              <td colSpan={ranks.length + 1}>
-                <button
-                  type="button"
-                  className="store-more-features"
-                  aria-expanded={expanded}
-                  aria-controls="store-extra-rank-features"
-                  onClick={() => setExpanded((value) => !value)}
-                >
-                  <span className="store-more-features-label">
-                    <span className="store-more-chevron" aria-hidden="true">
-                      {expanded ? "⌃" : "⌄"}
-                    </span>
-                    {expanded ? "Show fewer features" : "Show more features"}
-                    <span className="store-more-chevron" aria-hidden="true">
-                      {expanded ? "⌃" : "⌄"}
-                    </span>
-                  </span>
-                </button>
-              </td>
-            </tr>
-          </tbody>
-          <tbody id="store-extra-rank-features" hidden={!expanded}>
-            {featureRows(morePreviewRankFeatures)}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td className="store-comparison-spacer" />
-              {ranks.map((rank) => (
-                <td key={rank.id}>{action(rank)}</td>
-              ))}
-            </tr>
-          </tfoot>
-        </table>
+              </tr>
+            </tbody>
+            <tbody id="store-extra-rank-features" hidden={!expanded}>
+              {featureRows(extraFeatures)}
+            </tbody>
+          </table>
+        </div>
+        <div
+          className="store-comparison-actions"
+          ref={actionsScroll}
+          onScroll={(event) => {
+            if (comparisonScroll.current)
+              comparisonScroll.current.scrollLeft =
+                event.currentTarget.scrollLeft;
+          }}
+        >
+          <table
+            className="store-comparison-table"
+            aria-label="Rank cart actions"
+          >
+            <tfoot>
+              <tr>
+                <td className="store-comparison-spacer" />
+                {ranks.map((rank) => (
+                  <td key={rank.id}>{action(rank)}</td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </div>
       <div className="store-about-ranks">
         <h2>About ranks</h2>
@@ -567,6 +650,12 @@ export function Storefront({
   const [drawer, setDrawer] = useState(null);
   const [details, setDetails] = useState(null);
   const [cart, setCart] = useState(null);
+  const requestedServer =
+    new URLSearchParams(location.search).get("server") ??
+    new URLSearchParams(location.search).get("scope");
+  const comparisonServer =
+    serverScopes.find(({ id }) => id === requestedServer)?.id ??
+    serverScopes[0].id;
   const community = useStoreCommunity();
   const wallet = useStoreWallet();
   const [giftCardId, setGiftCardId] = useState("");
@@ -682,8 +771,10 @@ export function Storefront({
     event.preventDefault();
     onNavigate(href);
   }
-  function viewRank(rank) {
-    viewProduct({ rank });
+  function selectComparisonServer(scope) {
+    onNavigate(
+      `${storePageHref("server", storefrontHost)}?server=${encodeURIComponent(scope)}`,
+    );
   }
   function viewProduct(selection) {
     const rank = storeItem(selection);
@@ -694,19 +785,18 @@ export function Storefront({
     });
     setDrawer("product");
   }
-  function addToCart() {
+  function addToCart(selection) {
     if (
       loading ||
       catalogError ||
-      !validStoreSelection(details) ||
-      !detailProduct?.available
+      !validStoreSelection(selection) ||
+      !productFor(selection)
     )
       return;
-    setCart(details);
+    setCart(selection);
     setError("");
     setCheckoutUrl("");
-    if (username) setDrawer("cart");
-    else openLogin();
+    setDrawer("cart");
   }
   async function checkout() {
     if (busy || !purchaseReady) return;
@@ -851,7 +941,10 @@ export function Storefront({
           {showComparison ? (
             <RankComparison
               category={page}
-              viewRank={viewRank}
+              serverScope={comparisonServer}
+              selectServer={selectComparisonServer}
+              addToCart={addToCart}
+              cartLoading={loading || catalogError}
               productFor={productFor}
               mobile={mobile}
             />
@@ -1009,7 +1102,7 @@ export function Storefront({
                   !validStoreSelection(details) ||
                   !detailProduct?.available
                 }
-                onClick={addToCart}
+                onClick={() => addToCart(details)}
               >
                 {detailNeedsServer && !details.scope
                   ? "Choose a server"
@@ -1058,6 +1151,19 @@ export function Storefront({
                   {username ? "Change" : "Login"}
                 </button>
               </div>
+              {cartItem.requiresRank && (
+                <p>
+                  Requires{" "}
+                  {
+                    storeRanks.find(({ id }) => id === cartItem.requiresRank)
+                      .name
+                  }
+                  {cartItem.coverage === "modpack"
+                    ? ` on ${storeScopes.find(({ id }) => id === cart.scope).name}`
+                    : ""}
+                  . This monthly bonus keeps your permanent rank intact.
+                </p>
+              )}
               {giftCards.length > 0 && (
                 <div className="store-cart-gift">
                   <label htmlFor="store-cart-gift-card">Gift card</label>
