@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
+import prominenceLogo from "./assets/prominence-logo.png";
+import restlessHorizonsLogo from "./assets/restless-horizons-logo.png";
 import {
   useStoreCommunity,
   RecentPayments,
@@ -358,23 +360,34 @@ function RankComparison({
   const [expanded, setExpanded] = useState(false);
   useEffect(() => setExpanded(false), [category, serverScope]);
   const serverSwitch = () => (
-    <div
-      className="store-comparison-servers"
-      role="group"
-      aria-label="Compare server ranks"
+    <article
+      className="store-comparison-server-card"
+      aria-labelledby="store-compare-server-title"
     >
-      <span>Compare server</span>
-      {serverScopes.map((server) => (
-        <button
-          key={server.id}
-          type="button"
-          aria-pressed={server.id === serverScope}
-          onClick={() => selectServer(server.id)}
-        >
-          {server.name}
-        </button>
-      ))}
-    </div>
+      <img
+        src={serverScope === "prom2" ? prominenceLogo : restlessHorizonsLogo}
+        alt=""
+        className="store-comparison-server-art"
+      />
+      <h2 id="store-compare-server-title">Compare servers</h2>
+      <p>Choose a server to compare its perks.</p>
+      <div
+        className="store-comparison-servers"
+        role="group"
+        aria-label="Compare server ranks"
+      >
+        {serverScopes.map((server) => (
+          <button
+            key={server.id}
+            type="button"
+            aria-pressed={server.id === serverScope}
+            onClick={() => selectServer(server.id)}
+          >
+            {server.name}
+          </button>
+        ))}
+      </div>
+    </article>
   );
   const action = (rank) => (
     <button
@@ -434,11 +447,11 @@ function RankComparison({
           <strong>Preview perks.</strong> The features and prefix styles below
           are examples, not final benefits. Purchases are coming soon.
         </p>
-        {!network && mobile && serverSwitch()}
       </header>
       {mobile && (
         <>
           <div className="store-mobile-rank-cards">
+            {!network && serverSwitch()}
             {ranks.map((rank) => (
               <article
                 className="store-mobile-rank-card"
@@ -481,9 +494,13 @@ function RankComparison({
             <thead>
               {!mobile && (
                 <tr className="store-rank-art-row">
-                  <td className="store-comparison-spacer store-server-switch-cell">
-                    {!network && serverSwitch()}
-                  </td>
+                  {network ? (
+                    <td className="store-comparison-spacer" />
+                  ) : (
+                    <td className="store-server-switch-cell" rowSpan={4}>
+                      {serverSwitch()}
+                    </td>
+                  )}
                   {ranks.map((rank) => (
                     <td key={rank.id}>
                       <RankArtwork rank={rank.id} />
@@ -492,9 +509,11 @@ function RankComparison({
                 </tr>
               )}
               <tr className="store-rank-name-row">
-                <th scope="col" className="store-comparison-spacer">
-                  <span className="store-visually-hidden">Feature</span>
-                </th>
+                {(network || mobile) && (
+                  <th scope="col" className="store-comparison-spacer">
+                    <span className="store-visually-hidden">Feature</span>
+                  </th>
+                )}
                 {ranks.map((rank) => (
                   <th scope="col" key={rank.id}>
                     {rank.name}
@@ -504,13 +523,13 @@ function RankComparison({
               {!mobile && (
                 <>
                   <tr className="store-rank-summary-row">
-                    <td className="store-comparison-spacer" />
+                    {network && <td className="store-comparison-spacer" />}
                     {ranks.map((rank) => (
                       <td key={rank.id}>{summary(rank)}</td>
                     ))}
                   </tr>
                   <tr className="store-rank-purchase-row">
-                    <td className="store-comparison-spacer" />
+                    {network && <td className="store-comparison-spacer" />}
                     {ranks.map((rank) => (
                       <td key={rank.id}>
                         {price(rank)}
