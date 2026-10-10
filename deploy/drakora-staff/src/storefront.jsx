@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PublicIcon } from "./public-icons.jsx";
+import drakoraLogo from "./assets/drakora-logo.png";
 import prominenceLogo from "./assets/prominence-logo.png";
 import restlessHorizonsLogo from "./assets/restless-horizons-logo.png";
 import {
@@ -359,34 +360,57 @@ function RankComparison({
   const actionsScroll = useRef(null);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => setExpanded(false), [category, serverScope]);
-  const serverSwitch = () => (
+  const coverageCard = () => (
     <article
-      className="store-comparison-server-card"
-      aria-labelledby="store-compare-server-title"
+      className="store-comparison-coverage-card"
+      aria-labelledby="store-compare-title"
     >
       <img
-        src={serverScope === "prom2" ? prominenceLogo : restlessHorizonsLogo}
+        src={
+          network
+            ? drakoraLogo
+            : serverScope === "prom2"
+              ? prominenceLogo
+              : restlessHorizonsLogo
+        }
         alt=""
-        className="store-comparison-server-art"
+        className="store-comparison-coverage-art"
       />
-      <h2 id="store-compare-server-title">Compare servers</h2>
-      <p>Choose a server to compare its perks.</p>
-      <div
-        className="store-comparison-servers"
-        role="group"
-        aria-label="Compare server ranks"
-      >
-        {serverScopes.map((server) => (
-          <button
-            key={server.id}
-            type="button"
-            aria-pressed={server.id === serverScope}
-            onClick={() => selectServer(server.id)}
-          >
-            {server.name}
-          </button>
-        ))}
-      </div>
+      <h1 id="store-compare-title" tabIndex={-1}>
+        {network ? "Network ranks" : "Server ranks"}
+      </h1>
+      <p>
+        {network
+          ? "Applies to the entire Drakora network."
+          : "Choose a server to compare its perks."}
+      </p>
+      {network ? (
+        <ul className="store-network-coverage">
+          {serverScopes.map((server) => (
+            <li key={server.id}>
+              <PublicIcon name="check" />
+              {server.name}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div
+          className="store-comparison-servers"
+          role="group"
+          aria-label="Compare server ranks"
+        >
+          {serverScopes.map((server) => (
+            <button
+              key={server.id}
+              type="button"
+              aria-pressed={server.id === serverScope}
+              onClick={() => selectServer(server.id)}
+            >
+              {server.name}
+            </button>
+          ))}
+        </div>
+      )}
     </article>
   );
   const action = (rank) => (
@@ -434,24 +458,10 @@ function RankComparison({
     ));
   return (
     <section className="store-comparison" aria-labelledby="store-compare-title">
-      <header className="store-comparison-heading">
-        <h1 id="store-compare-title" tabIndex={-1}>
-          {network ? "Network" : "Server-specific"} ranks
-        </h1>
-        <p>
-          {network
-            ? "Cover Prominence II and Restless Horizons with one network rank."
-            : `Compare perks for ${serverName}. Ranks apply only to this server.`}
-        </p>
-        <p className="store-perks-preview-note">
-          <strong>Preview perks.</strong> The features and prefix styles below
-          are examples, not final benefits. Purchases are coming soon.
-        </p>
-      </header>
       {mobile && (
         <>
           <div className="store-mobile-rank-cards">
-            {!network && serverSwitch()}
+            {coverageCard()}
             {ranks.map((rank) => (
               <article
                 className="store-mobile-rank-card"
@@ -494,13 +504,9 @@ function RankComparison({
             <thead>
               {!mobile && (
                 <tr className="store-rank-art-row">
-                  {network ? (
-                    <td className="store-comparison-spacer" />
-                  ) : (
-                    <td className="store-server-switch-cell" rowSpan={4}>
-                      {serverSwitch()}
-                    </td>
-                  )}
+                  <td className="store-coverage-cell" rowSpan={4}>
+                    {coverageCard()}
+                  </td>
                   {ranks.map((rank) => (
                     <td key={rank.id}>
                       <RankArtwork rank={rank.id} />
@@ -509,7 +515,7 @@ function RankComparison({
                 </tr>
               )}
               <tr className="store-rank-name-row">
-                {(network || mobile) && (
+                {mobile && (
                   <th scope="col" className="store-comparison-spacer">
                     <span className="store-visually-hidden">Feature</span>
                   </th>
@@ -523,13 +529,11 @@ function RankComparison({
               {!mobile && (
                 <>
                   <tr className="store-rank-summary-row">
-                    {network && <td className="store-comparison-spacer" />}
                     {ranks.map((rank) => (
                       <td key={rank.id}>{summary(rank)}</td>
                     ))}
                   </tr>
                   <tr className="store-rank-purchase-row">
-                    {network && <td className="store-comparison-spacer" />}
                     {ranks.map((rank) => (
                       <td key={rank.id}>
                         {price(rank)}
@@ -608,6 +612,9 @@ function RankComparison({
           </table>
         </div>
       </div>
+      <p className="store-perks-preview-note">
+        Perks shown are previews. Purchases are coming soon.
+      </p>
       <div className="store-about-ranks">
         <h2>About ranks</h2>
         <p>

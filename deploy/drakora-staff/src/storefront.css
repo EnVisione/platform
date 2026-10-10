@@ -343,61 +343,60 @@
   color: var(--gold);
   margin: 0;
 }
-.store-comparison-heading {
-  padding: 24px;
-  background: #161616;
-  border-radius: 4px;
-  margin-bottom: 24px;
-}
-.storefront .store-comparison-heading h1 {
-  margin: 0 0 12px;
-  color: var(--gold);
-  font:
-    600 28px Georgia,
-    serif;
-}
-.store-comparison-heading p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
-}
-.store-comparison-heading p + p {
-  margin-top: 10px;
-}
 .store-perks-preview-note {
   color: #aaa;
-}
-.store-perks-preview-note strong {
-  color: var(--gold);
+  margin: 16px 6px 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .store-comparison-grid {
   --store-comparison-feature-width: 170px;
 }
-.store-comparison-server-card {
+.store-comparison-coverage-card {
   padding: 30px 24px;
   border-radius: 6px;
   background: #202020;
   text-align: center;
 }
-.store-comparison-server-art {
+.store-comparison-coverage-art {
   display: block;
   width: 100px;
   height: 100px;
   object-fit: contain;
   margin: 0 auto 20px;
 }
-.storefront .store-comparison-server-card h2 {
+.storefront .store-comparison-coverage-card h1 {
   margin: 0 0 14px;
   color: var(--gold);
   font:
     600 22px Georgia,
     serif;
 }
-.store-comparison-server-card p {
+.store-comparison-coverage-card p {
   margin: 0 0 20px;
   color: #bdbdbd;
   font-size: 13px;
   line-height: 1.7;
+}
+.store-network-coverage {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  color: var(--gold);
+  font-size: 13px;
+}
+.store-network-coverage li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.store-network-coverage .public-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 .store-comparison-servers {
   display: grid;
@@ -421,15 +420,15 @@
   background: #352c20;
   color: var(--gold);
 }
-.store-server-switch-cell {
+.store-coverage-cell {
   vertical-align: top;
 }
-.store-comparison-table .store-server-switch-cell {
+.store-comparison-table .store-coverage-cell {
   background: #202020;
   border-radius: 6px;
   padding: 34px 14px 28px;
 }
-.store-server-switch-cell .store-comparison-server-card {
+.store-coverage-cell .store-comparison-coverage-card {
   padding: 0;
 }
 .store-compare-scroll {
@@ -513,7 +512,7 @@
   overflow-wrap: anywhere;
 }
 .store-comparison-table .store-comparison-spacer,
-.store-comparison-table .store-server-switch-cell,
+.store-comparison-table .store-coverage-cell,
 .store-comparison-table tbody th {
   position: sticky;
   left: 0;
@@ -1476,10 +1475,7 @@
     max-height: none;
     overflow-x: auto;
   }
-  .store-comparison-heading {
-    padding: 18px;
-  }
-  .store-comparison-server-card .store-comparison-servers {
+  .store-comparison-coverage-card .store-comparison-servers {
     grid-template-columns: 1fr 1fr;
   }
   .store-compare-scroll {
