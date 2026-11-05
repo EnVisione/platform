@@ -292,7 +292,14 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     const command = {
       name: "ticket",
       description: "Open a private Drakora support ticket",
-      options: [],
+      options: [
+        {
+          type: 6,
+          name: "player",
+          description: "Staff only. Open a ticket on behalf of this member",
+          required: false,
+        },
+      ],
     };
     const existing = commands.find((command) => command.name === "ticket");
     if (existing) await main.commands.edit(existing.id, command);
@@ -333,13 +340,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         {
           type: 1,
           components: [
-            ...(ticket.status === "awaiting_resolution"
+            ...(!ticket.resolution
               ? [
                   {
                     type: 2,
                     style: 1,
-                    label: "Resolve ticket",
-                    custom_id: feedbackId("close", ticket),
+                    label: "Add resolution notes (optional)",
+                    custom_id: `ticket:resolution-prompt:${ticket.id}:${ticket.reopenedCount || 0}`,
                   },
                 ]
               : []),
@@ -444,21 +451,34 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     return `ticket:${action}:${ticket.id}${ticket.closureId ? `:${ticket.closureId}` : ""}`;
   }
   function ratingRow(ticket) {
+    if (ticket.rating !== null) return ratingFeedbackRow(ticket);
     return {
       type: 1,
       components: [
         {
           type: 3,
           custom_id: feedbackId("rating", ticket),
-          placeholder:
-            ticket.rating === null
-              ? "Rate the support · 1–5 stars"
-              : "Rating saved",
-          disabled: ticket.rating !== null,
+          placeholder: "Rate the support · 1–5 stars",
           options: [1, 2, 3, 4, 5].map((value) => ({
             label: `${value} ${value === 1 ? "star" : "stars"}`,
             value: String(value),
           })),
+        },
+      ],
+    };
+  }
+  function ratingFeedbackRow(ticket) {
+    return {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 2,
+          custom_id: feedbackId("rating-feedback", ticket),
+          label: ticket.ratingFeedbackAt
+            ? "Feedback saved"
+            : "Tell us more (optional)",
+          disabled: Boolean(ticket.ratingFeedbackAt),
         },
       ],
     };
@@ -468,7 +488,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       ticket.ratingStaff?.name ||
       ticket.claimedBy?.name ||
       ticket.helpedBy?.name;
-    return `${name ? `How did ${name.replace(/[\\*_~`|]/g, "")} do?` : "How helpful was the support?"} Rate the help from 1 to 5. Your rating is visible only to you and authorized staff.`;
+    return `${name ? `How did ${name.replace(/[\\*_~`|]/g, "")} do?` : "How helpful was the support?"} Rate the help from 1 to 5. Your rating is private. Founders can view it; Managers can see feedback only during a staff review.`;
   }
   function overview(ticket) {
     return {
@@ -489,6 +509,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           value: ticket.location,
           inline: true,
         },
+        ...(ticket.openedBy
+          ? [{ name: "Opened by staff", value: ticket.openedBy.name }]
+          : []),
         ...ticketDetails(ticket).map((detail) => ({
           name: detail.label,
           value: detail.value,
@@ -510,8 +533,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
   }
   function openingText(ticket) {
     const owner = ticket.owner.guest ? ticket.ign : `<@${ticket.owner.id}>`;
-    if (ticket.status === "awaiting_resolution")
-      return `${owner} This ticket was closed by the player. ${closureFeedback(ticket)} Staff resolution is pending.`;
+    if (
+      ["closed", "awaiting_resolution"].includes(ticket.status) &&
+      !ticket.closedBy &&
+      !ticket.resolution
+    )
+      return `${owner} This ticket was closed by the player. ${closureFeedback(ticket)} Resolution notes are optional.`;
     if (ticket.status === "closed")
       return `${owner} This ticket has been closed. ${closureFeedback(ticket)}`;
     if (ticket.status === "claimed")
@@ -675,8 +702,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return { pending: true };
     const target = await channel(ticket.channelId);
     const content = {
-      closed: `The player closed this ticket. ${closureFeedback(ticket)} Staff resolution is pending.`,
-      resolved: `Staff recorded the resolution and closed this ticket. ${closureFeedback(ticket)}`,
+      closed: `The player closed this ticket. ${closureFeedback(ticket)} Resolution notes are optional.`,
+      resolved: `${ticket.resolution ? "Staff recorded the resolution and closed this ticket." : "Staff closed this ticket. Resolution notes are optional."} ${closureFeedback(ticket)}`,
       rated:
         "Private feedback received. The player submitted a support rating. Authorized staff can view it in the dashboard.",
       reopened:
@@ -815,11 +842,13 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       const activity = {
         closed: [
           "Ticket closed by the player",
-          "The player closed the conversation. Staff resolution is pending.",
+          "The player closed the conversation. Resolution notes are optional.",
         ],
         resolved: [
           "Ticket resolved",
-          "Staff recorded the resolution and closed the conversation.",
+          ticket.resolution
+            ? "Staff recorded the resolution and closed the conversation."
+            : "Staff closed the conversation. Resolution notes are optional.",
         ],
         rated: [
           "Private feedback received",
@@ -888,16 +917,40 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       });
       return acknowledge(sent);
     },
+    async ticketOwner(id) {
+      if (typeof id !== "string" || !/^[0-9]{17,20}$/.test(id))
+        throw new AuthError("invalid_ticket_owner", 400);
+      let member;
+      try {
+        member = await (await guild()).members.fetch({ user: id, force: true });
+      } catch (error) {
+        if (error.code === 10007)
+          throw new AuthError("invalid_ticket_owner", 400);
+        throw error;
+      }
+      if (
+        !member?.user ||
+        member.user.id !== id ||
+        member.pending ||
+        member.user.bot
+      )
+        throw new AuthError("invalid_ticket_owner", 400);
+      return actor(member.user, member);
+    },
     async assertMember(id) {
       await (await guild()).members.fetch(id);
     },
-    async ratingNotification(ticket, job, key) {
+    async feedbackPrompt(ticket, job, key) {
       await ready();
-      const deliveryKind = "ticket-rating-delivery",
-        sendKind = "ticket-rating-send";
+      const followup = job.kind === "rating-followup";
+      const prefix = followup
+        ? "ticket-rating-followup"
+        : "ticket-feedback-reminder";
+      const deliveryKind = `${prefix}-delivery`;
+      const sendKind = `${prefix}-send`;
       const delivered = service.store.get(deliveryKind, key);
       if (delivered) return delivered;
-      const { staffId, rating, ratedAt, closureId } = job.notice;
+      const { closureId, hours } = job.notice;
       let intent = service.store.get(sendKind, key);
       const persist = () =>
         service.store.set(sendKind, key, intent, Number.MAX_SAFE_INTEGER);
@@ -905,10 +958,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         const receipt = {
           ticketId: ticket.id,
           closureId,
-          staffId,
+          hours,
           status,
-          ...(sent ? { channelId: intent.channelId, messageId: sent.id } : {}),
           at: Date.now(),
+          ...(sent ? { channelId: intent.channelId, messageId: sent.id } : {}),
         };
         service.store.transaction(() => {
           service.store.set(
@@ -921,21 +974,26 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         });
         return receipt;
       };
-      const recipient = await staffUser(staffId);
-      let authorized = Boolean(recipient);
+      const eligible = () => {
+        if (!followup)
+          return service.feedbackReminderEligible(ticket.id, closureId, hours);
+        const current = service.get(ticket.id);
+        return (
+          (current.closureId || null) === closureId &&
+          ["closed", "awaiting_resolution"].includes(current.status) &&
+          current.rating !== null &&
+          !current.ratingFeedbackAt &&
+          !current.owner.guest
+        );
+      };
+      if (!eligible()) return finish("cancelled");
       try {
-        if (recipient) service.staff(recipient, ticket);
-      } catch (error) {
-        if (error.code !== "ticket_access_denied") throw error;
-        authorized = false;
-      }
-      if (!authorized && !intent) return finish("access_removed");
-      const footer = `Drakora support review · ${key}`;
-      try {
-        const target = await (await client.users.fetch(staffId)).createDM();
+        const target = await (
+          await client.users.fetch(ticket.owner.id)
+        ).createDM();
         if (intent?.channelId && intent.channelId !== target.id)
           throw new Error(
-            "Staff review DM destination changed during delivery",
+            "Feedback reminder destination changed during delivery",
           );
         if (intent) {
           const found = await recoverRatingMessage(
@@ -951,32 +1009,23 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           intent = { channelId: target.id, after: latest.first()?.id || "0" };
           persist();
         }
-        if (!authorized) return finish("access_removed");
+        if (!eligible()) return finish("cancelled");
         intent.attempted = true;
         persist();
         const sent = await target.send({
           embeds: [
             {
-              title: "New support review",
-              description: `You received a new **${rating}-star review** for your Drakora support.\n\n${"★".repeat(rating)}${"☆".repeat(5 - rating)} **${rating} / 5**`,
+              title: followup
+                ? "Thank you for your rating"
+                : "How was your Drakora support?",
+              description: followup
+                ? "Your rating is saved. Want to tell us more? Where can we improve? Written feedback is optional and private. You can skip this step."
+                : "Your ticket is closed. If you have a moment, please rate your support below. Your feedback is private and helps us improve.",
               color: 0xd2bc8c,
-              footer: { text: footer },
-              timestamp: new Date(ratedAt).toISOString(),
+              footer: { text: `Drakora support review · ${key}` },
             },
           ],
-          components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 2,
-                  style: 5,
-                  label: "View ticket",
-                  url: `${config.staffOrigin}/tickets/${ticket.id}`,
-                },
-              ],
-            },
-          ],
+          components: [ratingRow(ticket)],
           allowedMentions: { parse: [] },
           nonce: createHash("sha256").update(key).digest("hex").slice(0, 25),
           enforceNonce: true,
@@ -1114,7 +1163,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 ? [
                     {
                       title: "How was your Drakora support?",
-                      description: `Your ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}\n\nAfter you rate it, the closed Discord channel is removed once staff have recorded the resolution. You can still reopen the ticket on the website.`,
+                      description: `Your ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}\n\nAfter you rate it, the closed Discord channel is removed after its transcript is saved. You can still reopen the ticket on the website.`,
                       color: 0xb92323,
                       fields: [
                         {
@@ -1173,10 +1222,15 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           );
       if (!intro)
         intro = await target.send({
-          content: "",
+          content: ticket.openedBy
+            ? `<@${ticket.owner.id}>, staff opened this private ticket for you.`
+            : "",
           embeds: [overview(ticket)],
           components: controls(ticket),
-          allowedMentions: { parse: [] },
+          allowedMentions: {
+            parse: [],
+            users: ticket.openedBy ? [ticket.owner.id] : [],
+          },
         });
       const hooks = await target.fetchWebhooks();
       let webhook = saved.webhookId
@@ -1242,36 +1296,41 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       )
         throw new Error("Ticket erasure channel ownership does not match");
       const copies = [];
-      for (const [key, intent] of service.store.entries("ticket-rating-send")) {
-        if (!key.startsWith(`${ticket.id}:`) || !intent.attempted) continue;
-        try {
-          const destination = await client.channels.fetch(intent.channelId);
-          if (!destination)
-            throw new Error(
-              "Staff review DM destination unavailable for erasure",
+      for (const sendKind of [
+        "ticket-rating-send",
+        "ticket-feedback-reminder-send",
+        "ticket-rating-followup-send",
+      ])
+        for (const [key, intent] of service.store.entries(sendKind)) {
+          if (!key.startsWith(`${ticket.id}:`) || !intent.attempted) continue;
+          try {
+            const destination = await client.channels.fetch(intent.channelId);
+            if (!destination)
+              throw new Error(
+                "Staff review DM destination unavailable for erasure",
+              );
+            const found = await recoverRatingMessage(
+              destination,
+              key,
+              intent,
+              () =>
+                service.store.set(
+                  sendKind,
+                  key,
+                  intent,
+                  Number.MAX_SAFE_INTEGER,
+                ),
             );
-          const found = await recoverRatingMessage(
-            destination,
-            key,
-            intent,
-            () =>
-              service.store.set(
-                "ticket-rating-send",
-                key,
-                intent,
-                Number.MAX_SAFE_INTEGER,
-              ),
-          );
-          if (found?.pending)
-            throw new Error(
-              "Staff review DM history capture is pending for erasure",
-            );
-          if (found)
-            copies.push({ channelId: intent.channelId, messageId: found.id });
-        } catch (error) {
-          if (error.code !== 10003) throw error;
+            if (found?.pending)
+              throw new Error(
+                "Staff review DM history capture is pending for erasure",
+              );
+            if (found)
+              copies.push({ channelId: intent.channelId, messageId: found.id });
+          } catch (error) {
+            if (error.code !== 10003) throw error;
+          }
         }
-      }
       for (const kind of [
         "ticket-notice-delivery",
         "ticket-notice-send",
@@ -1279,6 +1338,10 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         "ticket-feedback-send",
         "ticket-rating-delivery",
         "ticket-rating-send",
+        "ticket-feedback-reminder-delivery",
+        "ticket-feedback-reminder-send",
+        "ticket-rating-followup-delivery",
+        "ticket-rating-followup-send",
         "partnership-dm-send",
       ])
         for (const [key, value] of service.store.entries(kind))
@@ -1980,9 +2043,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     }
     return batch.size === 100 ? oldest : null;
   }
-  function intake(interaction) {
+  function intake(interaction, owner) {
     const select = new StringSelectMenuBuilder()
-      .setCustomId("ticket:type")
+      .setCustomId(owner ? `ticket:type-for:${owner.id}` : "ticket:type")
       .setPlaceholder("What do you need help with?")
       .addOptions(
         ticketTypes
@@ -1990,7 +2053,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           .map((type) => ({ label: type.name, value: type.id })),
       );
     return interaction.reply({
-      content: `Choose the kind of help you need. Your ticket stays private. By submitting, you agree to the [Terms of Service](${config.applications.publicOrigin}/terms). Read the [Privacy Policy](${config.applications.publicOrigin}/privacy) for data use, retention and your rights.`,
+      content: owner
+        ? `Open a private ticket for ${owner.name}. You will be recorded as the staff member who opened it.`
+        : `Choose the kind of help you need. Your ticket stays private. By submitting, you agree to the [Terms of Service](${config.applications.publicOrigin}/terms). Read the [Privacy Policy](${config.applications.publicOrigin}/privacy) for data use, retention and your rights.`,
       components: [
         new ActionRowBuilder().addComponents(select),
         myTicketsButton(),
@@ -2075,15 +2140,29 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       !interaction.customId?.startsWith("ticket:")
     )
       return;
-    if (
-      interaction.isChatInputCommand() &&
-      interaction.commandName === "ticket"
-    )
-      return intake(interaction);
-    if (!interaction.customId?.startsWith("ticket:")) return;
-    const [, action, selectedId, closureId] = interaction.customId.split(":");
+    const command =
+      interaction.isChatInputCommand() && interaction.commandName === "ticket";
+    if (!command && !interaction.customId?.startsWith("ticket:")) return;
+    const [, action, selectedId, closureId] = (
+      interaction.customId || ""
+    ).split(":");
     const id = action === "mine-choice" ? interaction.values[0] : selectedId;
     try {
+      if (command) {
+        const selected = interaction.options?.getUser("player");
+        if (!selected) return await intake(interaction);
+        await interaction.deferReply({ flags: 64 });
+        service.staff(
+          (await staffUser(interaction.user.id)) || { roles: [] },
+          undefined,
+          "tickets.reply",
+        );
+        const owner = await transport.ticketOwner(selected.id);
+        return await intake(
+          { reply: (data) => interaction.editReply(data) },
+          owner,
+        );
+      }
       if (action === "mine") {
         const mine = service
           .all()
@@ -2120,19 +2199,31 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           flags: 64,
         });
       }
-      if (action === "type") {
+      if (action === "type" || action === "type-for") {
         const type = interaction.values[0];
+        if (action === "type-for")
+          service.staff(
+            (await staffUser(interaction.user.id)) || { roles: [] },
+            { type },
+            "tickets.reply",
+          );
         const form = ticketIntake(type);
         if (!form) throw new AuthError("invalid_ticket", 400);
         return await interaction.showModal(
           new ModalBuilder()
-            .setCustomId(`ticket:intake:${type}`)
+            .setCustomId(
+              action === "type-for"
+                ? `ticket:intake-for:${type}:${id}`
+                : `ticket:intake:${type}`,
+            )
             .setTitle(form.title)
             .addComponents(
               ...form.fields.map((field) =>
                 input(
                   field.id,
-                  field.label,
+                  action === "type-for" && field.id === "ign"
+                    ? "Player Minecraft Java username"
+                    : field.label,
                   field.multiline
                     ? TextInputStyle.Paragraph
                     : TextInputStyle.Short,
@@ -2145,24 +2236,53 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             ),
         );
       }
-      if (action === "intake") {
+      if (action === "intake" || action === "intake-for") {
         const form = ticketIntake(id);
         if (!form) throw new AuthError("invalid_ticket", 400);
         await interaction.deferReply({ flags: 64 });
-        const ticket = service.create(
-          actor(interaction.user, interaction.member),
-          {
-            type: id,
-            ...Object.fromEntries(
-              form.fields.map((field) => [
-                field.id,
-                interaction.fields.getTextInputValue(field.id),
-              ]),
-            ),
-            requestId: randomUUID(),
-          },
-          "discord",
-        );
+        const staffIdentity =
+          action === "intake-for"
+            ? service.staff(
+                (await staffUser(interaction.user.id)) || { roles: [] },
+                { type: id },
+                "tickets.reply",
+              )
+            : null;
+        const owner = staffIdentity
+          ? await transport.ticketOwner(closureId)
+          : actor(interaction.user, interaction.member);
+        const input = {
+          type: id,
+          ...Object.fromEntries(
+            form.fields.map((field) => [
+              field.id,
+              interaction.fields.getTextInputValue(field.id),
+            ]),
+          ),
+          requestId: staffIdentity
+            ? service.store.get("ticket-discord-request", interaction.id)
+                ?.requestId || randomUUID()
+            : randomUUID(),
+        };
+        if (staffIdentity) {
+          service.store.set(
+            "ticket-discord-request",
+            interaction.id,
+            { requestId: input.requestId },
+            Date.now() + 86400000,
+          );
+          const ticket = service.createForStaff(
+            (await staffUser(interaction.user.id)) || { roles: [] },
+            owner,
+            input,
+            "discord",
+          );
+          return await interaction.editReply({
+            content: `Ticket opened for ${owner.name}. View it in the staff panel: ${config.staffOrigin}/tickets/${ticket.id}`,
+            allowedMentions: { parse: [] },
+          });
+        }
+        const ticket = service.create(owner, input, "discord");
         return await acknowledgeIntake(interaction, ticket);
       }
       const ticket = service.get(id),
@@ -2178,6 +2298,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           "takeover",
           "rate",
           "rating",
+          "feedback-submit",
           "reopen",
           "delete",
           "delete-confirm",
@@ -2195,6 +2316,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           "notes",
           "close",
           "resolve",
+          "resolution-prompt",
           "takeover",
           "delete",
           "delete-confirm",
@@ -2234,6 +2356,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         [
           "rate",
           "rating",
+          "rating-feedback",
+          "feedback-submit",
           "reopen",
           "delete",
           "delete-confirm",
@@ -2242,8 +2366,32 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         (closureId ? ticket.closureId !== closureId : ticket.reopenedCount)
       )
         throw new AuthError("ticket_feedback_expired", 409);
+      if (action === "rating-feedback") {
+        service.authorize(user, ticket);
+        if (
+          !["closed", "awaiting_resolution"].includes(ticket.status) ||
+          ticket.rating === null
+        )
+          throw new AuthError("ticket_rating_required", 409);
+        if (ticket.ratingFeedbackAt)
+          throw new AuthError("ticket_feedback_already_saved", 409);
+        return await interaction.showModal(
+          new ModalBuilder()
+            .setCustomId(feedbackId("feedback-submit", ticket))
+            .setTitle("Where can we improve?")
+            .addComponents(
+              input(
+                "feedback",
+                "Tell us more",
+                TextInputStyle.Paragraph,
+                1,
+                2000,
+              ),
+            ),
+        );
+      }
       if (
-        action === "resolve" &&
+        ["resolve", "resolution-prompt"].includes(action) &&
         (closureId === undefined
           ? ticket.reopenedCount
           : closureId !== String(ticket.reopenedCount || 0))
@@ -2274,7 +2422,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         });
       }
       if (
-        action === "close" &&
+        action === "resolution-prompt" &&
         (!owner ||
           (staffIdentity?.capabilities["tickets.close"] &&
             staffIdentity.capabilities[
@@ -2282,30 +2430,35 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             ]))
       ) {
         service.staff(user, ticket, "tickets.close");
-        if (ticket.status === "closed")
+        if (!["closed", "awaiting_resolution"].includes(ticket.status))
+          throw new AuthError("ticket_close_first", 409);
+        if (ticket.resolution)
           return await interaction.reply({
-            content:
-              "The resolution for this closure is already saved. No further resolution is needed.",
+            content: "Resolution notes for this closure are already saved.",
             flags: 64,
           });
         return await interaction.showModal(
           new ModalBuilder()
             .setCustomId(`ticket:resolve:${id}:${ticket.reopenedCount || 0}`)
-            .setTitle("Record the ticket resolution")
+            .setTitle("Optional resolution notes")
             .addComponents(
               input(
                 "summary",
                 "What did you do to resolve the issue?",
                 TextInputStyle.Paragraph,
-                1,
+                0,
                 4000,
+                undefined,
+                false,
               ),
               input(
                 "commands",
-                "Commands run (enter None if none)",
+                "Commands run (optional)",
                 TextInputStyle.Paragraph,
-                1,
+                0,
                 2000,
+                undefined,
+                false,
               ),
             ),
         );
@@ -2395,8 +2548,38 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           closureId,
           action === "takeover-approve",
         );
-      else if (action === "close") service.closeTicket(user, id, {}, false);
-      else if (action === "resolve")
+      else if (action === "close") {
+        const staffClosing =
+          !owner ||
+          Boolean(
+            staffIdentity?.capabilities["tickets.close"] &&
+            staffIdentity.capabilities[
+              `tickets.category.${ticketCategory(ticket)}.close`
+            ],
+          );
+        service.closeTicket(user, id, {}, staffClosing);
+        if (staffClosing)
+          return await interaction.editReply({
+            content:
+              "Ticket closed. You can optionally add private resolution notes now or later in the staff panel.",
+            components: ticket.resolution
+              ? []
+              : [
+                  {
+                    type: 1,
+                    components: [
+                      {
+                        type: 2,
+                        style: 2,
+                        label: "Add resolution notes (optional)",
+                        custom_id: `ticket:resolution-prompt:${id}:${ticket.reopenedCount || 0}`,
+                      },
+                    ],
+                  },
+                ],
+            allowedMentions: { parse: [] },
+          });
+      } else if (action === "resolve")
         service.closeTicket(
           user,
           id,
@@ -2407,9 +2590,28 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           },
           true,
         );
-      else if (action === "rating")
+      else if (action === "rating") {
         service.rate(user, id, Number(interaction.values[0]), closureId);
-      else if (action === "reopen")
+        return await interaction.editReply({
+          content:
+            "Thank you. Your private rating has been saved. You can optionally tell us more below.",
+          components: [ratingFeedbackRow(service.get(id))],
+          allowedMentions: { parse: [] },
+        });
+      } else if (action === "feedback-submit") {
+        service.addRatingFeedback(
+          user,
+          id,
+          interaction.fields.getTextInputValue("feedback"),
+          closureId,
+        );
+        return await interaction.editReply({
+          content:
+            "Thank you. Your private feedback has been saved. Your star rating is unchanged.",
+          components: [],
+          allowedMentions: { parse: [] },
+        });
+      } else if (action === "reopen")
         await service.reopen(user, id, !owner, closureId);
       else if (action === "delete-confirm")
         await service.deleteChannel(user, id, closureId);
@@ -2455,14 +2657,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
               : action === "takeover-deny"
                 ? "Takeover request denied. The assignment has not changed."
                 : action === "close"
-                  ? `Ticket closed. Staff will add the resolution record. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
-                  : action === "rating"
-                    ? "Thank you. Your private rating has been saved."
-                    : action === "delete-confirm"
-                      ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
-                      : action === "reopen"
-                        ? "Ticket reopened. Staff can claim it again."
-                        : "Ticket updated.",
+                  ? `Ticket closed. Resolution notes are optional. Rating and transcript downloads remain available on your private ticket: ${config.applications.publicOrigin}${ticketPath(ticket)}`
+                  : action === "delete-confirm"
+                    ? "Channel deletion requested. The transcript will be saved before removal; dashboard history is kept."
+                    : action === "reopen"
+                      ? "Ticket reopened. Staff can claim it again."
+                      : "Ticket updated.",
       );
     } catch (error) {
       const message =
@@ -2486,6 +2686,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           ticket_closed:
             "This ticket is closed. Reopen it before claiming or taking it over.",
           ticket_access_denied: "You do not have permission to do that.",
+          invalid_ticket_owner:
+            "Choose a human member of the main Drakora Discord server who has completed membership screening.",
           ticket_limit:
             "You already have three open tickets. Continue in an existing ticket.",
           invalid_ticket:
@@ -2495,6 +2697,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
           ticket_close_first:
             "Close the ticket before deleting its Discord channel.",
           ticket_already_rated: "You have already rated this ticket.",
+          ticket_rating_required:
+            "Please submit your star rating first. Written feedback is optional.",
+          ticket_feedback_already_saved:
+            "Your written feedback for this rating is already saved.",
+          invalid_rating_feedback:
+            "Enter feedback between 1 and 2,000 characters, or close the form to skip it. Your star rating is already saved.",
           ticket_feedback_expired:
             "These options belong to an earlier closure. Use My tickets in the ticket panel for current options.",
           ticket_reopen_pending:

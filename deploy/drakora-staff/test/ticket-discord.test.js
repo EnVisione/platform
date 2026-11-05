@@ -9,7 +9,7 @@ import { ticketDiscord } from "../server/ticket-discord.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
-function setupDiscord(t, notices = false, dedicatedRole = false) {
+function setupDiscord(t, notices = false, dedicatedRole = false, options = {}) {
   const config = {
     ...fixture,
     staffOrigin: "https://staff.example.invalid",
@@ -27,7 +27,7 @@ function setupDiscord(t, notices = false, dedicatedRole = false) {
   };
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   const policy = rolePermissions(config, store),
-    service = ticketService(config, store, policy);
+    service = ticketService(config, store, policy, options);
   const client = new EventEmitter();
   client.user = { id: "bot" };
   client.isReady = () => true;
@@ -3640,4 +3640,169 @@ test("ticket erasure recovers and deletes an uncertain staff rating DM without s
   assert.equal(dm.savedMessages.size, 0);
   assert.equal(service.store.entries("ticket-rating-send").length, 0);
   assert.equal(service.store.entries("ticket-outbox").length, 0);
+});
+
+test("rating feedback works privately from a DM or deleted ticket channel", async (t) => {
+  for (const route of ["dm", "channel"])
+    await t.test(route, async (t) => {
+      const app = setupDiscord(t);
+      const { service, transport, user, client, channels, staffDms, dms } = app;
+      const ticket = await supportTicket(service, user, transport);
+      const manager = await transport.staffUser("200");
+      service.claim(manager, ticket.id);
+      service.closeTicket(
+        manager,
+        ticket.id,
+        {
+          summary: "Fixed the reported issue and verified the result.",
+          commands: "None",
+        },
+        true,
+      );
+      await service.pump();
+      const closure = service.get(ticket.id).closureId;
+      const channelId = service.get(ticket.id).channelId;
+      const result = await click(
+        client,
+        user,
+        `ticket:rating:${ticket.id}:${closure}`,
+        ["4"],
+        route === "dm" ? null : "2",
+      );
+      assert.equal(result.flags, 64);
+      assert.match(result.data.content, /private rating has been saved/);
+      assert.equal(
+        result.data.components[0].components[0].label,
+        "Tell us more (optional)",
+      );
+      await service.pump();
+      assert.equal(channels.has(channelId), false);
+      const prompt = dms.find(
+        (message) => message.embeds?.[0]?.title === "Thank you for your rating",
+      );
+      assert.ok(prompt);
+      assert.match(prompt.embeds[0].description, /optional/);
+      const button = prompt.components[0].components[0].custom_id;
+      const denied = await click(client, { ...user, id: "200" }, button);
+      assert.equal(denied.modal, undefined);
+      const { modal } = await click(client, user, button, [], null);
+      assert.equal(modal.title, "Where can we improve?");
+      assert.ok(modal.custom_id.length <= 100);
+      const body = "Please explain the troubleshooting steps more clearly.";
+      const submitted = await click(client, user, modal.custom_id, [], null, {
+        feedback: body,
+      });
+      assert.match(submitted.data.content, /private feedback has been saved/);
+      assert.equal(service.get(ticket.id).rating, 4);
+      const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+      assert.equal(
+        service
+          .view(founder, ticket.id, true)
+          .history.find((x) => x.action === "rating_feedback").detail,
+        `Player feedback: ${body}`,
+      );
+      assert.ok(
+        [...staffDms.values()]
+          .flat()
+          .every((message) => !JSON.stringify(message).includes(body)),
+      );
+      const repeated = await click(client, user, modal.custom_id, [], null, {
+        feedback: body,
+      });
+      assert.match(repeated.data, /already saved/);
+    });
+});
+
+test("rating feedback followup recovers an uncertain DM send without duplication", async (t) => {
+  const app = setupDiscord(t);
+  const { service, transport, user, client } = app;
+  const ticket = await supportTicket(service, user, transport);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const target = await (await client.users.fetch(user.id)).createDM();
+  target.failAfterBotSend = true;
+  service.rate(user, ticket.id, 5, service.get(ticket.id).closureId);
+  await service.pump();
+  const count = target.savedMessages.size;
+  target.failAfterBotSend = false;
+  for (const [key, job] of service.store.entries("ticket-outbox"))
+    service.store.set(
+      "ticket-outbox",
+      key,
+      { ...job, after: 0 },
+      Number.MAX_SAFE_INTEGER,
+    );
+  await service.pump();
+  assert.equal(target.savedMessages.size, count);
+  assert.equal(
+    service.store.entries("ticket-rating-followup-delivery")[0][1].status,
+    "delivered",
+  );
+});
+
+test("rating feedback blocked DMs leave the saved rating intact", async (t) => {
+  const { service, transport, user, client } = setupDiscord(t);
+  const ticket = await supportTicket(service, user, transport);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  client.users.fetch = async () => {
+    throw Object.assign(new Error("DM blocked"), { code: 50007 });
+  };
+  service.rate(user, ticket.id, 3, service.get(ticket.id).closureId);
+  await service.pump();
+  assert.equal(service.get(ticket.id).rating, 3);
+  assert.equal(
+    service.store.entries("ticket-rating-followup-delivery")[0][1].status,
+    "blocked",
+  );
+});
+
+test("rating feedback prompts preserve six and twenty four hour reminders", async (t) => {
+  let at = Date.now();
+  const { service, transport, user, dms } = setupDiscord(t, false, false, {
+    now: () => at,
+  });
+  const ticket = await supportTicket(service, user, transport);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  for (const hours of [6, 24]) {
+    at = service.get(ticket.id).feedbackReminderAt + hours * 3600000;
+    await service.pump();
+    assert.ok(
+      service.store
+        .entries("ticket-feedback-reminder-delivery")
+        .some(([, x]) => x.hours === hours && x.status === "delivered"),
+    );
+  }
+  assert.equal(
+    dms.filter((x) =>
+      x.embeds?.[0]?.footer?.text.includes(":feedback-reminder:"),
+    ).length,
+    2,
+  );
+});
+
+test("rating feedback followup and private comments follow ticket erasure", async (t) => {
+  const app = setupDiscord(t);
+  const { service, transport, user } = app;
+  const ticket = await supportTicket(service, user, transport);
+  service.closeTicket(user, ticket.id, {});
+  await service.pump();
+  const closure = service.get(ticket.id).closureId;
+  service.rate(user, ticket.id, 5, closure);
+  await service.pump();
+  service.addRatingFeedback(
+    user,
+    ticket.id,
+    "Please keep explaining the steps clearly.",
+    closure,
+  );
+  assert.ok(app.dmChannel.savedMessages.size >= 2);
+  assert.equal(await service.eraseInactive(ticket.id, Date.now() + 1000), true);
+  assert.equal(app.dmChannel.savedMessages.size, 0);
+  assert.equal(service.store.entries(`ticket-history:${ticket.id}`).length, 0);
+  assert.equal(
+    service.store.entries("ticket-rating-followup-delivery").length,
+    0,
+  );
 });

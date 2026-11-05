@@ -1603,3 +1603,120 @@ test("staff support summaries preserve closure attribution, deduplicate resoluti
   assert.equal(service.staffStats(manager).get(helper.id).reviewCount, 0);
   assert.equal(service.staffStats(manager).has(manager.id), false);
 });
+
+test("rating feedback requires the rated closure and stays private to Founders", async (t) => {
+  const { service, store } = setup(t);
+  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const ticket = service.create(owner, input());
+  service.claim(helper, ticket.id);
+  service.closeTicket(
+    helper,
+    ticket.id,
+    {
+      summary: "Resolved and verified the reported issue.",
+      commands: "None",
+    },
+    true,
+  );
+  const closure = service.get(ticket.id).closureId;
+  fails(
+    () => service.addRatingFeedback(owner, ticket.id, "More detail", closure),
+    "ticket_rating_required",
+  );
+  service.rate(owner, ticket.id, 2, closure);
+  fails(
+    () =>
+      service.addRatingFeedback(
+        { id: "stranger" },
+        ticket.id,
+        "More detail",
+        closure,
+      ),
+    "ticket_not_found",
+  );
+  fails(
+    () => service.addRatingFeedback(founder, ticket.id, "More detail", closure),
+    "ticket_not_found",
+  );
+  fails(
+    () =>
+      service.addRatingFeedback(owner, ticket.id, "More detail", randomUUID()),
+    "ticket_feedback_expired",
+  );
+  for (const body of [" ", "a".repeat(2001), "bad\0input"])
+    fails(
+      () => service.addRatingFeedback(owner, ticket.id, body, closure),
+      "invalid_rating_feedback",
+    );
+  const body = "Please explain the steps before closing the ticket.";
+  service.addRatingFeedback(owner, ticket.id, body, closure);
+  assert.equal(service.get(ticket.id).rating, 2);
+  assert.equal(service.staffStats(founder).get(helper.id).reviewCount, 1);
+  const feedback = (user) =>
+    service
+      .view(user, ticket.id, true)
+      .history.filter((entry) => entry.action === "rating_feedback");
+  assert.equal(feedback(founder)[0].detail, `Player feedback: ${body}`);
+  assert.deepEqual(feedback(manager), []);
+  assert.deepEqual(feedback(helper), []);
+  assert.equal(
+    service.list(manager, { closed: true }).items[0].ratingFeedbackAt,
+    undefined,
+  );
+  fails(
+    () => service.addRatingFeedback(owner, ticket.id, body, closure),
+    "ticket_feedback_already_saved",
+  );
+  for (const [key] of store.entries("ticket-outbox"))
+    store.delete("ticket-outbox", key);
+  await service.reopen(owner, ticket.id);
+  assert.equal(service.get(ticket.id).ratingFeedbackAt, undefined);
+  assert.ok(
+    service.view(founder, ticket.id, true).previousResolutions[0]
+      .ratingFeedbackAt,
+  );
+  assert.equal(
+    service.view(manager, ticket.id, true).previousResolutions[0]
+      .ratingFeedbackAt,
+    undefined,
+  );
+  fails(
+    () => service.addRatingFeedback(owner, ticket.id, body, closure),
+    "ticket_feedback_expired",
+  );
+  assert.equal(feedback(founder).length, 1);
+});
+
+test("resolved totals include a reopened ticket while closed logs exclude it", async (t) => {
+  const { service, store } = setup(t);
+  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const tickets = [];
+  for (const rating of [5, 5, 1, null, null]) {
+    const ticket = service.create(owner, input());
+    service.claim(helper, ticket.id);
+    service.closeTicket(
+      helper,
+      ticket.id,
+      {
+        summary: "Resolved and verified the reported issue.",
+        commands: "None",
+      },
+      true,
+    );
+    if (rating !== null)
+      service.rate(owner, ticket.id, rating, ticket.closureId);
+    tickets.push(ticket);
+  }
+  for (const [key] of store.entries("ticket-outbox"))
+    store.delete("ticket-outbox", key);
+  await service.reopen(owner, tickets[2].id);
+  service.claim(otherStaff, tickets[2].id);
+  const stats = service.staffStats(founder).get(helper.id);
+  assert.equal(stats.ticketsResolved, 5);
+  assert.equal(stats.reviewCount, 3);
+  assert.equal(stats.averageRating, 11 / 3);
+  assert.equal(
+    service.list(founder, { closed: true, staff: helper.id }).total,
+    4,
+  );
+});

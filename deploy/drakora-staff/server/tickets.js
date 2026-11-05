@@ -1,4 +1,5 @@
 import { randomUUID, randomBytes, createHash } from "node:crypto";
+import { staffSupportTotals } from "./staff-support-totals.js";
 import { EventEmitter } from "node:events";
 import { AuthError } from "./discord.js";
 import { listFilters, matchesText } from "./list-filters.js";
@@ -42,6 +43,7 @@ export function ticketService(
   rolePolicy,
   { now = Date.now, onActivity = () => {} } = {},
 ) {
+  const supportTotals = staffSupportTotals(store, { now });
   const events = new EventEmitter();
   events.setMaxListeners(200);
   let transport,
@@ -152,6 +154,8 @@ export function ticketService(
       `${String(ticket.revision).padStart(12, "0")}:${entry.id}`,
       entry,
     );
+    if (["claimed", "taken_over", "closed", "rated"].includes(action))
+      supportTotals.observe(ticket, entry);
     put("ticket", ticket.id, ticket);
     if (
       ticket.type !== "partnership" &&
@@ -188,6 +192,7 @@ export function ticketService(
   function view(user, id, staffView = false, before) {
     const ticket = get(id);
     authorize(user, ticket, staffView);
+    const ratingsVisible = !staffView || rolePolicy.isFounder(user);
     const page = store.page(
       `ticket-messages:${id}`,
       50,
@@ -219,10 +224,16 @@ export function ticketService(
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       revision: ticket.revision,
-      rating: ticket.rating,
-      ratedAt: ticket.ratedAt || null,
-      ratingStaff: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
+      ...(ratingsVisible
+        ? {
+            rating: ticket.rating,
+            ratedAt: ticket.ratedAt || null,
+            ratingStaff:
+              ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
+          }
+        : {}),
       closureId: ticket.closureId || null,
+      cycle: ticket.reopenedCount || 0,
       channelRetained: Boolean(ticket.channelId),
       deletionPending: store
         .entries("ticket-outbox")
@@ -247,7 +258,12 @@ export function ticketService(
       history: store
         .entries(`ticket-history:${id}`)
         .map(([, entry]) => entry)
-        .filter((entry) => staffView || !entry.internal),
+        .filter(
+          (entry) =>
+            (staffView || !entry.internal) &&
+            (ratingsVisible ||
+              !["rated", "rating_feedback"].includes(entry.action)),
+        ),
       viewers: staffView
         ? [
             ...new Map(
@@ -260,7 +276,7 @@ export function ticketService(
         : [],
     };
     if (staffView) {
-      if (ticket.closureId && ticket.type !== "partnership") {
+      if (ratingsVisible && ticket.closureId && ticket.type !== "partnership") {
         const key = `${id}:feedback:${ticket.closureId}`;
         const delivery = store.get("ticket-feedback-delivery", key);
         const job = store.get("ticket-outbox", key);
@@ -351,6 +367,13 @@ export function ticketService(
               }
             : null,
         }));
+      if (!ratingsVisible)
+        for (const closure of safe.previousResolutions) {
+          delete closure.rating;
+          delete closure.ratedAt;
+          delete closure.ratingSubmittedAt;
+          delete closure.ratingFeedbackAt;
+        }
       safe.deliveryIssues = store
         .entries(
           ticket.type === "partnership"
@@ -401,12 +424,13 @@ export function ticketService(
         .entries(`ticket-closures:${ticket.id}`)
         .map(([, closure]) => closure);
       closures.push({
+        closedBy: ticket.closedBy,
         resolution: ticket.resolution,
         rating: ticket.rating,
         claimedBy: ticket.ratingStaff || assigned,
       });
       for (const closure of closures) {
-        const resolver = closure.resolution?.actor?.id;
+        const resolver = (closure.closedBy || closure.resolution?.actor)?.id;
         if (resolver) {
           if (!resolved.has(resolver)) resolved.set(resolver, new Set());
           resolved.get(resolver).add(ticket.id);
@@ -429,6 +453,10 @@ export function ticketService(
         ? summary.ratingTotal / summary.reviewCount
         : null;
       delete summary.ratingTotal;
+      if (!rolePolicy.isFounder(current)) {
+        delete summary.averageRating;
+        delete summary.reviewCount;
+      }
     }
     return stats;
   }
@@ -450,6 +478,7 @@ export function ticketService(
         ticket.claimedBy,
         ticket.helpedBy,
         ticket.ratingStaff,
+        ticket.closedBy,
         ticket.resolution?.actor,
         ticket.partnership?.decision?.actor,
       ];
@@ -466,6 +495,8 @@ export function ticketService(
           matchesText(staffTerm, [
             closure.claimedBy?.id,
             closure.claimedBy?.name,
+            closure.closedBy?.id,
+            closure.closedBy?.name,
             closure.resolution?.actor?.id,
             closure.resolution?.actor?.name,
           ]),
@@ -521,7 +552,17 @@ export function ticketService(
         a.id.localeCompare(b.id),
     );
     return {
-      items: filtered.slice(offset, offset + 50),
+      items: filtered.slice(offset, offset + 50).map((ticket) => {
+        const item = { ...ticket };
+        delete item.supportTotals;
+        if (!rolePolicy.isFounder(current)) {
+          delete item.rating;
+          delete item.ratedAt;
+          delete item.ratingStaff;
+          delete item.ratingFeedbackAt;
+        }
+        return item;
+      }),
       total: filtered.length,
       pageSize: 50,
       categories: ticketCategories
@@ -536,6 +577,15 @@ export function ticketService(
     };
   }
   function create(user, input, origin = "web", guestNetwork) {
+    return createTicket(user, input, origin, guestNetwork);
+  }
+  function createForStaff(user, owner, input, origin = "web") {
+    const current = staff(user, { type: input.type }, "tickets.reply");
+    if (!owner?.id || owner.guest || owner.bot)
+      throw new AuthError("invalid_ticket_owner", 400);
+    return createTicket(owner, input, origin, undefined, current);
+  }
+  function createTicket(user, input, origin, guestNetwork, openedBy) {
     if (!user?.id || !["web", "discord"].includes(origin))
       throw new AuthError("ticket_origin_disabled", 400);
     if (
@@ -554,9 +604,18 @@ export function ticketService(
       if (!validMailAddress(contactEmail))
         throw new AuthError("invalid_ticket_email", 400);
     }
-    const prior = store.get("ticket-request", `${user.id}:${requestId}`);
-    if (prior) return get(prior.id);
+    const requestKey = openedBy
+      ? `staff:${openedBy.id}:${requestId}`
+      : `${user.id}:${requestId}`;
+    const prior = store.get("ticket-request", requestKey);
+    if (prior) {
+      const ticket = get(prior.id);
+      if (ticket.owner.id !== user.id || ticket.type !== input.type)
+        throw new AuthError("invalid_request", 409);
+      return ticket;
+    }
     if (
+      !openedBy &&
       !user.guest &&
       store
         .entries("ticket")
@@ -584,6 +643,7 @@ export function ticketService(
       type: input.type,
       ...intake,
       owner: publicActor(user),
+      ...(openedBy ? { openedBy: publicActor(openedBy) } : {}),
       ...(user.guest ? { guestNetwork, contactEmail } : {}),
       origin,
       status: "pending",
@@ -608,7 +668,16 @@ export function ticketService(
           )
       )
         throw new AuthError("ticket_ip_limit", 409);
-      audit(ticket, user, "opened", "Ticket opened");
+      audit(
+        ticket,
+        openedBy || user,
+        "opened",
+        openedBy
+          ? "Staff opened this ticket on behalf of the owner"
+          : "Ticket opened",
+        false,
+        !openedBy,
+      );
       queue(ticket, "create");
       if (transport?.notesThread) queue(ticket, "notes-thread");
       if (config.tickets.staffChannelId)
@@ -620,7 +689,7 @@ export function ticketService(
             after: ticket.createdAt + (event === "unclaimed" ? 3600000 : 0),
             attempts: 0,
           });
-      put("ticket-request", `${user.id}:${requestId}`, { id: ticket.id });
+      put("ticket-request", requestKey, { id: ticket.id });
     });
     announce(ticket);
     return ticket;
@@ -1136,20 +1205,35 @@ export function ticketService(
     announce(ticket);
     return ticket;
   }
-  function closeTicket(user, id, input, staffView = false) {
+  function closeTicket(user, id, input = {}, staffView = false) {
     const ticket = get(id);
     authorize(user, ticket, staffView, "tickets.close");
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      throw new AuthError("invalid_resolution", 400);
     if (
       input?.cycle !== undefined &&
       input.cycle !== (ticket.reopenedCount || 0)
     )
       throw new AuthError("ticket_feedback_expired", 409);
-    if (ticket.status === "closed") return ticket;
-    if (!staffView && ticket.status === "awaiting_resolution") return ticket;
-    const resolution = staffView
+    const alreadyClosed = ["closed", "awaiting_resolution"].includes(
+      ticket.status,
+    );
+    const summary = staffView
+      ? text(input.summary ?? "", 0, 4000, "invalid_resolution")
+      : "";
+    const commands = staffView
+      ? text(input.commands ?? "", 0, 2000, "invalid_resolution")
+      : "";
+    const hasResolution =
+      staffView &&
+      (Boolean(summary) ||
+        Boolean(commands) ||
+        Boolean(input.attachments?.length));
+    if (alreadyClosed && (!hasResolution || ticket.resolution)) return ticket;
+    const resolution = hasResolution
       ? {
-          summary: text(input.summary, 1, 4000, "resolution_required"),
-          commands: text(input.commands, 1, 2000, "commands_required"),
+          summary,
+          commands: commands || "None",
           actor: publicActor(user),
           at: now(),
         }
@@ -1160,9 +1244,13 @@ export function ticketService(
         ticket.ratingStaff = ticket.claimedBy || ticket.helpedBy;
         if (!ticket.owner.guest && ticket.type !== "partnership")
           queue(ticket, "feedback", ticket.closureId);
+        ticket.feedbackReminderAt = now();
       }
-      ticket.status = staffView ? "closed" : "awaiting_resolution";
-      ticket.closedAt = now();
+      ticket.status = "closed";
+      if (!alreadyClosed) {
+        ticket.closedAt = now();
+        ticket.closedBy = staffView ? publicActor(user) : null;
+      }
       syncTakeoverRequest(ticket);
       if (resolution) {
         resolution.attachments = files(
@@ -1176,10 +1264,14 @@ export function ticketService(
       audit(
         ticket,
         user,
-        "closed",
-        staffView
-          ? "Staff recorded the resolution and closed the ticket"
-          : "Player closed the ticket; staff resolution is pending",
+        alreadyClosed ? "resolution" : "closed",
+        alreadyClosed
+          ? "Staff added optional private resolution notes"
+          : staffView
+            ? "Staff closed the ticket; resolution notes are optional"
+            : "Player closed the ticket; resolution notes are optional",
+        alreadyClosed,
+        !alreadyClosed,
       );
       if (!ticket.discordDeletedAt && !ticket.discordArchivedAt)
         queue(ticket, "status");
@@ -1246,9 +1338,11 @@ export function ticketService(
         ticket.closureId || String(ticket.closedAt),
         {
           at: ticket.closedAt,
+          closedBy: ticket.closedBy,
           claimedBy: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
           rating: ticket.rating,
           ratedAt: ticket.ratedAt || null,
+          ratingFeedbackAt: ticket.ratingFeedbackAt || null,
           resolution: ticket.resolution,
         },
       );
@@ -1259,8 +1353,10 @@ export function ticketService(
       syncTakeoverRequest(ticket);
       ticket.helpedBy = null;
       ticket.resolution = null;
+      delete ticket.closedBy;
       ticket.rating = null;
       ticket.ratedAt = null;
+      delete ticket.ratingFeedbackAt;
       ticket.ratingStaff = null;
       ticket.reopenedCount = (ticket.reopenedCount || 0) + 1;
       if (!ticket.channelId) {
@@ -1358,21 +1454,48 @@ export function ticketService(
       ticket.ratedAt = now();
       audit(ticket, user, "rated", `Player rated the help ${rating}/5`);
       queueActivity(ticket, "rated", user);
-      if (ticket.ratingStaff?.id)
-        queue(ticket, "rating-notification", ticket.closureId, {
-          staffId: ticket.ratingStaff.id,
-          rating,
-          ratedAt: ticket.ratedAt,
-          closureId: ticket.closureId,
-        });
+      queue(
+        ticket,
+        "rating-followup",
+        ticket.closureId || String(ticket.closedAt),
+        {
+          closureId: ticket.closureId || null,
+        },
+      );
       autoDeleteRated(ticket);
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function addRatingFeedback(user, id, body, closureId) {
+    const ticket = get(id);
+    authorize(user, ticket);
+    if ((closureId ?? null) !== (ticket.closureId || null))
+      throw new AuthError("ticket_feedback_expired", 409);
+    if (
+      !["closed", "awaiting_resolution"].includes(ticket.status) ||
+      ticket.rating === null
+    )
+      throw new AuthError("ticket_rating_required", 409);
+    if (ticket.ratingFeedbackAt)
+      throw new AuthError("ticket_feedback_already_saved", 409);
+    const bodyText = text(body, 1, 2000, "invalid_rating_feedback");
+    store.transaction(() => {
+      ticket.ratingFeedbackAt = now();
+      audit(
+        ticket,
+        user,
+        "rating_feedback",
+        `Player feedback: ${bodyText}`,
+        true,
+      );
     });
     announce(ticket);
     return ticket;
   }
   function autoDeleteRated(ticket) {
     if (
-      ticket.status !== "closed" ||
+      !["closed", "awaiting_resolution"].includes(ticket.status) ||
       ticket.rating === null ||
       !ticket.channelId
     )
@@ -1658,10 +1781,61 @@ export function ticketService(
     });
     announce(ticket);
   }
+  let nextReminderScan = 0;
+  function feedbackReminderEligible(id, closureId, hours) {
+    const ticket = get(id);
+    return (
+      ticket.closureId === closureId &&
+      ticket.rating === null &&
+      ["closed", "awaiting_resolution"].includes(ticket.status) &&
+      [6, 24].includes(hours) &&
+      Number.isFinite(ticket.feedbackReminderAt) &&
+      now() >= ticket.feedbackReminderAt + hours * 3600000 &&
+      (hours !== 6 || now() < ticket.feedbackReminderAt + 24 * 3600000)
+    );
+  }
+  function scheduleFeedbackReminders() {
+    if (now() < nextReminderScan) return;
+    nextReminderScan = now() + 60000;
+    for (const [, ticket] of store.entries("ticket")) {
+      if (
+        !Number.isFinite(ticket.feedbackReminderAt) ||
+        ticket.erasingAt ||
+        ticket.owner.guest ||
+        ticket.type === "partnership" ||
+        ticket.rating !== null ||
+        !["closed", "awaiting_resolution"].includes(ticket.status)
+      )
+        continue;
+      for (const hours of [6, 24]) {
+        if (now() < ticket.feedbackReminderAt + hours * 3600000) continue;
+        const ref = `${ticket.closureId}:${hours}`;
+        const key = `${ticket.id}:feedback-reminder:${ref}`;
+        if (
+          store.get("ticket-feedback-reminder-delivery", key) ||
+          store.get("ticket-outbox", key)
+        )
+          continue;
+        if (hours === 6 && now() >= ticket.feedbackReminderAt + 24 * 3600000) {
+          put("ticket-feedback-reminder-delivery", key, {
+            ticketId: ticket.id,
+            status: "superseded",
+            at: now(),
+          });
+          continue;
+        }
+        queue(ticket, "feedback-reminder", ref, {
+          closureId: ticket.closureId,
+          hours,
+        });
+      }
+    }
+  }
   async function pump() {
     if (!transport || stopped || running) return running;
     running = Promise.resolve()
       .then(async () => {
+        scheduleFeedbackReminders();
         const blocked = new Set(),
           notesBlocked = new Set();
         const priority = {
@@ -1673,7 +1847,8 @@ export function ticketService(
           activity: 3,
           delete: 4,
           feedback: 5,
-          "rating-notification": 6,
+          "feedback-reminder": 6,
+          "rating-followup": 7,
         };
         let attempts = 0;
         for (const [key, job] of store
@@ -1687,6 +1862,10 @@ export function ticketService(
                 : 0) ||
               a.ref.localeCompare(b.ref),
           )) {
+          if (job.kind === "rating-notification") {
+            store.delete("ticket-outbox", key);
+            continue;
+          }
           if (
             job.kind !== "create" &&
             (job.kind === "note" ? notesBlocked : blocked).has(job.ticketId)
@@ -1699,7 +1878,26 @@ export function ticketService(
           }
           if (store.get("ticket", job.ticketId)?.erasingAt) continue;
           const ticket = get(job.ticketId);
-          if (job.kind === "rating-notification") {
+          if (job.kind === "rating-followup") {
+            if (
+              job.notice.closureId !== (ticket.closureId || null) ||
+              ticket.rating === null ||
+              ticket.ratingFeedbackAt ||
+              !["closed", "awaiting_resolution"].includes(ticket.status)
+            ) {
+              store.delete("ticket-outbox", key);
+              continue;
+            }
+            if (job.failed) continue;
+          } else if (job.kind === "feedback-reminder") {
+            if (
+              job.notice.closureId !== ticket.closureId ||
+              ticket.rating !== null ||
+              !["closed", "awaiting_resolution"].includes(ticket.status)
+            ) {
+              store.delete("ticket-outbox", key);
+              continue;
+            }
             if (job.failed) continue;
           } else if (job.kind === "feedback") {
             const intent = store.get("ticket-feedback-send", key);
@@ -1748,12 +1946,10 @@ export function ticketService(
             } else if (job.kind === "feedback") {
               const result = await transport.feedback(ticket, job, key);
               if (result?.pending) continue;
-            } else if (job.kind === "rating-notification") {
-              const result = await transport.ratingNotification(
-                ticket,
-                job,
-                key,
-              );
+            } else if (
+              ["feedback-reminder", "rating-followup"].includes(job.kind)
+            ) {
+              const result = await transport.feedbackPrompt(ticket, job, key);
               if (result?.pending) continue;
             } else if (["status", "activity", "delete"].includes(job.kind)) {
               if (
@@ -1761,7 +1957,9 @@ export function ticketService(
                 (ticket.channelId !== job.ref ||
                   (job.notice?.automatic &&
                     (ticket.closureId !== job.notice.closureId ||
-                      ticket.status !== "closed" ||
+                      !["closed", "awaiting_resolution"].includes(
+                        ticket.status,
+                      ) ||
                       ticket.rating === null)) ||
                   !["closed", "awaiting_resolution"].includes(ticket.status))
               ) {
@@ -1845,7 +2043,11 @@ export function ticketService(
             job.after =
               now() + Math.min(60000, 1000 * 2 ** Math.min(job.attempts, 6));
             job.failure = error.code || "discord_unavailable";
-            if (["feedback", "rating-notification"].includes(job.kind))
+            if (
+              ["feedback", "feedback-reminder", "rating-followup"].includes(
+                job.kind,
+              )
+            )
               job.failed = job.attempts >= 20;
             if (store.get("ticket-outbox", key)?.generation === job.generation)
               put("ticket-outbox", key, job);
@@ -1954,20 +2156,26 @@ export function ticketService(
           !["closed", "awaiting_resolution"].includes(ticket.status)
         )
           continue;
+        if (ticket.status === "awaiting_resolution") {
+          ticket.status = "closed";
+          put("ticket", ticket.id, ticket);
+        }
         queueActivity(
           ticket,
-          ticket.status === "closed" ? "resolved" : "closed",
-          ticket.resolution?.actor || ticket.owner,
+          ticket.closedBy || ticket.resolution ? "resolved" : "closed",
+          ticket.closedBy || ticket.resolution?.actor || ticket.owner,
           true,
         );
         if (ticket.rating !== null)
           queueActivity(ticket, "rated", ticket.owner, true);
+        autoDeleteRated(ticket);
       }
     },
     get,
     list,
     view,
     create,
+    createForStaff,
     createPartnership,
     decidePartnership,
     visible,
@@ -1986,6 +2194,8 @@ export function ticketService(
     reopen,
     deleteChannel,
     rate,
+    addRatingFeedback,
+    feedbackReminderEligible,
     media,
     upload,
     ingest,
