@@ -1,8 +1,4 @@
-import {
-  ticketStatusLabel,
-  ticketTypes,
-  ticketDetails,
-} from "../shared/tickets.js";
+import { ticketStatusLabel, ticketTypes } from "../shared/tickets.js";
 
 const escape = (value) =>
   String(value ?? "").replace(
@@ -20,6 +16,12 @@ const imageTypes = new Set([
   "image/webp",
   "image/gif",
 ]);
+const ratingDecision = (record) =>
+  !record.ratingOverride
+    ? ""
+    : record.ratingOverride.value === null
+      ? "<p>Excluded from averages.</p>"
+      : `<p>Counted rating overridden to ${escape(record.ratingOverride.value)}/5.</p>`;
 
 export async function ticketTranscript(
   service,
@@ -29,11 +31,10 @@ export async function ticketTranscript(
   attachmentBytes,
   { authorizeAsStaff = false } = {},
 ) {
-  const ticket = service.get(id);
-  service.authorize(user, ticket, staffView || authorizeAsStaff);
-  const history = service
-    .view(user, id, staffView || authorizeAsStaff)
-    .history.filter((entry) => staffView || !entry.internal);
+  const ticket = service.view(user, id, staffView || authorizeAsStaff);
+  const history = ticket.history.filter(
+    (entry) => staffView || !entry.internal,
+  );
   let embeddedBytes = 0;
   async function attachment(fileId) {
     const file = service.store.get("ticket-media", fileId);
@@ -68,22 +69,18 @@ export async function ticketTranscript(
     );
   }
   let resolution = "";
-  const closures = service.store
-    .entries(`ticket-closures:${id}`)
-    .map(([, closure]) => closure);
+  const closures = ticket.previousResolutions || [];
   for (const closure of [...closures, { resolution: ticket.resolution }]) {
-    if (!staffView || !closure.resolution) continue;
+    if (!staffView || (!closure.resolution && !closure.rating)) continue;
     const record = closure.resolution;
     const files = [];
-    for (const fileId of record.attachments)
-      files.push(await attachment(fileId));
-    resolution += `<section><h2>Private staff resolution</h2><p>${escape(record.summary)}</p><h3>Commands run</h3><p>${escape(record.commands)}</p><p>Recorded by ${escape(record.actor.name)} · ${escape(date(record.at))}</p>${closure.rating ? `<p>Private rating: ${closure.rating}/5 · ${escape(closure.claimedBy?.name)}</p>` : ""}${files.join("")}</section>`;
+    for (const file of record?.attachments || [])
+      if (file) files.push(await attachment(file.id));
+    resolution += `<section><h2>${record ? "Private staff resolution" : "Previous closure"}</h2>${record ? `<p>${escape(record.summary)}</p><h3>Commands run</h3><p>${escape(record.commands)}</p><p>Recorded by ${escape(record.actor.name)} · ${escape(date(record.at))}</p>` : ""}${closure.rating ? `<p>Private rating: ${closure.rating}/5 · ${escape(closure.claimedBy?.name)}</p>` : ""}${ratingDecision(closure)}${files.join("")}</section>`;
   }
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Drakora ticket · ${escape(ticket.ign)}</title><style>body{margin:0;background:#313338;color:#dbdee1;font:16px/1.5 system-ui,sans-serif}main{max-width:960px;margin:auto;padding:32px 20px}h1,h2,strong{color:#f2f3f5}section{padding:20px;background:#2b2d31;margin-bottom:20px}p{white-space:pre-wrap;overflow-wrap:anywhere}header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}time,small,figcaption{font-size:12px;color:#b5bac1}.message{display:grid;grid-template-columns:40px 1fr;gap:16px;padding:16px 0}.message p{margin:4px 0}.avatar{width:40px;height:40px;background:#1e1f22;border-radius:50%;display:grid;place-items:center}.badge{font-size:10px;background:#b92323;color:white;padding:1px 4px}figure{margin:12px 0}img{max-width:100%;max-height:420px}a{color:#a7c7ff}.history{font-size:13px}</style></head><body><main><h1>Drakora · ${escape(ticket.ign)}</h1><p>${staffView ? "Private staff transcript" : "Player transcript"} · ${escape(id)}</p><section><h2>${escape(ticketTypes.find((type) => type.id === ticket.type)?.name)}</h2><p>${escape(ticket.location)}</p>${ticketDetails(
-    ticket,
-  )
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Drakora ticket · ${escape(ticket.ign)}</title><style>body{margin:0;background:#313338;color:#dbdee1;font:16px/1.5 system-ui,sans-serif}main{max-width:960px;margin:auto;padding:32px 20px}h1,h2,strong{color:#f2f3f5}section{padding:20px;background:#2b2d31;margin-bottom:20px}p{white-space:pre-wrap;overflow-wrap:anywhere}header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}time,small,figcaption{font-size:12px;color:#b5bac1}.message{display:grid;grid-template-columns:40px 1fr;gap:16px;padding:16px 0}.message p{margin:4px 0}.avatar{width:40px;height:40px;background:#1e1f22;border-radius:50%;display:grid;place-items:center}.badge{font-size:10px;background:#b92323;color:white;padding:1px 4px}figure{margin:12px 0}img{max-width:100%;max-height:420px}a{color:#a7c7ff}.history{font-size:13px}</style></head><body><main><h1>Drakora · ${escape(ticket.ign)}</h1><p>${staffView ? "Private staff transcript" : "Player transcript"} · ${escape(id)}</p><section><h2>${escape(ticketTypes.find((type) => type.id === ticket.type)?.name)}</h2><p>${escape(ticket.location)}</p>${ticket.intakeDetails
     .map((detail) => `<p>${escape(detail.label)}: ${escape(detail.value)}</p>`)
     .join(
       "",
-    )}<p>${escape(ticket.description)}</p><p>${escape(ticketStatusLabel(ticket))} · Opened ${escape(date(ticket.createdAt))}</p>${ticket.claimedBy ? `<p>Assisted by ${escape(ticket.claimedBy.name)}</p>` : ""}${ticket.rating ? `<p>Optional rating: ${ticket.rating}/5</p>` : ""}</section>${messages.join("")}${resolution}<section class="history"><h2>Ticket history</h2>${history.map((entry) => `<p>${escape(date(entry.at))} · ${escape(entry.actor.name)} · ${escape(entry.detail)}</p>`).join("")}</section><small>Generated ${escape(date(Date.now()))}. Server attachments are retained for 30 days; text and ticket history remain in staff logs.</small></main></body></html>`;
+    )}<p>${escape(ticket.description)}</p><p>${escape(ticketStatusLabel(ticket))} · Opened ${escape(date(ticket.createdAt))}</p>${ticket.claimedBy ? `<p>Assisted by ${escape(ticket.claimedBy.name)}</p>` : ""}${ticket.rating ? `<p>Optional rating: ${ticket.rating}/5</p>` : ""}${staffView ? ratingDecision(ticket) : ""}</section>${messages.join("")}${resolution}<section class="history"><h2>Ticket history</h2>${history.map((entry) => `<p>${escape(date(entry.at))} · ${escape(entry.actor.name)} · ${escape(entry.detail)}</p>`).join("")}</section><small>Generated ${escape(date(Date.now()))}. Server attachments are retained for 30 days; text and ticket history remain in staff logs.</small></main></body></html>`;
 }

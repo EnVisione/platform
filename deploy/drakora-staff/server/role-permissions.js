@@ -105,11 +105,46 @@ export function rolePermissions(config, store) {
           key.startsWith("roles.")
         )
           enabled = managers.includes(role.name);
+        if (key === "bot.view" || key === "bot.edit")
+          enabled = [...admins, "Sr Moderator", "Moderator"].includes(
+            role.name,
+          );
         if (key === "accounts.view" || key.startsWith("mail."))
           enabled = admins.includes(role.name);
         if (key.startsWith("tickets.") || key === "logs.view")
           enabled = [...reviewers, "Helper"].includes(role.name);
         if (key === "tickets.view" || key === "logs.view") enabled = true;
+        if (key === "players.view")
+          enabled = [...reviewers, "Helper"].includes(role.name);
+        if (
+          [
+            "moderation.view",
+            "moderation.warn",
+            "moderation.notes",
+            "staffnotes.view",
+            "staffnotes.create",
+            "staffnotes.clear",
+          ].includes(key)
+        )
+          enabled = [...reviewers, "Helper"].includes(role.name);
+        if (
+          ["moderation.mute", "moderation.freeze", "moderation.kick"].includes(
+            key,
+          )
+        )
+          enabled = reviewers.includes(role.name);
+        if (
+          [
+            "moderation.ban",
+            "moderation.revoke",
+            "moderation.appeals",
+          ].includes(key)
+        )
+          enabled = [...admins, "Sr Moderator", "Moderator"].includes(
+            role.name,
+          );
+        if (["moderation.ip", "moderation.ipban"].includes(key))
+          enabled = admins.includes(role.name);
         if (key.startsWith("tickets.category.")) {
           const category = key.split(".")[2];
           enabled =
@@ -132,6 +167,8 @@ export function rolePermissions(config, store) {
           enabled = enabled && communityRankNames.includes(role.name);
         if (key === "tickets.macros.manage")
           enabled = admins.includes(role.name);
+        if (key === "tickets.rating.override")
+          enabled = managers.includes(role.name);
         if (ticketRole) {
           if (role.ticket)
             enabled =
@@ -177,8 +214,10 @@ export function rolePermissions(config, store) {
   const takeover = (key) =>
     key === "tickets.takeover" ||
     (key.startsWith("tickets.category.") && key.endsWith(".takeover"));
-  const adminOnly = deletion;
+  const adminOnly = (key) =>
+    deletion(key) || ["moderation.ip", "moderation.ipban"].includes(key);
   const restricted = (key, role) =>
+    (key === "tickets.rating.override" && !managers.includes(role.name)) ||
     (!ticketRole &&
       key.startsWith("tickets.category.billing.") &&
       role.name !== "Founder") ||
@@ -303,6 +342,10 @@ export function rolePermissions(config, store) {
     if (!isManager(user))
       for (const key of keys.filter((key) => key.startsWith("roles.")))
         granted[key] = false;
+    if (!isAdmin(user)) {
+      granted["moderation.ip"] = false;
+      granted["moderation.ipban"] = false;
+    }
     if (isFounder(user))
       for (const key of protectedFounderPermissions) granted[key] = true;
     if (ticketRole) {

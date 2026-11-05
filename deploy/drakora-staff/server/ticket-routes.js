@@ -302,6 +302,24 @@ export function ticketRouter(
       });
     });
   } else {
+    router.post(
+      prefix,
+      rateLimit({ windowMs: 60000, limit: 10, legacyHeaders: false }),
+      express.json({ limit: "12kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        const user = await identity(req);
+        service.staff(user, { type: req.body.type }, "tickets.reply");
+        const owner = await transport.ticketOwner(req.body.discordId);
+        const ticket = service.createForStaff(
+          await identity(req),
+          owner,
+          req.body,
+          "web",
+        );
+        res.status(201).json({ id: ticket.id, path: `/tickets/${ticket.id}` });
+      },
+    );
     router.get(prefix, async (req, res) => {
       const user = await identity(req),
         offset = Number(req.query.offset ?? 0);
@@ -549,6 +567,16 @@ export function ticketRouter(
       res.json({ ok: true });
     },
   );
+  if (staffView)
+    router.post(
+      `${prefix}/:id/rating-override`,
+      express.json({ limit: "4kb" }),
+      async (req, res) => {
+        checkMutation(req);
+        service.overrideRating(await identity(req), req.params.id, req.body);
+        res.json({ ok: true });
+      },
+    );
   router.post(
     `${prefix}/:id/close`,
     express.json({ limit: "16kb" }),

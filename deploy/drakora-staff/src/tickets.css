@@ -1077,3 +1077,67 @@
     padding: 16px;
   }
 }
+
+.staff-ticket-open {
+  margin: 1rem 0;
+}
+.staff-ticket-open form {
+  margin-top: 1rem;
+  max-width: 52rem;
+}
+.staff-ticket-open fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+.staff-ticket-open label {
+  display: grid;
+  gap: 0.4rem;
+}
+.staff-ticket-open input,
+.staff-ticket-open select,
+.staff-ticket-open textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.staff-ticket-open textarea {
+  resize: vertical;
+}
+
+.ticket-reopened {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ticket-state.reopened {
+  background: #4b402b;
+  color: #f1d697;
+}
+.ticket-rating-override fieldset {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ticket-rating-override label {
+  display: grid;
+  gap: 6px;
+}
+.ticket-rating-override select,
+.ticket-rating-override textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 0;
+  border-radius: 5px;
+  background: #1e1f22;
+  color: inherit;
+  font: inherit;
+}
+.ticket-rating-override textarea {
+  resize: vertical;
+}

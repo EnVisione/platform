@@ -1687,7 +1687,7 @@ test("rating feedback requires the rated closure and stays private to Founders",
   assert.equal(feedback(founder).length, 1);
 });
 
-test("resolved totals include a reopened ticket while closed logs exclude it", async (t) => {
+test("resolved totals and logs both include reopened ticket history", async (t) => {
   const { service, store } = setup(t);
   const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
   const tickets = [];
@@ -1717,6 +1717,6 @@ test("resolved totals include a reopened ticket while closed logs exclude it", a
   assert.equal(stats.averageRating, 11 / 3);
   assert.equal(
     service.list(founder, { closed: true, staff: helper.id }).total,
-    4,
+    5,
   );
 });

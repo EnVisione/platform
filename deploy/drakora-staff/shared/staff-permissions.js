@@ -2,6 +2,116 @@ import { ticketCategories } from "./tickets.js";
 
 export const staffPermissions = [
   [
+    "bot.view",
+    "Bot",
+    "View bot settings",
+    "Read custom commands, supported pack versions, change history and safe saved-reply previews.",
+  ],
+  [
+    "bot.edit",
+    "Bot",
+    "Edit bot settings",
+    "Create, edit, enable and delete commands, preview drafts and change supported-version overrides.",
+    ["bot.view"],
+  ],
+  [
+    "players.view",
+    "Players",
+    "View players and playtime",
+    "Read connected players, reported server, heartbeat and committed playtime.",
+  ],
+  [
+    "moderation.warn",
+    "Moderation",
+    "Issue warnings",
+    "Create a warning on the selected platform only.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.mute",
+    "Moderation",
+    "Mute players",
+    "Create temporary or permanent mutes on the selected platform only.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.ban",
+    "Moderation",
+    "Ban players",
+    "Create temporary or permanent bans on the selected platform only.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.freeze",
+    "Moderation",
+    "Freeze Minecraft players",
+    "Request a scoped Minecraft freeze and wait for backend confirmation.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.kick",
+    "Moderation",
+    "Kick Minecraft players",
+    "Request a kick of a matching online session.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.ip",
+    "Moderation",
+    "View IP associations",
+    "Admin or higher can inspect reported addresses and possible shared-IP accounts. An association does not establish ownership or wrongdoing.",
+    ["moderation.view", "players.view"],
+  ],
+  [
+    "moderation.ipban",
+    "Moderation",
+    "Issue scoped IP bans",
+    "Admin or higher can ban a reported Minecraft address in a selected scope.",
+    ["moderation.view", "moderation.ip"],
+  ],
+  [
+    "staffnotes.view",
+    "Staff notes",
+    "View player notices",
+    "Read player-visible staff notes and explicit acknowledgement times.",
+    ["moderation.view", "players.view"],
+  ],
+  [
+    "staffnotes.create",
+    "Staff notes",
+    "Send player notices",
+    "Send high- or low-priority player notices in a selected network scope.",
+    ["staffnotes.view"],
+  ],
+  [
+    "staffnotes.clear",
+    "Staff notes",
+    "Clear player notices",
+    "Stop pending notices while retaining their acknowledgement and clearing history.",
+    ["staffnotes.view"],
+  ],
+  [
+    "moderation.notes",
+    "Moderation",
+    "Write private case notes",
+    "Add staff-only evidence, notes and conclusions. These are never sent to players.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.revoke",
+    "Moderation",
+    "Revoke sanctions",
+    "Revoke an individual case without clearing other active cases.",
+    ["moderation.view"],
+  ],
+  [
+    "moderation.appeals",
+    "Moderation",
+    "Review appeals",
+    "Accept or deny appeals with a player-visible decision. Acceptance also requires permission to revoke the case action.",
+    ["moderation.view"],
+  ],
+  [
     "moderation.view",
     "Moderation",
     "View moderation history",
@@ -40,6 +150,13 @@ export const staffPermissions = [
     "Resolve tickets",
     "Record the work and commands used, attach proof, and close tickets.",
     ["tickets.view"],
+  ],
+  [
+    "tickets.rating.override",
+    "Tickets",
+    "Override support ratings",
+    "Managers and Founders can exclude, replace or restore a ticket rating with a recorded reason.",
+    ["tickets.view", "logs.view"],
   ],
   [
     "tickets.macros.manage",
@@ -228,6 +345,7 @@ export const inboxPermission = (address, action = "view") =>
   `mail.inbox.${address.toLowerCase()}.${action}`;
 
 export function ticketPermissionScope(key) {
+  if (key === "tickets.rating.override") return "rank";
   if (/^tickets\.category\.(billing|staff|partnership)\./.test(key))
     return "rank";
   return key.startsWith("tickets.") || key === "logs.view" ? "tickets" : null;

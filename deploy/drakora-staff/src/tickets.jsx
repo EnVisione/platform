@@ -2,6 +2,7 @@ import { LegalNotice } from "./legal-notice.jsx";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ticketTypes,
+  ticketCapability,
   ticketIntake,
   ticketStatuses,
   ticketStatusLabel,
@@ -15,6 +16,15 @@ import { DateFilters } from "./list-filters.jsx";
 import { MacroPicker, TicketMacroLibrary } from "./ticket-macros.jsx";
 
 const errors = {
+  ticket_rating_manager_required:
+    "Only Managers and Founders with rating override access can change ratings.",
+  ticket_revision_changed:
+    "This ticket changed. Refresh it before saving the rating decision.",
+  ticket_rating_not_found: "This closure has no submitted rating to override.",
+  invalid_rating_override:
+    "Choose a rating action and enter a reason of up to 1,000 characters.",
+  invalid_ticket_owner:
+    "Enter the Discord ID of a human member of the main Drakora server who has completed membership screening.",
   invalid_ticket_category:
     "Choose a valid ticket category or reset the filters.",
   invalid_list_filters: "Check the filters and choose a valid date range.",
@@ -112,7 +122,126 @@ function Avatar({ actor }) {
     </span>
   );
 }
-function FeedbackRating({ rating, staff, at, previous = false }) {
+function RatingModeration({ ticket, busy, onSave }) {
+  const ratings = ticket.ratingModeration || [];
+  const [closureId, setClosureId] = useState(ratings[0]?.closureId || "");
+  const [mode, setMode] = useState("exclude");
+  const [rating, setRating] = useState("5");
+  const [reason, setReason] = useState("");
+  const selected =
+    ratings.find((entry) => entry.closureId === closureId) || ratings[0];
+  if (!selected)
+    return (
+      <section className="ticket-detail-section">
+        <h3>Rating decisions</h3>
+        <p>No submitted ratings for this ticket.</p>
+      </section>
+    );
+  return (
+    <section className="ticket-detail-section">
+      <h3>Rating decisions</h3>
+      <p className="ticket-muted">
+        The original player rating is preserved. Every change requires a reason
+        and is recorded in Activity.
+      </p>
+      <form
+        className="ticket-rating-override"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave({
+            closureId: selected.closureId,
+            revision: ticket.revision,
+            action: mode,
+            rating: mode === "set" ? Number(rating) : undefined,
+            reason,
+          });
+        }}
+      >
+        <fieldset disabled={busy}>
+          <label>
+            Rated closure
+            <select
+              value={selected.closureId}
+              onChange={(event) => {
+                setClosureId(event.target.value);
+                setReason("");
+              }}
+            >
+              {ratings.map((entry) => (
+                <option key={entry.closureId} value={entry.closureId}>
+                  {entry.staff?.name || "Support team"} ·{" "}
+                  {stamp(entry.closedAt)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p>
+            Player rating: <strong>{selected.originalRating}/5</strong>
+            <br />
+            Counts toward averages:{" "}
+            <strong>
+              {selected.effectiveRating === null
+                ? "Excluded"
+                : `${selected.effectiveRating}/5`}
+            </strong>
+          </p>
+          {selected.override && (
+            <p className="ticket-muted">
+              {selected.override.actor.name} · {stamp(selected.override.at)}
+              <br />
+              {selected.override.reason}
+            </p>
+          )}
+          <label>
+            Rating action
+            <select
+              value={mode}
+              onChange={(event) => setMode(event.target.value)}
+            >
+              <option value="exclude">Exclude from averages</option>
+              <option value="set">Replace the counted score</option>
+              <option value="restore">Restore the player rating</option>
+            </select>
+          </label>
+          {mode === "set" && (
+            <label>
+              Replacement rating
+              <select
+                value={rating}
+                onChange={(event) => setRating(event.target.value)}
+              >
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <option key={value} value={value}>
+                    {value} {value === 1 ? "star" : "stars"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            Reason
+            <textarea
+              required
+              maxLength={1000}
+              rows={3}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          <button
+            className="ticket-primary"
+            disabled={!reason.trim()}
+            type="submit"
+          >
+            {busy ? "Saving…" : "Save rating decision"}
+          </button>
+        </fieldset>
+      </form>
+    </section>
+  );
+}
+
+function FeedbackRating({ rating, staff, at, override, previous = false }) {
   return (
     <div className="ticket-feedback-rating">
       {previous && <p className="ticket-muted">Previous closure</p>}
@@ -124,6 +253,13 @@ function FeedbackRating({ rating, staff, at, previous = false }) {
         <strong>{rating} / 5</strong>
       </p>
       {staff && <p>Feedback for {staff.name}</p>}
+      {override && (
+        <p className="ticket-muted">
+          {override.value === null
+            ? "Excluded from averages"
+            : `Counted rating overridden to ${override.value}/5`}
+        </p>
+      )}
       {at && <p className="ticket-muted">Rated {stamp(at)}</p>}
     </div>
   );
@@ -182,11 +318,12 @@ function Composer({
   notes = false,
   onSent,
   resolution = false,
+  cycle,
   macroCategory,
   uploadLimit = ticketMessageUploadLimit,
 }) {
   const [content, setContent] = useState(""),
-    [commands, setCommands] = useState("None"),
+    [commands, setCommands] = useState(""),
     [files, setFiles] = useState([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -261,7 +398,12 @@ function Composer({
           headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
           body: JSON.stringify(
             resolution
-              ? { summary: content, commands, attachments: pending.current.ids }
+              ? {
+                  summary: content,
+                  commands,
+                  attachments: pending.current.ids,
+                  cycle,
+                }
               : {
                   content,
                   attachments: pending.current.ids,
@@ -293,9 +435,10 @@ function Composer({
     >
       {resolution && (
         <>
-          <h3>Record the resolution</h3>
+          <h3>Add resolution notes (optional)</h3>
           <p>
-            Keep this record factual. Only staff can see these notes and proof.
+            This ticket is already closed. Add any useful details now or skip
+            this step. Only staff can see these notes and proof.
           </p>
         </>
       )}
@@ -359,7 +502,7 @@ function Composer({
               : "Message the ticket…"
         }
         maxLength={resolution ? 4000 : 2000}
-        required={resolution || !files.length}
+        required={!resolution && !files.length}
         rows={resolution ? 4 : 2}
         disabled={busy}
       />
@@ -389,12 +532,11 @@ function Composer({
       )}
       {resolution && (
         <label>
-          Commands run
+          Commands run (optional)
           <textarea
             value={commands}
             onChange={(event) => setCommands(event.target.value)}
             maxLength={2000}
-            required
             rows={2}
             disabled={busy}
           />
@@ -460,11 +602,17 @@ function Composer({
             : ""}{" "}
           · retained for 30 days
         </small>
-        <button className="ticket-primary" disabled={busy}>
+        <button
+          className="ticket-primary"
+          disabled={
+            busy ||
+            (resolution && !content.trim() && !commands.trim() && !files.length)
+          }
+        >
           {busy
             ? "Sending…"
             : resolution
-              ? "Save resolution and close"
+              ? "Save resolution notes"
               : notes
                 ? "Add staff note"
                 : "Send"}
@@ -1077,6 +1225,7 @@ function TicketChat({
         body: JSON.stringify(data),
       });
       await refresh();
+      if (name === "close" && staffView) setClosing(true);
       if (name === "takeover-request") {
         setRequestingTakeover(false);
         setTakeoverReason("");
@@ -1196,11 +1345,25 @@ function TicketChat({
               Take over / request
             </button>
           )}
-          {staffView && ticket.actions?.close && ticket.status !== "closed" && (
-            <button onClick={() => setClosing((value) => !value)}>
-              {closing ? "Cancel resolution" : "Resolve ticket"}
+          {staffView && ticket.actions?.close && active && (
+            <button
+              disabled={busy}
+              onClick={() => action("close", { cycle: ticket.cycle || 0 })}
+            >
+              Close ticket
             </button>
           )}
+          {staffView &&
+            ticket.actions?.close &&
+            !active &&
+            !ticket.resolution && (
+              <button
+                disabled={busy}
+                onClick={() => setClosing((value) => !value)}
+              >
+                {closing ? "Skip for now" : "Add resolution notes (optional)"}
+              </button>
+            )}
           {!staffView && active && (
             <button
               disabled={busy}
@@ -1433,7 +1596,10 @@ function TicketChat({
           )}
           {!staffView && closing && active && (
             <div className="ticket-close-confirm">
-              <p>Close this ticket? Staff will still document the work done.</p>
+              <p>
+                Close this ticket? Staff can optionally add private resolution
+                notes afterward.
+              </p>
               <button
                 className="ticket-primary"
                 disabled={busy}
@@ -1447,11 +1613,12 @@ function TicketChat({
               <button onClick={() => setClosing(false)}>Keep open</button>
             </div>
           )}
-          {staffView && closing && ticket.status !== "closed" && (
+          {staffView && closing && !active && !ticket.resolution && (
             <Composer
               base={base}
               csrf={csrf}
               resolution
+              cycle={ticket.cycle || 0}
               internal
               uploadLimit={ticketMessageUploadLimit}
               onSent={async () => {
@@ -1469,22 +1636,19 @@ function TicketChat({
               uploadLimit={ticketMessageUploadLimit}
             />
           )}
-          {!active && !(staffView && closing && ticket.status !== "closed") && (
+          {!active && !(staffView && closing && !ticket.resolution) && (
             <div className="ticket-finished">
-              <p>
-                {ticket.status === "awaiting_resolution"
-                  ? "The conversation is closed. Staff will finish the resolution record."
-                  : "This ticket is closed."}
-              </p>
+              <p>This ticket is closed. Resolution notes are optional.</p>
               {!staffView && !ticket.rating && (
                 <div className="ticket-rating">
                   <span>
                     {ticket.ratingStaff?.name
                       ? `How did ${ticket.ratingStaff.name} do?`
                       : "How helpful was the support?"}{" "}
-                    Your 1–5 rating is private to you and authorized staff.
-                    After rating, the closed Discord channel is removed once the
-                    resolution and transcript are saved.
+                    Your rating is private. Founders can view it; Managers can
+                    see feedback only during a staff review. After rating, the
+                    closed Discord channel is removed after its transcript is
+                    saved.
                   </span>
                   {[1, 2, 3, 4, 5].map((value) => (
                     <button
@@ -1554,6 +1718,14 @@ function TicketChat({
                 Activity
               </button>
             )}
+            {staffView && ticket.actions?.overrideRating && (
+              <button
+                aria-pressed={panel === "ratings"}
+                onClick={() => setPanel("ratings")}
+              >
+                Ratings
+              </button>
+            )}
             {staffView &&
               (ticket.resolution || ticket.previousResolutions?.length > 0) && (
                 <button
@@ -1565,6 +1737,15 @@ function TicketChat({
               )}
           </div>
         </div>
+        {staffView && ticket.actions?.overrideRating && (
+          <div className="ticket-panel-content" hidden={panel !== "ratings"}>
+            <RatingModeration
+              ticket={ticket}
+              busy={busy}
+              onSave={(data) => action("rating-override", data)}
+            />
+          </div>
+        )}
         <div className="ticket-panel-content" hidden={panel !== "details"}>
           <div className="ticket-person">
             <img
@@ -1610,6 +1791,7 @@ function TicketChat({
                 {ticket.rating ? (
                   <FeedbackRating
                     rating={ticket.rating}
+                    override={ticket.ratingOverride}
                     staff={ticket.ratingStaff}
                     at={ticket.ratedAt}
                   />
@@ -1645,6 +1827,7 @@ function TicketChat({
                     <FeedbackRating
                       key={closure.at}
                       rating={closure.rating}
+                      override={closure.ratingOverride}
                       staff={closure.claimedBy}
                       at={closure.ratedAt}
                       previous
@@ -1750,6 +1933,127 @@ function TicketChat({
         )}
       </aside>
     </div>
+  );
+}
+
+function StaffTicketOpen({ csrf, capabilities }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const types = ticketTypes.filter(
+    (type) =>
+      type.id !== "partnership" &&
+      capabilities[ticketCapability({ type: type.id }, "reply")],
+  );
+  const [form, setForm] = useState({
+    type: types[0]?.id || "general",
+    discordId: "",
+  });
+  const requestId = useRef(crypto.randomUUID());
+  if (!capabilities["tickets.reply"] || !types.length) return null;
+  const intake = ticketIntake(form.type);
+  const change = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    requestId.current = crypto.randomUUID();
+  };
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ ...form, requestId: requestId.current }),
+      });
+      location.assign(result.path);
+    } catch (error) {
+      setError(error.message);
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="staff-ticket-open">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        disabled={busy}
+      >
+        {open ? "Cancel new ticket" : "Open for someone"}
+      </button>
+      {open && (
+        <form onSubmit={submit} aria-label="Open a ticket for someone">
+          <h3>Open a ticket for someone</h3>
+          <p>
+            The selected Discord member owns this ticket and can reply
+            privately. Your name is recorded as the staff member who opened it.
+            This can exceed their normal three-ticket limit.
+          </p>
+          {error && (
+            <p role="alert" className="ticket-error">
+              {error}
+            </p>
+          )}
+          <fieldset disabled={busy}>
+            <label>
+              Player Discord user ID
+              <input
+                required
+                pattern="[0-9]{17,20}"
+                inputMode="numeric"
+                maxLength={20}
+                value={form.discordId}
+                onChange={(event) =>
+                  change("discordId", event.target.value.trim())
+                }
+              />
+            </label>
+            <label>
+              Ticket type
+              <select
+                value={form.type}
+                onChange={(event) => change("type", event.target.value)}
+              >
+                {types.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {intake.fields.map((field) => {
+              const props = {
+                required: field.required !== false,
+                minLength: field.min,
+                maxLength: field.max,
+                value: form[field.id] || "",
+                placeholder:
+                  field.id === "ign"
+                    ? "Their Minecraft username"
+                    : field.placeholder,
+                onChange: (event) => change(field.id, event.target.value),
+              };
+              return (
+                <label key={field.id}>
+                  {field.id === "ign"
+                    ? "Player Minecraft Java username"
+                    : field.label}
+                  {field.multiline ? (
+                    <textarea {...props} rows={4} />
+                  ) : (
+                    <input {...props} />
+                  )}
+                </label>
+              );
+            })}
+            <button type="submit">
+              {busy ? "Opening ticket…" : "Open ticket for this player"}
+            </button>
+          </fieldset>
+        </form>
+      )}
+    </section>
   );
 }
 
@@ -1859,6 +2163,7 @@ export function Tickets({ csrf, capabilities, logs = false }) {
         </div>
         <button onClick={refresh}>Refresh</button>
       </div>
+      {!logs && <StaffTicketOpen csrf={csrf} capabilities={capabilities} />}
       {!logs && capabilities["tickets.macros.manage"] && (
         <TicketMacroLibrary csrf={csrf} initialCategory={category} />
       )}
@@ -2011,9 +2316,9 @@ export function Tickets({ csrf, capabilities, logs = false }) {
         </div>
       </form>
       <p className="ticket-filter-note">
-        Staff search includes assigned staff, first replies and resolutions,
-        including previous closures. Dates filter when tickets were opened.
-        Category counts match the other filters.
+        Staff search includes every recorded claimant, first replies and
+        resolutions. Reopened tickets remain in Logs. Dates filter when tickets
+        were opened. Category counts match the other filters.
       </p>
       <div className="ticket-list">
         {!ready && !error && <p>Loading tickets…</p>}
@@ -2034,6 +2339,20 @@ export function Tickets({ csrf, capabilities, logs = false }) {
                 <small>
                   {ticket.owner.name} · {stamp(ticket.createdAt)}
                 </small>
+                {ticket.lastReopened && (
+                  <p className="ticket-reopened">
+                    <span className="ticket-state reopened">Reopened</span> by{" "}
+                    {ticket.lastReopened.actor?.name || "Unknown member"}
+                    {ticket.lastReopened.at &&
+                      ` · ${stamp(ticket.lastReopened.at)}`}
+                  </p>
+                )}
+                {ticket.staffHistory?.length > 0 && (
+                  <small>
+                    Staff history:{" "}
+                    {ticket.staffHistory.map((actor) => actor.name).join(", ")}
+                  </small>
+                )}
               </div>
               <span className={`ticket-state ${ticket.status}`}>
                 {ticketStatusLabel(ticket)}

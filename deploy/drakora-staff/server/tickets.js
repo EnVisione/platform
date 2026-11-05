@@ -1,5 +1,6 @@
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { staffSupportTotals } from "./staff-support-totals.js";
+import { effectiveRating, validRating } from "./ticket-rating.js";
 import { EventEmitter } from "node:events";
 import { AuthError } from "./discord.js";
 import { listFilters, matchesText } from "./list-filters.js";
@@ -80,6 +81,20 @@ export function ticketService(
     if (!user || ticket.type === "partnership" || ticket.owner.id !== user.id)
       throw new AuthError("ticket_not_found", 404);
     return user;
+  }
+  function ratingClosures(ticket) {
+    return [
+      ...store
+        .entries(`ticket-closures:${ticket.id}`)
+        .map(([key, closure]) => ({ ...closure, key })),
+      {
+        key: ticket.closureId || String(ticket.closedAt),
+        closedAt: ticket.closedAt,
+        claimedBy: ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
+        rating: ticket.rating,
+        ratingOverride: ticket.ratingOverride,
+      },
+    ];
   }
   function announce(ticket) {
     events.emit("changed", { id: ticket.id, revision: ticket.revision });
@@ -193,6 +208,12 @@ export function ticketService(
     const ticket = get(id);
     authorize(user, ticket, staffView);
     const ratingsVisible = !staffView || rolePolicy.isFounder(user);
+    const currentUser = staffView ? rolePolicy.apply(user) : null;
+    const canOverrideRating = Boolean(
+      staffView &&
+      rolePolicy.isManager(currentUser) &&
+      currentUser.capabilities["tickets.rating.override"],
+    );
     const page = store.page(
       `ticket-messages:${id}`,
       50,
@@ -227,6 +248,9 @@ export function ticketService(
       ...(ratingsVisible
         ? {
             rating: ticket.rating,
+            ratingOverride: staffView
+              ? ticket.ratingOverride || null
+              : undefined,
             ratedAt: ticket.ratedAt || null,
             ratingStaff:
               ticket.ratingStaff || ticket.claimedBy || ticket.helpedBy,
@@ -262,7 +286,10 @@ export function ticketService(
           (entry) =>
             (staffView || !entry.internal) &&
             (ratingsVisible ||
-              !["rated", "rating_feedback"].includes(entry.action)),
+              (canOverrideRating && entry.action === "rating_override") ||
+              !["rated", "rating_feedback", "rating_override"].includes(
+                entry.action,
+              )),
         ),
       viewers: staffView
         ? [
@@ -314,6 +341,18 @@ export function ticketService(
         };
       }
       const current = rolePolicy.apply(user);
+      safe.ratingModeration = canOverrideRating
+        ? ratingClosures(ticket)
+            .filter((closure) => validRating(closure.rating))
+            .map((closure) => ({
+              closureId: closure.key,
+              closedAt: closure.closedAt ?? closure.at ?? null,
+              staff: closure.claimedBy || null,
+              originalRating: closure.rating,
+              effectiveRating: effectiveRating(closure),
+              override: closure.ratingOverride || null,
+            }))
+        : undefined;
       safe.actions = Object.fromEntries(
         ["view", "reply", "claim", "takeover", "close", "delete"].map(
           (action) => [
@@ -344,6 +383,7 @@ export function ticketService(
         current.capabilities["tickets.takeover"] &&
         current.capabilities[ticketCapability(ticket, "takeover")],
       );
+      safe.actions.overrideRating = canOverrideRating;
       safe.resolution = ticket.resolution
         ? {
             ...ticket.resolution,
@@ -373,6 +413,7 @@ export function ticketService(
           delete closure.ratedAt;
           delete closure.ratingSubmittedAt;
           delete closure.ratingFeedbackAt;
+          delete closure.ratingOverride;
         }
       safe.deliveryIssues = store
         .entries(
@@ -427,6 +468,7 @@ export function ticketService(
         closedBy: ticket.closedBy,
         resolution: ticket.resolution,
         rating: ticket.rating,
+        ratingOverride: ticket.ratingOverride,
         claimedBy: ticket.ratingStaff || assigned,
       });
       for (const closure of closures) {
@@ -436,15 +478,10 @@ export function ticketService(
           resolved.get(resolver).add(ticket.id);
           entry(resolver).ticketsResolved = resolved.get(resolver).size;
         }
-        if (
-          closure.claimedBy?.id &&
-          Number.isInteger(closure.rating) &&
-          closure.rating >= 1 &&
-          closure.rating <= 5
-        ) {
+        if (closure.claimedBy?.id && validRating(effectiveRating(closure))) {
           const summary = entry(closure.claimedBy.id);
           summary.reviewCount++;
-          summary.ratingTotal += closure.rating;
+          summary.ratingTotal += effectiveRating(closure);
         }
       }
     }
@@ -472,6 +509,42 @@ export function ticketService(
     const sort = input.sort || "updated";
     const { offset, term, withinDate } = listFilters(input);
     const staffTerm = listFilters({ query: input.staff }).term;
+    const histories = new Map();
+    const historyFor = (ticket) => {
+      if (!histories.has(ticket.id)) {
+        const events = store
+          .entries(`ticket-history:${ticket.id}`)
+          .map(([, event]) => event);
+        const closures = store
+          .entries(`ticket-closures:${ticket.id}`)
+          .map(([, closure]) => closure);
+        const claimants = new Map();
+        for (const event of events)
+          if (
+            ["claimed", "taken_over"].includes(event.action) &&
+            event.actor?.id
+          )
+            claimants.set(event.actor.id, event.actor);
+        for (const actor of [
+          ...closures.map((closure) => closure.claimedBy),
+          ticket.claimedBy,
+        ])
+          if (actor?.id) claimants.set(actor.id, actor);
+        const reopened = events
+          .filter((event) => event.action === "reopened")
+          .sort((a, b) => b.at - a.at)[0];
+        histories.set(ticket.id, {
+          claimants: [...claimants.values()],
+          closures,
+          lastReopened: reopened
+            ? { actor: reopened.actor, at: reopened.at }
+            : ticket.reopenedCount
+              ? { actor: null, at: null }
+              : null,
+        });
+      }
+      return histories.get(ticket.id);
+    };
     const matchesStaff = (ticket) => {
       if (!staffTerm) return true;
       const actors = [
@@ -481,6 +554,7 @@ export function ticketService(
         ticket.closedBy,
         ticket.resolution?.actor,
         ticket.partnership?.decision?.actor,
+        ...historyFor(ticket).claimants,
       ];
       if (
         matchesText(
@@ -489,18 +563,16 @@ export function ticketService(
         )
       )
         return true;
-      return store
-        .entries(`ticket-closures:${ticket.id}`)
-        .some(([, closure]) =>
-          matchesText(staffTerm, [
-            closure.claimedBy?.id,
-            closure.claimedBy?.name,
-            closure.closedBy?.id,
-            closure.closedBy?.name,
-            closure.resolution?.actor?.id,
-            closure.resolution?.actor?.name,
-          ]),
-        );
+      return historyFor(ticket).closures.some((closure) =>
+        matchesText(staffTerm, [
+          closure.claimedBy?.id,
+          closure.claimedBy?.name,
+          closure.closedBy?.id,
+          closure.closedBy?.name,
+          closure.resolution?.actor?.id,
+          closure.resolution?.actor?.name,
+        ]),
+      );
     };
     if (category && !ticketCategories.some((entry) => entry.id === category))
       throw new AuthError("invalid_ticket_category", 400);
@@ -520,7 +592,9 @@ export function ticketService(
       .filter(
         (ticket) =>
           !ticket.erasingAt &&
-          (closed ? ticket.status === "closed" : ticket.status !== "closed") &&
+          (closed
+            ? ticket.status === "closed" || ticket.reopenedCount > 0
+            : ticket.status !== "closed") &&
           current.capabilities[ticketCapability(ticket)] &&
           (!status || ticket.status === status) &&
           (!type || ticket.type === type) &&
@@ -539,6 +613,12 @@ export function ticketService(
             ticket.owner.name,
             ticket.claimedBy?.id,
             ticket.claimedBy?.name,
+            ...(term
+              ? historyFor(ticket).claimants.flatMap((actor) => [
+                  actor.id,
+                  actor.name,
+                ])
+              : []),
           ]),
       );
     const filtered = values.filter(
@@ -554,12 +634,16 @@ export function ticketService(
     return {
       items: filtered.slice(offset, offset + 50).map((ticket) => {
         const item = { ...ticket };
+        const history = historyFor(ticket);
+        item.staffHistory = history.claimants;
+        item.lastReopened = history.lastReopened;
         delete item.supportTotals;
         if (!rolePolicy.isFounder(current)) {
           delete item.rating;
           delete item.ratedAt;
           delete item.ratingStaff;
           delete item.ratingFeedbackAt;
+          delete item.ratingOverride;
         }
         return item;
       }),
@@ -1343,6 +1427,7 @@ export function ticketService(
           rating: ticket.rating,
           ratedAt: ticket.ratedAt || null,
           ratingFeedbackAt: ticket.ratingFeedbackAt || null,
+          ratingOverride: ticket.ratingOverride || null,
           resolution: ticket.resolution,
         },
       );
@@ -1357,6 +1442,7 @@ export function ticketService(
       ticket.rating = null;
       ticket.ratedAt = null;
       delete ticket.ratingFeedbackAt;
+      delete ticket.ratingOverride;
       ticket.ratingStaff = null;
       ticket.reopenedCount = (ticket.reopenedCount || 0) + 1;
       if (!ticket.channelId) {
@@ -1488,6 +1574,65 @@ export function ticketService(
         "rating_feedback",
         `Player feedback: ${bodyText}`,
         true,
+      );
+    });
+    announce(ticket);
+    return ticket;
+  }
+  function overrideRating(user, id, input) {
+    const ticket = get(id);
+    const current = staff(user, ticket);
+    if (
+      !rolePolicy.isManager(current) ||
+      !current.capabilities["tickets.rating.override"]
+    )
+      throw new AuthError("ticket_rating_manager_required", 403);
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      throw new AuthError("invalid_rating_override", 400);
+    if (
+      !Number.isSafeInteger(input.revision) ||
+      input.revision !== ticket.revision
+    )
+      throw new AuthError("ticket_revision_changed", 409);
+    const reason = text(input.reason, 1, 1000, "invalid_rating_override");
+    if (
+      !["exclude", "set", "restore"].includes(input.action) ||
+      (input.action === "set" && !validRating(input.rating))
+    )
+      throw new AuthError("invalid_rating_override", 400);
+    const closure = ratingClosures(ticket).find(
+      (entry) => entry.key === input.closureId,
+    );
+    if (!closure || !validRating(closure.rating))
+      throw new AuthError("ticket_rating_not_found", 404);
+    const previous = effectiveRating(closure);
+    store.transaction(() => {
+      supportTotals.observe(ticket);
+      if (input.action === "restore") delete closure.ratingOverride;
+      else
+        closure.ratingOverride = {
+          value: input.action === "exclude" ? null : input.rating,
+          reason,
+          actor: publicActor(current),
+          at: now(),
+        };
+      const next = effectiveRating(closure);
+      supportTotals.adjustRating(closure.claimedBy?.id, previous, next);
+      if (closure.key === (ticket.closureId || String(ticket.closedAt))) {
+        if (closure.ratingOverride)
+          ticket.ratingOverride = closure.ratingOverride;
+        else delete ticket.ratingOverride;
+      } else {
+        const { key, ...saved } = closure;
+        put(`ticket-closures:${id}`, key, saved);
+      }
+      audit(
+        ticket,
+        current,
+        "rating_override",
+        `Support rating ${input.action === "restore" ? "restored" : input.action === "exclude" ? "excluded from averages" : `overridden to ${next}/5`} for closure ${closure.key}. Previous effective rating: ${previous ?? "excluded"}. Reason: ${reason}`,
+        true,
+        false,
       );
     });
     announce(ticket);
@@ -2195,6 +2340,7 @@ export function ticketService(
     deleteChannel,
     rate,
     addRatingFeedback,
+    overrideRating,
     feedbackReminderEligible,
     media,
     upload,
