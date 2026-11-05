@@ -128,6 +128,7 @@ function RatingModeration({ ticket, busy, onSave }) {
   const [mode, setMode] = useState("exclude");
   const [rating, setRating] = useState("5");
   const [reason, setReason] = useState("");
+  const [saved, setSaved] = useState(false);
   const selected =
     ratings.find((entry) => entry.closureId === closureId) || ratings[0];
   if (!selected)
@@ -146,15 +147,21 @@ function RatingModeration({ ticket, busy, onSave }) {
       </p>
       <form
         className="ticket-rating-override"
-        onSubmit={(event) => {
+        onChange={() => setSaved(false)}
+        onSubmit={async (event) => {
           event.preventDefault();
-          onSave({
+          setSaved(false);
+          const success = await onSave({
             closureId: selected.closureId,
             revision: ticket.revision,
             action: mode,
             rating: mode === "set" ? Number(rating) : undefined,
             reason,
           });
+          if (success) {
+            setReason("");
+            setSaved(true);
+          }
         }}
       >
         <fieldset disabled={busy}>
@@ -228,6 +235,11 @@ function RatingModeration({ ticket, busy, onSave }) {
               onChange={(event) => setReason(event.target.value)}
             />
           </label>
+          {saved && (
+            <p className="ticket-rating-saved" role="status">
+              Rating decision saved.
+            </p>
+          )}
           <button
             className="ticket-primary"
             disabled={!reason.trim()}
@@ -1231,10 +1243,12 @@ function TicketChat({
         setTakeoverReason("");
         setConversation("notes");
       }
+      return true;
     } catch (error) {
       setError(error.message);
       if (error.code === "ticket_takeover_approval_required")
         setRequestingTakeover(true);
+      return false;
     } finally {
       setBusy(false);
     }
