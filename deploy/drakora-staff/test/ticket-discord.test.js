@@ -2108,6 +2108,125 @@ test("closure preserves owner read access and paginated history before Admin cha
   );
 });
 
+test("closure notices and ratings remain available while attachment archiving is blocked", async (t) => {
+  for (const blockedDm of [false, true]) {
+    await t.test(blockedDm ? "blocked DMs" : "open DMs", async (t) => {
+      const context = setupDiscord(t);
+      const { service, transport, channels, user, client, dms } = context;
+      const ticket = await supportTicket(service, user, transport);
+      await service.pump();
+      const target = channels.get(service.get(ticket.id).channelId);
+      const manager = { id: "200", name: "Manager", roles: ["10", "21"] };
+      service.claim(manager, ticket.id);
+      await service.pump();
+      target.savedMessages.set("20000", {
+        id: "20000",
+        channelId: target.id,
+        guildId: "2",
+        author: user,
+        content: "Here is my full log.",
+        createdTimestamp: Date.now() - 1000,
+        attachments: new Collection([
+          [
+            "20001",
+            {
+              id: "20001",
+              name: "latest.log",
+              contentType: "text/plain",
+              size: 67 * 1024 * 1024,
+              url: `https://cdn.discordapp.com/attachments/${target.id}/20001/latest.log`,
+            },
+          ],
+        ]),
+      });
+      const dm = await (await client.users.fetch(user.id)).createDM();
+      if (blockedDm)
+        dm.send = async () => {
+          throw Object.assign(new Error("DM blocked"), { code: 50007 });
+        };
+      service.closeTicket(manager, ticket.id, {}, true);
+      await service.pump();
+      const snapshot = service.store.get("ticket-discord-close", ticket.id);
+      assert.equal(snapshot.ready, undefined);
+      assert.equal(snapshot.historySaved, true);
+      const notices = () =>
+        [...target.savedMessages.values()].filter((message) =>
+          message.embeds?.[0]?.description?.includes("Staff closed this ticket"),
+        );
+      assert.equal(notices().length, 1);
+      const notice = notices()[0];
+      assert.match(
+        notice.embeds[0].description,
+        /rate your support below or in the bot's DM/,
+      );
+      assert.ok(
+        notice.components[1].components.some(
+          (component) => component.label === "Add resolution notes (optional)",
+        ),
+      );
+      assert.ok(
+        notice.components[1].components.some(
+          (component) => component.label === "Delete channel · Admin+",
+        ),
+      );
+      const ownerPermissions = target.overwrites.find(
+        (entry) => entry.id === user.id,
+      );
+      assert.ok(ownerPermissions.allow.includes(P.ViewChannel));
+      assert.ok(ownerPermissions.deny.includes(P.SendMessages));
+      const rating = notice.components[0].components[0];
+      if (blockedDm) {
+        assert.equal(dms.length, 0);
+        assert.equal(
+          service.store.entries("ticket-feedback-send")[0][1].route,
+          "channel",
+        );
+      } else {
+        assert.equal(dms.length, 1);
+        assert.equal(
+          dms[0].components[0].components[0].custom_id,
+          rating.custom_id,
+        );
+        assert.doesNotMatch(
+          dms[0].embeds[0].description,
+          /transcript is saved/,
+        );
+      }
+      const denied = await click(
+        client,
+        { ...user, id: "intruder" },
+        rating.custom_id,
+        ["5"],
+      );
+      assert.match(denied.data, /not found|permission/i);
+      const response = await click(client, user, rating.custom_id, ["5"]);
+      assert.match(response.data.content, /private rating has been saved/);
+      service.closeTicket(manager, ticket.id, { summary: "Solved" }, true);
+      await service.pump();
+      for (const [key, job] of service.store.entries("ticket-outbox"))
+        service.store.set(
+          "ticket-outbox",
+          key,
+          { ...job, after: 0 },
+          Number.MAX_SAFE_INTEGER,
+        );
+      await service.pump();
+      assert.equal(channels.has(target.id), true);
+      assert.equal(
+        service.store.get("ticket-discord-close", ticket.id).ready,
+        undefined,
+      );
+      assert.equal(service.get(ticket.id).rating, 5);
+      assert.equal(service.messages(ticket.id)[0].content, "Here is my full log.");
+      assert.equal(
+        service.store.entries("ticket-media")[0][1].channelId,
+        target.id,
+      );
+      assert.equal(notices().length, 1);
+    });
+  }
+});
+
 test("closure leaves the channel intact if history permissions or ownership are unavailable", async (t) => {
   const { service, transport, channels, user } = setupDiscord(t);
   const ticket = service.create(

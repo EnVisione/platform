@@ -698,7 +698,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       return result;
     }
     const closed = ["closed", "awaiting_resolution"].includes(ticket.status);
-    if (closed && !service.store.get("ticket-discord-close", ticket.id)?.ready)
+    const closure = service.store.get("ticket-discord-close", ticket.id);
+    if (closed && !closure?.controlsReady && !closure?.ready)
       return { pending: true };
     const target = await channel(ticket.channelId);
     const content = {
@@ -1163,7 +1164,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
                 ? [
                     {
                       title: "How was your Drakora support?",
-                      description: `Your ticket is closed and its transcript is saved. ${feedbackQuestion(ticket)}\n\nAfter you rate it, the closed Discord channel is removed after its transcript is saved. You can still reopen the ticket on the website.`,
+                      description: `Your ticket is closed. ${feedbackQuestion(ticket)}\n\nAfter you rate it, the closed Discord channel is removed once its transcript and attachments are safely saved. You can still reopen the ticket on the website.`,
                       color: 0xb92323,
                       fields: [
                         {
@@ -1763,8 +1764,12 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         components: controls(ticket, true),
         allowedMentions: { parse: [] },
       });
-    if (!snapshot?.ready) {
-      snapshot ||= { channelId: target.id, historySaved: false };
+    snapshot ||= { channelId: target.id, historySaved: false };
+    if (!snapshot.controlsReady) {
+      snapshot.controlsReady = true;
+      persist();
+    }
+    if (!snapshot.ready) {
       for (let page = 0; !snapshot.historySaved && page < 5; page++) {
         snapshot.before = await reconcile(
           ticket,

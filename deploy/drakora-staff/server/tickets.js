@@ -2046,6 +2046,7 @@ export function ticketService(
             if (job.failed) continue;
           } else if (job.kind === "feedback") {
             const intent = store.get("ticket-feedback-send", key);
+            const closure = store.get("ticket-discord-close", ticket.id);
             const cleanup = intent?.route === "channel" && intent.channelId;
             if (
               !cleanup &&
@@ -2061,7 +2062,8 @@ export function ticketService(
               job.failed ||
               (!cleanup &&
                 ticket.channelId &&
-                !store.get("ticket-discord-close", ticket.id)?.ready)
+                !closure?.controlsReady &&
+                !closure?.ready)
             )
               continue;
           } else if (
