@@ -6,6 +6,7 @@ import { Collection, ChannelType, PermissionFlagsBits as P } from "discord.js";
 import { openStore } from "../server/store.js";
 import { ticketService } from "../server/tickets.js";
 import { ticketDiscord } from "../server/ticket-discord.js";
+import { ticketTranscript } from "../server/ticket-transcript.js";
 import { rolePermissions } from "../server/role-permissions.js";
 import { config as fixture } from "./fixture.js";
 
@@ -2108,7 +2109,7 @@ test("closure preserves owner read access and paginated history before Admin cha
   );
 });
 
-test("closure notices and ratings remain available while attachment archiving is blocked", async (t) => {
+test("closure notices and ratings remain available when oversized attachments are skipped", async (t) => {
   for (const blockedDm of [false, true]) {
     await t.test(blockedDm ? "blocked DMs" : "open DMs", async (t) => {
       const context = setupDiscord(t);
@@ -2147,7 +2148,7 @@ test("closure notices and ratings remain available while attachment archiving is
       service.closeTicket(manager, ticket.id, {}, true);
       await service.pump();
       const snapshot = service.store.get("ticket-discord-close", ticket.id);
-      assert.equal(snapshot.ready, undefined);
+      assert.equal(snapshot.ready, true);
       assert.equal(snapshot.historySaved, true);
       const notices = () =>
         [...target.savedMessages.values()].filter((message) =>
@@ -2211,18 +2212,104 @@ test("closure notices and ratings remain available while attachment archiving is
           Number.MAX_SAFE_INTEGER,
         );
       await service.pump();
-      assert.equal(channels.has(target.id), true);
+      assert.equal(channels.has(target.id), false);
       assert.equal(
         service.store.get("ticket-discord-close", ticket.id).ready,
-        undefined,
+        true,
       );
       assert.equal(service.get(ticket.id).rating, 5);
       assert.equal(service.messages(ticket.id)[0].content, "Here is my full log.");
-      assert.equal(
-        service.store.entries("ticket-media")[0][1].channelId,
-        target.id,
+      const [, file] = service.store.entries("ticket-media")[0];
+      assert.equal(file.archiveSkipped.reason, "attachment_too_large");
+      assert.equal(file.size, 67 * 1024 * 1024);
+      assert.match((await transport.bytes(file)).toString(), /not archived/);
+      const attachment = service.view(user, ticket.id).messages[0]
+        .attachments[0];
+      assert.equal(attachment.archiveSkipped, true);
+      assert.equal(attachment.name, "latest.log.not-archived.txt");
+      const transcript = await ticketTranscript(
+        service,
+        user,
+        ticket.id,
+        false,
+        transport.bytes,
       );
+      assert.match(transcript, /Here is my full log/);
+      assert.match(transcript, /latest.log.*not archived/);
       assert.equal(notices().length, 1);
+    });
+  }
+});
+
+test("Discord size rejections skip only the rejected attachment while transient errors retry", async (t) => {
+  for (const code of [40005, 503, 50013]) {
+    await t.test(String(code), async (t) => {
+      const { service, transport, channels, user } = setupDiscord(t);
+      const ticket = await supportTicket(service, user, transport);
+      await service.pump();
+      const target = channels.get(service.get(ticket.id).channelId);
+      target.savedMessages.set("20000", {
+        id: "20000",
+        channelId: target.id,
+        guildId: "2",
+        author: user,
+        content: "Keep this message and the accepted attachment.",
+        createdTimestamp: Date.now() - 1000,
+        attachments: new Collection(
+          ["rejected.log", "accepted.png"].map((name, index) => [
+            String(20001 + index),
+            {
+              id: String(20001 + index),
+              name,
+              size: 7,
+              contentType: "application/octet-stream",
+              url: `https://cdn.discordapp.com/attachments/${target.id}/${20001 + index}/${name}`,
+            },
+          ]),
+        ),
+      });
+      t.mock.method(globalThis, "fetch", async () => new Response("picture"));
+      const seed = await transport.upload(
+        Buffer.from("picture"),
+        "seed.txt",
+        "text/plain",
+        ticket,
+      );
+      const archive = channels.get(seed.channelId);
+      const send = archive.send;
+      archive.send = async (data) => {
+        if (data.files?.some((file) => file.name === "rejected.log"))
+          throw Object.assign(new Error("Upload rejected"), { code });
+        return send(data);
+      };
+      service.closeTicket(user, ticket.id, {});
+      await service.pump();
+      await service.deleteChannel(
+        { id: "admin", roles: ["10", "21"] },
+        ticket.id,
+      );
+      await service.pump();
+      const files = service.store.entries("ticket-media").map(([, f]) => f);
+      const rejected = files.find((file) => file.name === "rejected.log");
+      assert.equal(channels.has(target.id), code !== 40005);
+      assert.equal(Boolean(rejected.archiveSkipped), code === 40005);
+      if (code === 40005) {
+        const accepted = files.find((file) => file.name === "accepted.png");
+        assert.notEqual(accepted.channelId, target.id);
+        assert.equal(accepted.archiveSkipped, undefined);
+        assert.equal((await transport.bytes(accepted)).toString(), "picture");
+        assert.match(
+          (await transport.bytes(rejected)).toString(),
+          /not archived/,
+        );
+        assert.equal(service.get(ticket.id).channelId, null);
+      } else {
+        assert.equal(
+          service.store.get("ticket-discord-close", ticket.id).ready,
+          undefined,
+        );
+      }
+      assert.equal(service.messages(ticket.id).length, 1);
     });
   }
 });

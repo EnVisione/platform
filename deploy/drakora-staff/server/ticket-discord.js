@@ -18,6 +18,7 @@ import {
   ticketPath,
   ticketStatusLabel,
   ticketCategory,
+  skippedTicketAttachment,
 } from "../shared/tickets.js";
 import { ticketTranscript } from "./ticket-transcript.js";
 import { ticketNotesDiscord } from "./ticket-notes-discord.js";
@@ -1551,6 +1552,8 @@ export function ticketDiscord(config, service, client, rolePolicy) {
     async bytes(file) {
       if (file.expiresAt <= Date.now() || file.purged || file.removed)
         throw new AuthError("attachment_expired", 410);
+      const skipped = skippedTicketAttachment(file);
+      if (skipped) return Buffer.from(skipped.text);
       const source = await (
         file.directMessage || file.staffGuildId === config.guildId
           ? await client.channels.fetch(file.channelId)
@@ -1678,16 +1681,38 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       file.channelId === channelId &&
       !file.purged &&
       !file.removed &&
+      !file.archiveSkipped &&
       file.expiresAt > Date.now();
     for (const [id, file] of service.store.entries("ticket-media")) {
       if (!needsCopy(file)) continue;
       if (copied++ === 5) return false;
-      const stored = await transport.upload(
-        await transport.bytes(file),
-        file.name,
-        file.type,
-        ticket,
-      );
+      let stored;
+      try {
+        stored = await transport.upload(
+          await transport.bytes(file),
+          file.name,
+          file.type,
+          ticket,
+        );
+      } catch (error) {
+        if (!["attachment_too_large", 40005].includes(error.code)) throw error;
+        const current = service.store.get("ticket-media", id);
+        if (
+          needsCopy(current) &&
+          current.messageId === file.messageId &&
+          current.attachmentId === file.attachmentId
+        )
+          service.store.set(
+            "ticket-media",
+            id,
+            {
+              ...current,
+              archiveSkipped: { reason: error.code, at: Date.now() },
+            },
+            Number.MAX_SAFE_INTEGER,
+          );
+        continue;
+      }
       const current = service.store.get("ticket-media", id);
       if (
         !needsCopy(current) ||

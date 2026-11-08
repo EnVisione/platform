@@ -15,6 +15,7 @@ import {
   ticketPath,
   ticketMediaDays,
   ticketMessageUploadLimit,
+  skippedTicketAttachment,
 } from "../shared/tickets.js";
 
 const forever = Number.MAX_SAFE_INTEGER;
@@ -195,11 +196,13 @@ export function ticketService(
   }
   function mediaView(file, staffView, ticketId) {
     if (file.internal && !staffView) return null;
+    const skipped = skippedTicketAttachment(file);
     return {
       id: file.id,
-      name: file.name,
-      type: file.type,
-      size: file.size,
+      name: skipped?.name || file.name,
+      type: skipped?.type || file.type,
+      size: skipped?.size ?? file.size,
+      ...(skipped ? { archiveSkipped: true } : {}),
       expired: Boolean(file.expiresAt <= now() || file.purged || file.removed),
       url: `${staffView ? "/api/tickets" : "/help/api/tickets"}/${ticketId}/attachments/${file.id}`,
     };

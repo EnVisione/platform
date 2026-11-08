@@ -12,6 +12,7 @@ import {
   ticketPath,
   ticketTypes,
   ticketUploadLimit,
+  skippedTicketAttachment,
 } from "../shared/tickets.js";
 
 const save = (req) =>
@@ -667,14 +668,18 @@ export function ticketRouter(
       req.params.fileId,
       staffView,
     );
-    const bytes = await transport.bytes(file);
+    const skipped = skippedTicketAttachment(file);
+    const metadata = skipped || file;
+    const bytes = skipped
+      ? Buffer.from(skipped.text)
+      : await transport.bytes(file);
     // download other files. never execute player files on the portal origin.
     res
       .set({
-        "Content-Type": /^image\/(png|jpeg|webp|gif)$/.test(file.type)
-          ? file.type
+        "Content-Type": /^image\/(png|jpeg|webp|gif)$/.test(metadata.type)
+          ? metadata.type
           : "application/octet-stream",
-        "Content-Disposition": `${/^image\/(png|jpeg|webp|gif)$/.test(file.type) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+        "Content-Disposition": `${/^image\/(png|jpeg|webp|gif)$/.test(metadata.type) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(metadata.name)}`,
         "Content-Security-Policy":
           "default-src 'none'; sandbox allow-downloads",
         "Cache-Control": "private, no-store",

@@ -40,6 +40,8 @@ export async function ticketTranscript(
     const file = service.store.get("ticket-media", fileId);
     if (!file || (file.internal && !staffView)) return "";
     const label = escape(file.name);
+    if (file.archiveSkipped)
+      return `<p class="attachment">${label} — not archived because Discord could not accept this attachment</p>`;
     if (file.purged || file.expiresAt <= Date.now())
       return `<p class="attachment">${label} — expired after 30 days</p>`;
     if (embeddedBytes + file.size > 24 * 1024 * 1024)

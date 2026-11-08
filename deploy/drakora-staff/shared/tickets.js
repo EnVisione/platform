@@ -37,6 +37,16 @@ export function ticketStatusLabel(ticket) {
 export const ticketMediaDays = 30;
 export const ticketUploadLimit = 8 * 1024 * 1024;
 export const ticketMessageUploadLimit = 20 * 1024 * 1024;
+export function skippedTicketAttachment(file) {
+  if (!file.archiveSkipped) return null;
+  const text = `This attachment was not archived.\n\nFile: ${file.name}\nOriginal size: ${file.size} bytes\nReason: Discord could not accept this attachment in the ticket archive.\n\nThe ticket conversation and history were saved.\n`;
+  return {
+    name: `${file.name}.not-archived.txt`,
+    type: "text/plain",
+    size: new TextEncoder().encode(text).length,
+    text,
+  };
+}
 export const ticketPath = (ticket) =>
   `/help/${encodeURIComponent(ticket.ign)}/${ticket.id}`;
 
