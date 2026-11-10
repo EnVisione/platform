@@ -40,7 +40,7 @@ import {
 } from "./staff-reviews.js";
 import { staffReviewDiscord } from "./staff-review-discord.js";
 import { staffReviewRouter } from "./staff-review-routes.js";
-import { staffDirectory } from "./staff-directory.js";
+import { staffAccountRoster, staffDirectory } from "./staff-directory.js";
 import { roleRouter } from "./role-routes.js";
 import { memberActivity } from "./activity.js";
 import { contactRanks } from "./contact-ranks.js";
@@ -1243,27 +1243,20 @@ app.get("/api/accounts", async (req, res) => {
   if (!managementAccess(config, user).manager)
     throw new AuthError("management_role_required");
   const officeSnapshot = office?.snapshot(user);
-  const live = new Map(
-    (officeSnapshot?.members ?? []).map((member) => [member.id, member]),
-  );
+  const roster = staffAccountRoster(officeSnapshot, minecraft.entries());
   const stats =
     tickets && user.capabilities["tickets.view"]
       ? tickets.staffStats(user)
       : null;
   const reviewSummaries =
     reviews && staffReviewAccess(config, user) ? reviews.summaries() : null;
-  const identities = new Map(minecraft.entries());
-  for (const member of live.values())
-    if (member.staff && !identities.has(member.id))
-      identities.set(member.id, null);
-  const accounts = [...identities].map(([id, link]) => {
+  const accounts = [...roster].map(([id, { member, minecraft: link }]) => {
     const stored = store.get("user", id);
-    const member = live.get(id);
     return {
       id,
       name: member?.name ?? stored?.name ?? id,
       avatar: member?.avatar ?? stored?.avatar ?? null,
-      ranks: officeSnapshot?.connected ? (member?.ranks ?? []) : null,
+      ranks: member.ranks ?? [],
       minecraft: link,
       staffReview: reviewSummaries?.get(id) || null,
       reviewEligible: Boolean(

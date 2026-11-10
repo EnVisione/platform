@@ -1,3 +1,24 @@
+import { AuthError } from "./discord.js";
+
+export function staffAccountRoster(snapshot, registrations) {
+  if (!snapshot?.connected)
+    throw new AuthError("discord_unavailable", 503);
+  const links = new Map(registrations);
+  return new Map(
+    snapshot.members
+      .filter(
+        (member) =>
+          !member.bot &&
+          !member.pending &&
+          (member.staff || links.has(member.id)),
+      )
+      .map((member) => [
+        member.id,
+        { member, minecraft: links.get(member.id) ?? null },
+      ]),
+  );
+}
+
 export function staffDirectory(config, roster, minecraft) {
   return async () => {
     const people = await roster();
