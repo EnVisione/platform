@@ -712,6 +712,9 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         "This ticket was reopened and returned to the waiting queue. Staff can claim it again.",
     }[notice.event];
     if (!content) throw new Error("Unknown ticket activity notice");
+    const closingNotice =
+      notice.event === "closed" ||
+      (notice.event === "resolved" && Boolean(ticket.closedBy));
     const mentions = notice.silent
       ? []
       : closed
@@ -720,6 +723,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
             !notice.actor.guest && notice.actor.id !== ticket.owner.id
               ? notice.actor.id
               : null,
+            closingNotice && !ticket.owner.guest ? ticket.owner.id : null,
           ].filter(Boolean)
         : [
             !ticket.owner.guest ? ticket.owner.id : null,

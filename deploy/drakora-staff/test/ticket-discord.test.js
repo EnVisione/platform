@@ -2756,10 +2756,13 @@ test("player closure, private rating and staff resolution each post a notice wit
   assert.equal(notices.length, 3);
   assert.match(notices[0].embeds[0].description, /player closed/);
   assert.match(notices[1].embeds[0].description, /Private feedback received/);
+  assert.ok(notices[0].sentData.allowedMentions.users.includes(owner.id));
+  assert.ok(!notices[1].sentData.allowedMentions.users.includes(owner.id));
   assert.match(
     notices[2].embeds[0].description,
     /Staff recorded the resolution/,
   );
+  assert.ok(!notices[2].sentData.allowedMentions.users.includes(owner.id));
   assert.doesNotMatch(
     JSON.stringify(notices.map((message) => message.data)),
     /PRIVATE|4\/5/,
@@ -2812,6 +2815,30 @@ test("player closure, private rating and staff resolution each post a notice wit
   );
   assert.ok(deletionNotice);
   assert.deepEqual(deletionNotice.data.allowedMentions, { parse: [] });
+});
+
+test("staff closure mentions the ticket author alongside the assigned and closing staff", async (t) => {
+  const { service, transport, user, channels } = setupDiscord(t);
+  const owner = { id: user.id, name: "Player" };
+  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
+  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const ticket = await supportTicket(service, owner, transport);
+  service.claim(helper, ticket.id);
+  await service.pump();
+  service.closeTicket(manager, ticket.id, {}, true);
+  await service.pump();
+
+  const target = channels.get(service.get(ticket.id).channelId);
+  const notice = [...target.savedMessages.values()].find((message) =>
+    message.embeds?.[0]?.description?.includes("Staff closed this ticket"),
+  );
+  assert.ok(notice);
+  assert.equal(notice.sentData.content, "<@201> <@200> <@100>");
+  assert.deepEqual(notice.sentData.allowedMentions, {
+    parse: [],
+    users: [helper.id, manager.id, owner.id],
+  });
+  assert.match(notice.embeds[0].description, /<@100>/);
 });
 
 test("feedback after channel deletion is delivered privately to staff without exposing a score or duplicating an uncertain send", async (t) => {
