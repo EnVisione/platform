@@ -90,6 +90,7 @@ import { tebexEventService } from "./tebex-events.js";
 import { storeCheckoutService } from "./store-checkout.js";
 import { supporterCoinService } from "./supporter-coins.js";
 import { rankAnnouncementService } from "./rank-announcements.js";
+import { discordDonationPublisher } from "./discord-donation-announcements.js";
 import { storeAccountService, storeSessionRequired } from "./store-account.js";
 import {
   minecraftLinkService,
@@ -135,10 +136,6 @@ const storePurchases = shopService
 const storeAccount = shopService ? storeAccountService(store) : undefined;
 const supporterCoins = supporterCoinService(store, config.storefront);
 const donators = donatorAudiences(store, storePurchases);
-const rankAnnouncements =
-  config.storefront?.webhooks?.mode === "production"
-    ? rankAnnouncementService(store, config.storefront.rankAnnouncements)
-    : undefined;
 let onboarding;
 const applications = applicationDatabase
   ? applicationService(
@@ -216,6 +213,15 @@ async function workspaceConfig() {
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
+const donationChannel = process.env.STORE_DONATION_DISCORD_CHANNEL;
+const rankAnnouncements =
+  config.storefront?.webhooks?.mode === "production"
+    ? rankAnnouncementService(store, config.storefront.rankAnnouncements, {
+        discord: donationChannel
+          ? discordDonationPublisher(office?.gateway.rest, donationChannel)
+          : undefined,
+      })
+    : undefined;
 const rulesPanel =
   office && website
     ? discordRulesPanel(config, store, office.gateway, website)
