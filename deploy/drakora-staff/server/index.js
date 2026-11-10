@@ -218,7 +218,7 @@ const rankAnnouncements =
   config.storefront?.webhooks?.mode === "production"
     ? rankAnnouncementService(store, config.storefront.rankAnnouncements, {
         discord: donationChannel
-          ? discordDonationPublisher(office?.gateway.rest, donationChannel)
+          ? discordDonationPublisher(office?.gateway.rest, donationChannel, store)
           : undefined,
       })
     : undefined;

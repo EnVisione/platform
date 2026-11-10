@@ -10,11 +10,14 @@ import {
   queueRankAnnouncement,
   rankAnnouncementService,
 } from "../server/rank-announcements.js";
-import { openStore } from "../server/store.js";
+import { hash, openStore } from "../server/store.js";
 
 const channelId = "123456789012345678";
 const names = { buyer: "Buyer_One", recipient: "Recipient", gift: true };
 const uuid = "12345678-1234-4234-8234-123456789012";
+const buyerUuid = "12345678-1234-4234-8234-123456789013";
+const buyerDiscordId = "123456789012345670";
+const recipientDiscordId = "123456789012345671";
 const coinKind = "store-coin-announcement";
 const rankKind = "store-rank-announcement";
 const settings = {
@@ -43,7 +46,7 @@ function fixture(t, { minecraft = true, discord = true } = {}) {
   } };
   const service = rankAnnouncementService(store, minecraft ? settings : undefined, {
     client,
-    discord: discord ? discordDonationPublisher(rest, channelId) : undefined,
+    discord: discord ? discordDonationPublisher(rest, channelId, store) : undefined,
     log: (name) => sent.failures.push(name),
   });
   t.after(async () => { await service.close(); store.close(); });
@@ -53,6 +56,14 @@ function fixture(t, { minecraft = true, discord = true } = {}) {
     queueCoinAnnouncement(store, key, receipt, options, Date.now());
   }
   return { store, sent, outage, service, coin };
+}
+
+function link(store, playerUuid, discordId, kind) {
+  store.set("minecraft-owner", playerUuid, {
+    [`${kind}Linked`]: true,
+    discord: { id: discordId },
+  });
+  store.set("minecraft-discord-owner", discordId, { uuid: playerUuid });
 }
 
 test("Discord mirrors a paid coin gift and its goal without triggering mentions", async (t) => {
@@ -139,4 +150,45 @@ test("Discord can deliver alone and caps a fully funded progress bar", async (t)
   assert.equal(embed.description, "Buyer has just bought Appreciation Coins!");
   assert.match(embed.fields[0].value, /^🟩{12}\n\*\*100% funded\*\*/u);
   assert.equal(store.entries(coinKind).length, 0);
+});
+
+test("Discord tags the verified buyer of a rank or coin gift and leaves the recipient as a Minecraft name", async (t) => {
+  const { store, sent, service } = fixture(t);
+  link(store, buyerUuid, buyerDiscordId, "staff");
+  link(store, uuid, recipientDiscordId, "member");
+
+  const transactionId = "rank-gift";
+  const credit = { uuid, buyerUuid, active: true, coins: 2500 };
+  const rankReceipt = { uuid, transactionId, rank: "archdragon", scope: "network", state: "paid" };
+  store.set("supporter-receipt", hash(transactionId), credit);
+  store.set("store-purchase-receipt", "rank", rankReceipt);
+  queueRankAnnouncement(store, "rank", rankReceipt, names, Date.now());
+  acknowledgeRankAnnouncements(store, uuid, [{ rank: "archdragon", scope: "network" }]);
+  store.set("supporter-receipt", "coin-gift", credit);
+  queueCoinAnnouncement(store, "coin-gift", credit, names, Date.now());
+  await service.flush();
+
+  assert.equal(sent.discord.length, 2);
+  const products = ["ArchDragon", "Appreciation Coins"];
+  for (const [i, { body }] of sent.discord.entries()) {
+    const product = products[i];
+    assert.equal(body.content, `<@${buyerDiscordId}> has just gifted Recipient ${product}!`);
+    assert.deepEqual(body.allowed_mentions, { parse: [], users: [buyerDiscordId] });
+    assert.equal(body.embeds[0].description, undefined);
+  }
+  assert.equal(sent.minecraft.length, 2);
+  for (const message of sent.minecraft)
+    assert.match(message.message, /^Buyer_One has just gifted Recipient /);
+});
+
+test("Discord falls back to the Minecraft name when the link does not point back to the payer", async (t) => {
+  const { store, sent, service, coin } = fixture(t);
+  link(store, uuid, buyerDiscordId, "member");
+  store.set("minecraft-discord-owner", buyerDiscordId, { uuid: buyerUuid });
+  coin("unverified", { buyer: "Buyer_One", recipient: "Buyer_One" });
+  await service.flush();
+  const [{ body }] = sent.discord;
+  assert.equal(body.content, undefined);
+  assert.deepEqual(body.allowed_mentions, { parse: [] });
+  assert.match(body.embeds[0].description, /^Buyer\\_One has just bought /);
 });

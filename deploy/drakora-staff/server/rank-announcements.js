@@ -5,6 +5,7 @@ import { readPrivateKey } from "./private-key.js";
 import { storeRanks } from "../shared/storefront.js";
 import { goalAnnouncementBar } from "../shared/store-goal.js";
 import { storeGoalSnapshot } from "./store-goal.js";
+import { hash } from "./store.js";
 
 const lifetime = 86400000;
 const kind = "store-rank-announcement";
@@ -93,11 +94,26 @@ export function coinAnnouncementMessage(item, timestamp, goal) {
   };
 }
 
-function paidAnnouncement(store, queueKind, item) {
-  if (queueKind === kind)
-    return store.get("store-purchase-receipt", item.receiptKey)?.state === "paid";
+function paidAnnouncementReceipt(store, queueKind, item) {
+  if (queueKind === kind) {
+    const receipt = store.get("store-purchase-receipt", item.receiptKey);
+    return receipt?.state === "paid" ? receipt : undefined;
+  }
   const receipt = store.get("supporter-receipt", item.receiptKey);
-  return receipt?.active === true && !receipt.refunded && !receipt.disputed;
+  return receipt?.active === true && !receipt.refunded && !receipt.disputed
+    ? receipt
+    : undefined;
+}
+
+function announcementBuyerUuid(store, queueKind, item, receipt) {
+  if (!item.gift) return receipt.uuid;
+  let credit = receipt;
+  if (queueKind === kind) {
+    if (typeof receipt.transactionId !== "string") return undefined;
+    credit = store.get("supporter-receipt", hash(receipt.transactionId));
+  }
+  if (credit?.uuid === item.uuid && credit.buyerUuid !== item.uuid)
+    return credit.buyerUuid;
 }
 
 export function acknowledgeRankAnnouncements(store, uuid, deliveredRanks) {
@@ -225,7 +241,8 @@ export function rankAnnouncementService(store, settings, options = {}) {
             if (!pending(current) || current.id !== item.id ||
                 current.createdAt + lifetime <= now())
               continue;
-            if (!paidAnnouncement(store, queueKind, current)) {
+            const receipt = paidAnnouncementReceipt(store, queueKind, current);
+            if (!receipt) {
               store.delete(queueKind, current.receiptKey);
               continue;
             }
@@ -234,7 +251,7 @@ export function rankAnnouncementService(store, settings, options = {}) {
             if (discord && current.discordPending && !current.goal)
               store.set(queueKind, current.receiptKey, { ...current, goal }, expires);
             const render = queueKind === kind ? rankAnnouncementMessage : coinAnnouncementMessage;
-            await publish(render(current, now(), goal), goal);
+            await publish(render(current, now(), goal), goal, current, queueKind, receipt);
             const latest = store.get(queueKind, current.receiptKey);
             if (latest?.id !== current.id) continue;
             const updated = { ...latest, [field]: complete };
@@ -260,7 +277,11 @@ export function rankAnnouncementService(store, settings, options = {}) {
     "Minecraft", "minecraftSent", (sent) => !sent, true, publishMinecraft, disconnectMinecraft,
   ) : undefined;
   const flushDiscord = discord ? destination(
-    "Discord", "discordPending", (pending) => pending === true, false, discord,
+    "Discord", "discordPending", (pending) => pending === true, false,
+    (message, goal, item, queueKind, receipt) => discord(message, goal, {
+      buyer: item.buyer,
+      buyerUuid: announcementBuyerUuid(store, queueKind, item, receipt),
+    }),
   ) : undefined;
   const flush = () => Promise.all([flushMinecraft?.(), flushDiscord?.()]);
   return {
