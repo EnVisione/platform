@@ -1,0 +1,69 @@
+.player-results {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.player-results table {
+  width: 100%;
+  min-width: 35rem;
+  border-collapse: separate;
+  border-spacing: 0 10px;
+}
+
+.player-results th {
+  padding: 0 12px;
+  color: #b5bac1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.player-results th:first-child {
+  width: 100%;
+}
+
+.player-results tbody tr {
+  position: relative;
+}
+
+.player-results td {
+  padding: 16px 12px;
+  border-block: 1px solid #41444c;
+  background: #2b2d31;
+  white-space: nowrap;
+}
+
+.player-results td:first-child {
+  border-inline-start: 1px solid #41444c;
+  border-radius: 10px 0 0 10px;
+  white-space: normal;
+}
+
+.player-results td:last-child {
+  border-inline-end: 1px solid #41444c;
+  border-radius: 0 10px 10px 0;
+}
+
+.player-results :is(th, td):first-child {
+  padding-inline-start: 16px;
+}
+
+.player-results :is(th, td):last-child {
+  padding-inline-end: 16px;
+}
+
+.player-results tbody tr:is(:hover, :focus-within) td {
+  border-color: var(--accent-ink);
+  background: #33353b;
+}
+
+.player-results a::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.player-results time {
+  color: #b5bac1;
+}
