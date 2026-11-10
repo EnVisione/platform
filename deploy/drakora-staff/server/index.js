@@ -1,4 +1,8 @@
+import { botCommandsService, botCommandsAccess } from "./bot-commands.js";
+import { botPackVersions } from "./bot-pack-versions.js";
+import { botCommandRouter } from "./bot-command-routes.js";
 import express from "express";
+import { publicAssets } from "./public-assets.js";
 import session from "express-session";
 import { rateLimit } from "express-rate-limit";
 import { Provider } from "oidc-provider";
@@ -20,6 +24,7 @@ import {
 } from "./workspace.js";
 import { workspaceSessions } from "./workspace-session.js";
 import { discordOffice } from "./office.js";
+import { discordRulesPanel } from "./rules-discord.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { trackerAccessService } from "./tracker-access.js";
 import { validateConfig } from "./config.js";
@@ -48,6 +53,7 @@ import { contactRanks } from "./contact-ranks.js";
 import { applicationService } from "./applications.js";
 import { applicationOnboarding } from "./application-onboarding.js";
 import { applicationRouter } from "./application-routes.js";
+import { minecraftSkinService } from "./minecraft-skins.js";
 import { applicationFormRouter } from "./application-form-routes.js";
 import { mailboxService } from "./mailbox.js";
 import { mailRouter } from "./mail-routes.js";
@@ -65,10 +71,26 @@ import { ticketMacros } from "./ticket-macros.js";
 import { discordHoneypot } from "./honeypot-discord.js";
 import { moderationHistory } from "./moderation.js";
 import { moderationRouter } from "./moderation-routes.js";
+import { playtimeCounter } from "./staff-review-metrics.js";
+import { protectModerationStaff } from "./moderation-permissions.js";
+import { staffNotes } from "./staff-notes.js";
+import { moderationCases } from "./moderation-cases.js";
+import { playerActivity } from "./players.js";
+import { moderationDiscord } from "./moderation-discord.js";
+import { moderationTargetResolver } from "./moderation-targets.js";
+import { appealRouter, publicAppealSession } from "./appeal-routes.js";
+import { appealAccounts } from "./appeal-accounts.js";
 import { retentionService, privacyActivity } from "./retention.js";
 import { legalRouter } from "./legal.js";
 import { storefrontService, storefrontRouter } from "./storefront.js";
-import { storeWalletService } from "./store-wallet.js";
+import { storePlusService } from "./store-plus.js";
+import { storePurchaseService } from "./store-purchases.js";
+import { tebexWebhookService, tebexWebhookRouter } from "./tebex-webhooks.js";
+import { tebexEventService } from "./tebex-events.js";
+import { storeCheckoutService } from "./store-checkout.js";
+import { supporterCoinService } from "./supporter-coins.js";
+import { rankAnnouncementService } from "./rank-announcements.js";
+import { storeAccountService, storeSessionRequired } from "./store-account.js";
 import {
   minecraftLinkService,
   proxyAuthenticator,
@@ -76,6 +98,7 @@ import {
 import { minecraftRankBridge } from "./minecraft-bridge-ranks.js";
 import { minecraftRoleTransport } from "./minecraft-bridge-discord.js";
 import { minecraftBridgeRouter } from "./minecraft-bridge-routes.js";
+import { donatorAudiences } from "./donator-audiences.js";
 
 const config = validateConfig(
   JSON.parse(
@@ -84,7 +107,7 @@ const config = validateConfig(
 );
 const dataPath = process.env.DATA_PATH ?? "/data";
 mkdirSync(dataPath, { recursive: true, mode: 0o700 });
-const { store, sessions, OidcAdapter } = openStore(
+const { store, sessions, createSessionStore, OidcAdapter } = openStore(
   `${dataPath}/staff.sqlite`,
   config.databaseKey,
 );
@@ -103,9 +126,19 @@ const website = config.website ? websiteService(config, store) : undefined;
 const shopService = config.website
   ? storefrontService(config.storefront)
   : undefined;
-const storeWallet = shopService
-  ? storeWalletService(store, shopService.giftCard)
+const storePlus = shopService
+  ? storePlusService(store, config.storefront)
   : undefined;
+const storePurchases = shopService
+  ? storePurchaseService(store, config.storefront?.purchases)
+  : undefined;
+const storeAccount = shopService ? storeAccountService(store) : undefined;
+const supporterCoins = supporterCoinService(store, config.storefront);
+const donators = donatorAudiences(store, storePurchases);
+const rankAnnouncements =
+  config.storefront?.webhooks?.mode === "production"
+    ? rankAnnouncementService(store, config.storefront.rankAnnouncements)
+    : undefined;
 let onboarding;
 const applications = applicationDatabase
   ? applicationService(
@@ -118,7 +151,12 @@ const applications = applicationDatabase
       (record) => onboarding?.erase(record),
     )
   : undefined;
+const minecraftSkins = minecraftSkinService({
+  profile: applications?.minecraftProfile,
+});
 const rolePolicy = rolePermissions(config, store);
+const botCommands = botCommandsService(config, store);
+const packVersions = botPackVersions(config, store, botCommands);
 const ticketPath = process.env.TICKET_DATA_PATH ?? "/tickets";
 if (config.tickets) mkdirSync(ticketPath, { recursive: true, mode: 0o700 });
 const ticketDatabase = config.tickets
@@ -133,6 +171,7 @@ const retention = retentionService(config, store, {
   tickets,
   applications,
   applicationStore: applicationDatabase?.store,
+  plus: storePlus,
 });
 const ticketEmails = tickets ? ticketMail(config, tickets) : undefined;
 const discord = discordClient(
@@ -177,6 +216,10 @@ async function workspaceConfig() {
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
   : undefined;
+const rulesPanel =
+  office && website
+    ? discordRulesPanel(config, store, office.gateway, website)
+    : undefined;
 let minecraftLinks, minecraftRanks, minecraftProxyAuth, minecraftBridgeTimer;
 let minecraftBridgeListener;
 if (config.minecraftBridge?.enabled) {
@@ -191,7 +234,12 @@ if (config.minecraftBridge?.enabled) {
     minecraftLinks,
     transport,
     office.roleSync,
+    Date.now,
+    storePlus,
   );
+  void minecraftRanks
+    .plusChanged()
+    .catch(() => console.error("Minecraft Plus synchronization is pending."));
   minecraftProxyAuth = proxyAuthenticator(config.minecraftBridge, store);
   minecraftBridgeListener = (packet) =>
     void minecraftRanks
@@ -214,6 +262,110 @@ const honeypot = config.honeypot
 const ticketTransport = tickets
   ? ticketDiscord(config, tickets, office.gateway, rolePolicy)
   : undefined;
+const players = playerActivity(store);
+const resolveMinecraftTarget = moderationTargetResolver(store);
+const publicAppealAccounts = appealAccounts(store, {
+  profile: (name) => resolveMinecraftTarget({ name }),
+  owner: (uuid) => store.get("minecraft-owner", uuid),
+  byDiscord: (id) => store.get("minecraft-discord-owner", id),
+});
+const connectedModeration = moderationCases(store, {
+  staffOrigin: config.staffOrigin,
+  publicOrigin: config.applications?.publicOrigin ?? "https://drakora.org",
+  appealAccounts: publicAppealAccounts,
+  resolveIP: (uuid) => players.ipFor(uuid),
+  linkedDiscord: (uuid) => {
+    const owner = uuid ? store.get("minecraft-owner", uuid) : null;
+    return owner && (owner.memberLinked || owner.staffLinked)
+      ? owner.discord?.id
+      : undefined;
+  },
+  linkedMinecraft: (id) => {
+    const linked = store.get("minecraft-discord-owner", id);
+    const owner = linked?.uuid && store.get("minecraft-owner", linked.uuid);
+    return owner &&
+      owner.discord?.id === id &&
+      (owner.memberLinked || owner.staffLinked)
+      ? { uuid: owner.uuid, name: owner.name }
+      : undefined;
+  },
+  protectIP: async (actor, ip) => {
+    for (const target of players.alts(actor, { ip }).matches) {
+      const owner = store.get("minecraft-owner", target.uuid);
+      if (target.uuid === actor.uuid || owner?.discord?.id === actor.id)
+        throw new AuthError("moderation_self_action_denied", 403);
+      if (
+        office &&
+        owner?.discord?.id &&
+        (owner.memberLinked || owner.staffLinked)
+      )
+        protectModerationStaff(
+          config,
+          actor,
+          await office.staffMember(owner.discord.id),
+        );
+    }
+  },
+  resolveActor: async (uuid) => {
+    const owner = store.get("minecraft-owner", uuid);
+    if (
+      !owner?.staffLinked ||
+      !owner.discord?.id ||
+      !store.get("user", owner.discord.id)
+    )
+      throw new AuthError("moderation_staff_link_required");
+    const actor = await discord.check(owner.discord.id, true);
+    if (!actor.staffMember) throw new AuthError("moderation_access_denied");
+    return actor;
+  },
+  resolveTarget: async (platform, input) => {
+    if (platform === "discord") {
+      if (
+        typeof input?.discordId !== "string" ||
+        !/^\d{1,20}$/.test(input.discordId) ||
+        !office
+      )
+        throw new AuthError("invalid_moderation_target", 400);
+      const user = await office.gateway.users.fetch(input.discordId);
+      return { discordId: user.id, name: user.globalName || user.username };
+    }
+    const profile = await resolveMinecraftTarget(input);
+    const owner = profile.uuid
+      ? store.get("minecraft-owner", profile.uuid)
+      : null;
+    return {
+      ...profile,
+      uuid: profile.uuid,
+      name: profile.name,
+      ...((owner?.memberLinked || owner?.staffLinked) && owner.discord?.id
+        ? { discordId: owner.discord.id }
+        : {}),
+    };
+  },
+  protectTarget: async (actor, target) => {
+    if (!target.discordId || !office) return;
+    protectModerationStaff(
+      config,
+      actor,
+      await office.staffMember(target.discordId),
+    );
+  },
+});
+const playerStaffNotes = staffNotes(store, { moderation: connectedModeration });
+
+const moderationTransport = office
+  ? moderationDiscord(config, connectedModeration, office.gateway, rolePolicy)
+  : undefined;
+let moderationRetry;
+const moderationTimer = setInterval(() => {
+  if (moderationRetry) return;
+  moderationRetry = connectedModeration
+    .retry()
+    .catch(() => console.error("Moderation delivery is pending."))
+    .finally(() => {
+      moderationRetry = undefined;
+    });
+}, 15000).unref();
 const ticketStaffNotices = tickets
   ? ticketNotices(config, tickets, ticketTransport)
   : undefined;
@@ -237,6 +389,7 @@ const overview = overviewService(config, {
   tickets,
   mail,
   queues: office?.overviewQueues,
+  players,
 });
 const assignments =
   office && config.roleSync
@@ -279,6 +432,8 @@ const reviews =
     ? staffReviews(config, store, {
         roster: () => office.staffRoster(),
         member: reviewMember,
+        memberRanks: (id) =>
+          office.staffRoster().find((person) => person.id === id)?.ranks || [],
         assignments,
         applicationStore: applicationDatabase?.store,
         progress: (id, from, to) => ({
@@ -286,6 +441,12 @@ const reviews =
           lastActiveAt: activity.lastActiveAt(id),
         }),
         minecraft: minecraft.get,
+        playtime: (id, at) => {
+          const link = minecraft.get(id);
+          const owner = link?.uuid && store.get("minecraft-owner", link.uuid);
+          if (!owner?.staffLinked || owner.discord?.id !== id) return null;
+          return playtimeCounter(store, link, at);
+        },
       })
     : null;
 if (reviews)
@@ -361,6 +522,7 @@ const makeSession = (name) =>
 const staffSession = makeSession("__Host-drakora_staff");
 const todoSession = makeSession("__Host-drakora_todo");
 const storeSession = makeSession("__Host-drakora_store");
+const appealSession = publicAppealSession(config, createSessionStore());
 const applicationSession = applicationDatabase
   ? session({
       name: "__Host-drakora_apply",
@@ -385,6 +547,7 @@ const ticketSession = ticketDatabase
 app.use((req, res, next) => {
   res.set({
     "Cache-Control": "no-store",
+    "X-Robots-Tag": "noindex, nofollow",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "Strict-Transport-Security": "max-age=31536000",
@@ -405,30 +568,27 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) =>
-  [applicationHost, storefrontHost].includes(req.headers.host) &&
-  (req.path.startsWith("/store/api/wallet") ||
-    (config.minecraftBridge?.enabled &&
-      (req.path === "/minecraft/link" ||
-        req.path.startsWith("/api/minecraft/link"))) ||
-    req.path === "/store/api/gift-card" ||
-    req.path === "/store/api/checkout" ||
-    req.path === "/store/auth/consume")
-    ? storeSession(req, res, next)
-    : req.headers.host === storefrontHost
-      ? next()
-      : ticketSession &&
-          req.headers.host === applicationHost &&
-          (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
-        ? ticketSession(req, res, next)
-        : config.website &&
+  req.headers.host === applicationHost &&
+  (req.path === "/appeal" || req.path.startsWith("/appeal/"))
+    ? appealSession(req, res, next)
+    : [applicationHost, storefrontHost].includes(req.headers.host) &&
+        storeSessionRequired(req.path, config.minecraftBridge?.enabled)
+      ? storeSession(req, res, next)
+      : req.headers.host === storefrontHost
+        ? next()
+        : ticketSession &&
             req.headers.host === applicationHost &&
-            !req.path.startsWith("/apply")
-          ? next()
-          : (req.headers.host === todoHost
-              ? todoSession
-              : req.headers.host === applicationHost
-                ? applicationSession
-                : staffSession)(req, res, next),
+            (req.path.startsWith("/help/") || req.path.startsWith("/partners"))
+          ? ticketSession(req, res, next)
+          : config.website &&
+              req.headers.host === applicationHost &&
+              !req.path.startsWith("/apply")
+            ? next()
+            : (req.headers.host === todoHost
+                ? todoSession
+                : req.headers.host === applicationHost
+                  ? applicationSession
+                  : staffSession)(req, res, next),
 );
 app.use(
   ["/auth/discord", "/__staff/start"],
@@ -455,12 +615,20 @@ app.use((req, res, next) => {
               "/compare/",
               "/prefixes",
               "/prefixes/",
+              "/plus",
+              "/plus/",
               "/gift-cards",
               "/gift-cards/",
             ].includes(req.path)))
-        ? "default-src 'self'; script-src 'self' https://js.tebex.io; style-src 'self' 'unsafe-inline' https://js.tebex.io; img-src 'self' https:; connect-src 'self' https://*.tebex.io; frame-src https://*.tebex.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.tebex.io"
+        ? "default-src 'self'; script-src 'self' https://js.tebex.io; style-src 'self' 'unsafe-inline' https://js.tebex.io; img-src 'self' https:; connect-src 'self' https://*.tebex.io; frame-src https://*.tebex.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://checkout.tebex.io https://pay.tebex.io"
         : `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' ${req.headers.host === applicationHost && config.website ? "https:" : "https://cdn.discordapp.com"}; connect-src 'self'; frame-src ${config.todoOrigin}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
+  next();
+});
+
+app.get("/robots.txt", (req, res, next) => {
+  if ([staffHost, todoHost].includes(req.headers.host))
+    return res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   next();
 });
 
@@ -481,6 +649,13 @@ if (minecraftLinks)
       {
         signedIn,
         dist,
+        plus: storePlus,
+        supporterCoins,
+        donators,
+        purchases: storePurchases,
+        moderation: connectedModeration,
+        staffNotes: playerStaffNotes,
+        players,
       },
     ),
   );
@@ -490,17 +665,60 @@ else
     res.status(503).json({ ok: false, error: "minecraft_bridge_disabled" });
   });
 
+app.use(
+  appealRouter(config, connectedModeration, {
+    dist,
+    discordIdentity: (code, redirectUri) =>
+      discord.storeIdentity(code, redirectUri),
+  }),
+);
+
 if (website) {
+  const events = tebexEventService(
+    store,
+    config.storefront ?? {},
+    storePurchases,
+    storePlus,
+    { profile: applications?.minecraftProfile },
+  );
+  const webhook = tebexWebhookRouter(
+    tebexWebhookService(config.storefront?.webhooks, async (event) => {
+      const result = await events.handle(event);
+      supporterCoins.handle(event);
+      void minecraftRanks
+        ?.plusChanged()
+        .catch(() =>
+          console.error("Minecraft Plus synchronization is pending."),
+        );
+      return result;
+    }),
+  );
+  app.use((req, res, next) =>
+    [applicationHost, storefrontHost].includes(req.headers.host)
+      ? webhook(req, res, next)
+      : next(),
+  );
   const shop = storefrontRouter(
     shopService,
     [config.applications.publicOrigin, config.storefront?.origin].filter(
       Boolean,
     ),
-    storeWallet,
+    storeAccount,
     {
       staffOrigin: config.staffOrigin,
-      giftCardsEnabled: Boolean(config.storefront?.pluginSecret),
       minecraftProfile: applications?.minecraftProfile,
+      plus: storePlus,
+      skins: minecraftSkins,
+      purchases: storePurchases,
+      testBuyer: events.testBuyer,
+      supporterCoins,
+      store,
+      checkout: storeCheckoutService(
+        store,
+        config.storefront ?? {},
+        storePlus,
+        events,
+      ),
     },
   );
   app.use((req, res, next) =>
@@ -510,9 +728,10 @@ if (website) {
   );
   const publicWebsite = publicWebsiteRouter(
     website,
-    communityStatus(config),
+    communityStatus(config, fetch, Date.now, overview.networkSnapshot),
     dist,
     publicStaffDirectory,
+    config.applications.publicOrigin,
   );
   app.use((req, res, next) =>
     [applicationHost, storefrontHost].includes(req.headers.host)
@@ -538,7 +757,12 @@ if (tickets) {
 }
 
 if (applications) {
-  const publicApplications = applicationRouter(config, applications, dist);
+  const publicApplications = applicationRouter(
+    config,
+    applications,
+    dist,
+    minecraftSkins,
+  );
   app.use((req, res, next) =>
     req.headers.host === applicationHost ||
     (req.headers.host === staffHost &&
@@ -560,6 +784,7 @@ function safeNext(value) {
       "/applications/editor",
       "/email",
       "/roles",
+      "/bot",
       "/website",
       "/office",
       "/tracker",
@@ -567,6 +792,7 @@ function safeNext(value) {
       "/tickets",
       "/logs",
       "/moderation",
+      "/players",
       "/minecraft/link",
     ].includes(value)
   )
@@ -583,7 +809,7 @@ function safeNext(value) {
     return value;
   if (
     typeof value === "string" &&
-    /^\/(applications|tickets|moderation|staff-reviews)\/[a-f0-9-]{36}$/.test(
+    /^\/(applications|tickets|moderation|staff-reviews|players)\/[a-f0-9-]{36}$/.test(
       value,
     )
   )
@@ -638,12 +864,13 @@ function publicUser(user) {
     mail: mailAccess(config, user),
     capabilities: user.capabilities,
     rolesPanel: Boolean(user.capabilities["roles.view"]),
+    bot: botCommandsAccess(user),
     website: Boolean(website && websiteAccess(config, user)),
     tickets: Boolean(tickets && user.capabilities["tickets.view"]),
     staffReviews: Boolean(reviews && staffReviewAccess(config, user)),
     logs: Boolean(
       (tickets && user.capabilities["logs.view"]) ||
-      (reviews && staffReviewAccess(config, user)),
+        (reviews && staffReviewAccess(config, user)),
     ),
     returning: user.returning,
     minecraft: minecraft.get(user.id) ?? null,
@@ -1009,7 +1236,7 @@ app.get("/auth/discord", async (req, res) => {
   const state = newToken();
   const next = safeNext(req.query.next);
   if (req.query.purpose === "store") {
-    if (!storeWallet?.challengeGet(req.query.challenge))
+    if (!storeAccount?.challengeGet(req.query.challenge))
       throw new AuthError("invalid_login_state");
     req.session.storeOAuth = {
       challenge: req.query.challenge,
@@ -1023,6 +1250,7 @@ app.get("/auth/discord", async (req, res) => {
       redirect_uri: `${config.staffOrigin}/auth/discord/callback`,
       response_type: "code",
       scope: "identify",
+      prompt: "consent",
       state,
     });
     return res.redirect(authorize.href);
@@ -1116,20 +1344,20 @@ app.get("/auth/discord/callback", async (req, res) => {
     const pending = req.session.storeOAuth;
     delete req.session.storeOAuth;
     await save(req);
-    const challenge = storeWallet.challengeGet(pending.challenge);
+    const challenge = storeAccount.challengeGet(pending.challenge);
     if (!challenge) throw new AuthError("invalid_login_state");
     try {
       if (pending.until < Date.now() || typeof req.query.code !== "string")
         throw new AuthError("invalid_login_state");
       return res.redirect(
-        storeWallet.handoff(
+        storeAccount.handoff(
           pending.challenge,
           await discord.storeIdentity(req.query.code),
         ),
       );
     } catch {
       return res.redirect(
-        `${challenge.origin}/store?giftCardError=discord_cancelled#store-gift-cards`,
+        `${challenge.origin}/store/plus?error=discord_cancelled`,
       );
     }
   }
@@ -1238,6 +1466,16 @@ app.post(
     res.json({ minecraft: minecraft.requestChange(user.id, req.body?.name) });
   },
 );
+app.use(
+  botCommandRouter({
+    service: botCommands,
+    config,
+    staffHost,
+    dist,
+    authorize: (req) => signedIn(req, { syncHuly: false, forceDiscord: true }),
+    mutation: requireMutation,
+  }),
+);
 app.get("/api/accounts", async (req, res) => {
   const user = await signedIn(req);
   if (!managementAccess(config, user).manager)
@@ -1249,7 +1487,7 @@ app.get("/api/accounts", async (req, res) => {
       ? tickets.staffStats(user)
       : null;
   const reviewSummaries =
-    reviews && staffReviewAccess(config, user) ? reviews.summaries() : null;
+    reviews && staffReviewAccess(config, user) ? reviews.summaries(user) : null;
   const accounts = [...roster].map(([id, { member, minecraft: link }]) => {
     const stored = store.get("user", id);
     return {
@@ -1260,7 +1498,7 @@ app.get("/api/accounts", async (req, res) => {
       minecraft: link,
       staffReview: reviewSummaries?.get(id) || null,
       reviewEligible: Boolean(
-        reviewSummaries && member && reviews.eligible(member),
+        reviewSummaries && member && reviews.eligible(member, user),
       ),
       discordStatus: member?.status ?? "unknown",
       lastActiveAt: member?.lastActiveAt ?? activity.lastActiveAt(id) ?? null,
@@ -1269,8 +1507,9 @@ app.get("/api/accounts", async (req, res) => {
         ? stats.get(id) || {
             ticketsResolved: 0,
             activeTickets: 0,
-            reviewCount: 0,
-            averageRating: null,
+            ...(rolePolicy.isFounder(user)
+              ? { reviewCount: 0, averageRating: null }
+              : {}),
           }
         : null,
     };
@@ -1558,10 +1797,7 @@ app.use("/oidc", async (req, res, next) => {
   provider.callback()(req, res);
 });
 
-app.use(
-  "/__staff/assets",
-  express.static(`${dist}/assets`, { immutable: true, maxAge: "1y" }),
-);
+app.use("/__staff/assets", publicAssets(dist));
 app.get(["/login", "/access"], (_req, res) =>
   res.sendFile(`${dist}/index.html`),
 );
@@ -1653,7 +1889,11 @@ if (reviews) {
 app.use(
   moderationRouter({
     history: moderationHistory(store),
-    authorize: (req) => signedIn(req, { syncHuly: false }),
+    authorize: (req) => signedIn(req, { syncHuly: false, forceDiscord: true }),
+    cases: connectedModeration,
+    staffNotes: playerStaffNotes,
+    players,
+    mutation: requireMutation,
     applications,
     tickets,
     staffHost,
@@ -1871,6 +2111,7 @@ sweep.unref();
 server.listen(3000, "0.0.0.0", () =>
   console.log("Drakora staff service ready."),
 );
+packVersions.start();
 todoSync?.start();
 trackerAccess?.start();
 applications?.start();
@@ -1880,11 +2121,18 @@ reviews?.start();
 partnerships?.start();
 ticketEmails?.start();
 ticketStaffNotices?.start();
+rankAnnouncements?.start();
 async function stop() {
+  await rankAnnouncements?.close();
+  await packVersions.close();
   clearInterval(minecraftBridgeTimer);
   if (minecraftBridgeListener)
     office.gateway.off("raw", minecraftBridgeListener);
   await minecraftRanks?.close();
+  clearInterval(moderationTimer);
+  await moderationRetry;
+  await moderationTransport?.close();
+  await connectedModeration.close();
   await reviews?.close();
   await retention.close();
   clearInterval(sweep);
@@ -1900,6 +2148,7 @@ async function stop() {
   await tickets?.stop();
   await ticketTransport?.close();
   await honeypot?.close();
+  await rulesPanel?.close();
   await office?.close();
   await mail?.close();
   for (const socket of sockets) socket.destroy();
