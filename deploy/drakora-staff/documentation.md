@@ -156,6 +156,12 @@ Keep the public domains exclusively behind the staff proxy. An independently pub
 
 The optional Office configuration includes the category, invitation channel, allowed host role IDs, and an ordered list of meeting or casual voice rooms. Removing it disables the integration server. Build the matching Huly frontend before exposing the Office configuration to clients.
 
+## Community Discord nicknames
+
+Members with a store rank, Drakora Plus, or an eligible staff rank can use `/nick set` and `/nick reset` in the community Discord. The bot checks the member's current Discord roles before changing their server nickname. Discord profile names and Minecraft nicknames are separate.
+
+Drakora Plus adds `[★]` to the member's existing server name or Discord profile name. The bot also applies the badge when Plus is assigned later. When Plus ends, it removes the badge and keeps a custom nickname only if the member still has an eligible rank. Discord's role hierarchy applies to nickname changes.
+
 ## Discord staff rank synchronization
 
 With Office enabled, `roleSync.guildId` identifies the main Drakora guild and `roleSync.roles` contains explicit `{ "staffId": "...", "mainId": "..." }` pairs. The staff guild remains `guildId`. Each role can appear in only one pair. Staff IDs must be configured ranks or application specialist roles; Dashboard admission cannot be mapped. The current configuration maps Founder, Manager, Admin, Sr Moderator, Moderator, Jr Moderator, Helper, Builder, Developer and Artist. Specialist roles remain independent of community ranks and each other. On first synchronization or when a specialist mapping is added, existing specialist assignments from both guilds are combined without replacing the preferred community rank. Stored mapping IDs distinguish a newly linked role from a later removal. Remove the optional `roleSync` block to disable synchronization.

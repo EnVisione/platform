@@ -24,6 +24,7 @@ import {
 } from "./workspace.js";
 import { workspaceSessions } from "./workspace-session.js";
 import { discordOffice } from "./office.js";
+import { discordNicknames } from "./discord-nicknames.js";
 import { discordRulesPanel } from "./rules-discord.js";
 import { discordTodoSync } from "./todo-sync.js";
 import { trackerAccessService } from "./tracker-access.js";
@@ -212,6 +213,9 @@ async function workspaceConfig() {
 }
 const office = config.office
   ? discordOffice(config, store, { mail, rolePolicy })
+  : undefined;
+const nicknames = office && config.roleSync && config.minecraftBridge?.plusRoleId
+  ? discordNicknames(config, store, office.gateway)
   : undefined;
 const donationChannel = process.env.STORE_DONATION_DISCORD_CHANNEL;
 const rankAnnouncements =
@@ -2129,6 +2133,7 @@ ticketEmails?.start();
 ticketStaffNotices?.start();
 rankAnnouncements?.start();
 async function stop() {
+  await nicknames?.close();
   await rankAnnouncements?.close();
   await packVersions.close();
   clearInterval(minecraftBridgeTimer);
