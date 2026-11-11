@@ -149,10 +149,23 @@ export function minecraftLinkService(
     const value = store.get("minecraft-link-challenge", id);
     return value?.expiresAt > now() ? value : undefined;
   }
+  async function eligibleStaff(id) {
+    if (!dependencies.assertStaff) return false;
+    try {
+      await dependencies.assertStaff(id);
+      return true;
+    } catch (error) {
+      if (error.code === "staff_admission_required") return false;
+      throw error;
+    }
+  }
   const publicChallenge = (value) => ({
     player: value.player,
     kind: value.kind,
     state: value.discord ? "approved" : "pending",
+    ...(value.kind === "staff" || value.staffApproved === true
+      ? { staffVerification: true }
+      : {}),
     expiresAt: value.expiresAt,
     ...(value.discord ? { discord: value.discord } : {}),
   });
@@ -197,7 +210,7 @@ export function minecraftLinkService(
     preview(token) {
       return publicChallenge(challenge(token));
     },
-    async approve(token, identity, staffAdmitted = false) {
+    async approve(token, identity, staffAdmitted = false, verifyStaff = false) {
       const saved = challenge(token);
       if (!/^\d{1,20}$/.test(identity?.id) || typeof identity.name !== "string")
         throw bridgeFailure("discord_login_required", 401);
@@ -205,6 +218,9 @@ export function minecraftLinkService(
         throw bridgeFailure("staff_admission_required", 403);
       if (saved.kind === "staff" && dependencies.assertStaff)
         await dependencies.assertStaff(identity.id);
+      const staffApproved =
+        saved.kind === "member" && verifyStaff === true &&
+        (await eligibleStaff(identity.id));
       return store.transaction(() => {
         const current = challenge(token);
         const occupied = owner(current.player.uuid),
@@ -217,6 +233,7 @@ export function minecraftLinkService(
         if (current.discord && current.discord.id !== identity.id)
           throw bridgeFailure("link_already_approved", 409);
         current.discord = { id: identity.id, name: identity.name.slice(0, 80) };
+        current.staffApproved = staffApproved;
         current.confirmationCode ??= opaque();
         current.approvedAt ??= now();
         store.set(
@@ -264,8 +281,9 @@ export function minecraftLinkService(
         throw bridgeFailure("invalid_confirmation", 409);
       if (kind === "staff")
         await dependencies.assertStaff?.(waiting.discord.id);
-      let firstConsent;
-      const value = store.transaction(() => {
+      const staffEligible =
+        waiting.staffApproved === true && (await eligibleStaff(waiting.discord.id));
+      const { value, consents } = store.transaction(() => {
         const current = pending(player, kind);
         if (!current?.discord || !equal(current.confirmationCode, input.code))
           throw bridgeFailure("invalid_confirmation", 409);
@@ -276,17 +294,26 @@ export function minecraftLinkService(
           (other && other.uuid !== player.uuid)
         )
           throw bridgeFailure("minecraft_ownership_conflict", 409);
-        firstConsent = !existing?.[`${kind}Linked`];
+        const verifiedKinds = [kind];
+        if (kind === "member" && current.staffApproved && staffEligible)
+          verifiedKinds.push("staff");
+        const consents = verifiedKinds.map((category) => ({
+          category,
+          first: !existing?.[`${category}Linked`],
+        }));
         const linked = {
           ...existing,
           uuid: player.uuid,
           name: player.name,
           discord: current.discord,
-          [`${kind}Linked`]: true,
-          [`${kind}ConsentAt`]: now(),
           verifiedAt: existing?.verifiedAt ?? now(),
         };
-        if (kind === "staff") registry.verify(current.discord.id, player);
+        for (const category of verifiedKinds) {
+          linked[`${category}Linked`] = true;
+          linked[`${category}ConsentAt`] = now();
+        }
+        if (verifiedKinds.includes("staff"))
+          registry.verify(current.discord.id, player);
         save(linked);
         store.set(
           "minecraft-discord-owner",
@@ -297,9 +324,14 @@ export function minecraftLinkService(
         store.delete("minecraft-link-pending", `${player.uuid}:${kind}`);
         store.delete("minecraft-link-challenge", hash(current.token));
         audit("confirmed", { ...linked, kind });
-        return linked;
+        return { value: linked, consents };
       });
-      await dependencies.onLinked?.(value, kind, firstConsent);
+      if (dependencies.onLinked)
+        await Promise.all(
+          consents.map(({ category, first }) =>
+            dependencies.onLinked(value, category, first),
+          ),
+        );
       return {
         ok: true,
         state: "linked",

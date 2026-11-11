@@ -197,6 +197,61 @@ test("approval and confirmation expire and staff admission is checked again", as
     code: "invalid_confirmation",
   });
 });
+test("a shared link verifies screened staff and preserves ordinary member linking", async (t) => {
+  const { links, registry, calls } = setup(t);
+  registry.register(identity.id, player.name);
+  assert.equal(registry.verifiedStaff(identity.id), false);
+  const token = tokenFrom(links.begin({ player, kind: "member" }));
+  const approval = await links.approve(token, identity, false, true);
+  assert.equal(approval.staffVerification, true);
+  assert.equal(registry.verifiedStaff(identity.id), false);
+  const verified = await links.confirm({
+    player,
+    kind: "member",
+    code: links.status({ player, kind: "member" }).confirmationCode,
+  });
+  assert.equal(verified.staffLinked, true);
+  assert.equal(verified.memberLinked, true);
+  assert.equal(registry.verifiedStaff(identity.id), true);
+  assert.deepEqual(calls.map(({ kind, first }) => [kind, first]), [
+    ["member", true],
+    ["staff", true],
+  ]);
+
+  const member = { id: "43", name: "Regular player" };
+  const memberToken = tokenFrom(links.begin({ player: second, kind: "member" }));
+  const memberApproval = await links.approve(memberToken, member, false, true);
+  assert.equal(memberApproval.staffVerification, undefined);
+  const ordinary = await links.confirm({
+    player: second,
+    kind: "member",
+    code: links.status({ player: second, kind: "member" }).confirmationCode,
+  });
+  assert.equal(ordinary.memberLinked, true);
+  assert.equal(ordinary.staffLinked, false);
+  assert.equal(registry.verifiedStaff(member.id), false);
+});
+
+test("leaving the staff server during linking preserves only ordinary verification", async (t) => {
+  let active = true;
+  const { links, registry } = setup(t, {
+    assertStaff: async () => {
+      if (!active) throw Object.assign(new Error(), { code: "staff_admission_required" });
+    },
+  });
+  const token = tokenFrom(links.begin({ player, kind: "member" }));
+  await links.approve(token, identity, false, true);
+  active = false;
+  const result = await links.confirm({
+    player,
+    kind: "member",
+    code: links.status({ player, kind: "member" }).confirmationCode,
+  });
+  assert.equal(result.memberLinked, true);
+  assert.equal(result.staffLinked, false);
+  assert.equal(registry.verifiedStaff(identity.id), false);
+});
+
 function signer(keys, now) {
   return (body, proxy = "na", changes = {}) => {
     const raw = Buffer.from(JSON.stringify(body));
@@ -424,7 +479,7 @@ test("HTTP proxy rejects EU writes and oversized bodies and browser approval enf
         "X-CSRF-Token": csrf,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ challenge: token }),
+      body: JSON.stringify({ challenge: token, verifyStaff: true }),
     });
   assert.equal(
     (await approve("https://attacker.test", "test-csrf")).status,
@@ -433,7 +488,9 @@ test("HTTP proxy rejects EU writes and oversized bodies and browser approval enf
   assert.equal((await approve("https://store.test", "wrong")).status, 403);
   response = await approve("https://store.test", "test-csrf");
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).state, "approved");
+  const approval = await response.json();
+  assert.equal(approval.state, "approved");
+  assert.equal(approval.staffVerification, true);
   assert.equal(links.owner(player.uuid), undefined);
 });
 test("confirmed ownership survives a real encrypted SQLite reopen", async (t) => {

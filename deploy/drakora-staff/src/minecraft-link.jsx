@@ -6,7 +6,7 @@ const explanations = {
   link_storage_required:
     "Allow tab storage to keep this request through sign-in, or sign in to the staff dashboard first and reopen the link from Minecraft.",
   link_expired:
-    "This link has expired. Run /link or /stafflink in Minecraft to start again.",
+    "This link has expired. Run /link in Minecraft to start again.",
   minecraft_ownership_conflict:
     "This Minecraft account or Discord account is already linked to another account. Contact support; it cannot be reassigned here.",
   link_already_approved:
@@ -117,7 +117,7 @@ export function MinecraftLink() {
           "Content-Type": "application/json",
           "X-CSRF-Token": session.csrf,
         },
-        body: JSON.stringify({ challenge }),
+        body: JSON.stringify({ challenge, verifyStaff: true }),
       });
       setPreview(value);
       if (preview.kind === "staff")
@@ -180,7 +180,9 @@ export function MinecraftLink() {
                   one-use code.
                 </p>
                 <p>
-                  Your accounts are linked only after that final confirmation.
+                  {preview.staffVerification
+                    ? "After confirming in Minecraft, reopen the staff dashboard."
+                    : "Your accounts are linked only after that final confirmation."}
                 </p>
               </div>
             ) : session?.identity ? (
@@ -194,7 +196,7 @@ export function MinecraftLink() {
                   />
                   {staff
                     ? "I consent to verifying my staff profile and synchronizing configured staff ranks."
-                    : "I consent to linking these accounts and synchronizing my cosmetic ranks."}
+                    : "I consent to linking these accounts and syncing my cosmetic ranks. If I’m in the staff Discord, this also verifies my staff profile and syncs configured staff ranks."}
                 </label>
                 <button
                   type="button"

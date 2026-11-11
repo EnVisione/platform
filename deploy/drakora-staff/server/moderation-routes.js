@@ -62,7 +62,7 @@ export function moderationRouter({
     } catch (error) {
       if (error.status === 401)
         return res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
-      if (error.code === "minecraft_name_required")
+      if (error.code === "minecraft_link_required")
         return res.redirect(`/minecraft?next=${encodeURIComponent(req.path)}`);
       next(error);
     }

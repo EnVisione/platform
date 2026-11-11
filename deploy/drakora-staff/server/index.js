@@ -837,7 +837,7 @@ function safeNext(value) {
 
 async function signedIn(
   req,
-  { syncHuly = true, forceDiscord = false } = {},
+  { allowUnlinked = false, syncHuly = true, forceDiscord = false } = {},
 ) {
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
@@ -851,6 +851,10 @@ async function signedIn(
   if ((req.session.accessEpoch || 0) !== (user.accessEpoch || 0))
     throw new AuthError("login_required", 401);
   if (!user.staffMember) throw new AuthError("staff_server_required");
+  if (!minecraft.verifiedStaff(user.id)) {
+    if (allowUnlinked) return user;
+    throw new AuthError("minecraft_link_required", 428);
+  }
   const path = requestPath(req);
   if (
     !["GET", "HEAD"].includes(req.method) ||
@@ -1029,8 +1033,7 @@ officeRouter.post(
       !safeEqual(req.headers["x-csrf-token"], req.session.csrf)
     )
       throw new AuthError("invalid_request");
-    const user = await discord.check(req.session.userId, true);
-    if (!user.staffMember) throw new AuthError("staff_server_required");
+    const user = await signedIn(req, { forceDiscord: true });
     if (!user.capabilities["office.host"])
       throw new AuthError("meeting_host_required");
     if (!["start", "end"].includes(req.params.action))
@@ -1092,6 +1095,8 @@ app.use(async (req, res, next) => {
   if (req.method === "GET" && req.path === "/__staff/attach") {
     const handoff = workspaceSession.take(req.query.code);
     let user = await discord.check(handoff.userId, true);
+    if (!minecraft.verifiedStaff(user.id))
+      throw new AuthError("minecraft_link_required", 428);
     if (!user.permissions.dashboard || !workspaceAllowed(user, handoff.view))
       throw new AuthError("staff_permission_required");
     user = await huly.sync(user);
@@ -1139,6 +1144,8 @@ app.use(async (req, res, next) => {
     );
     const user = await discord.check(handoff.userId, true);
     if (!user.staffMember) throw new AuthError("staff_server_required");
+    if (!minecraft.verifiedStaff(user.id))
+      throw new AuthError("minecraft_link_required", 428);
     if (!user.permissions.todo)
       throw new AuthError("staff_permission_required");
     await regenerate(req);
@@ -1166,7 +1173,7 @@ app.use(async (req, res, next) => {
       if (req.headers["sec-fetch-dest"] === "iframe") throw error;
       return res.redirect("/__staff/start");
     }
-    if (error.code === "minecraft_name_required" && isPageRequest(req))
+    if (error.code === "minecraft_link_required" && isPageRequest(req))
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     throw error;
   }
@@ -1420,7 +1427,7 @@ app.get("/auth/discord/callback", async (req, res) => {
   await save(req);
   if (req.query.error || typeof req.query.code !== "string")
     return res.redirect("/login?error=discord_cancelled");
-  const user = await huly.sync(await discord.login(req.query.code));
+  const user = await discord.login(req.query.code);
   await regenerate(req);
   Object.assign(req.session, {
     userId: user.id,
@@ -1429,11 +1436,19 @@ app.get("/auth/discord/callback", async (req, res) => {
     csrf: newToken(),
   });
   await save(req);
-  res.redirect(next);
+  res.redirect(
+    next === "/minecraft/link" || minecraft.verifiedStaff(user.id)
+      ? next
+      : `/minecraft?next=${encodeURIComponent(next)}`,
+  );
 });
 
 app.get("/api/me", async (req, res) => {
-  const user = await signedIn(req);
+  const user = await signedIn(req, { allowUnlinked: true });
+  if (!minecraft.verifiedStaff(user.id))
+    return res.json({
+      user: { name: user.name, minecraftSetupRequired: true },
+    });
   res.json({ user: publicUser(user), csrf: req.session.csrf });
 });
 app.get("/api/overview", async (req, res) => {
@@ -1443,17 +1458,6 @@ app.get("/api/overview", async (req, res) => {
 app.use(
   "/api/preferences/time",
   timePreferenceRouter(timeSettings, signedIn, requireMutation),
-);
-app.post(
-  "/api/minecraft",
-  rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
-  express.json({ limit: "1kb" }),
-  async (req, res) => {
-    const user = await signedIn(req);
-    requireMutation(req);
-    const link = minecraft.register(user.id, req.body?.name);
-    res.status(201).json({ minecraft: link });
-  },
 );
 app.post(
   "/api/minecraft/change",
@@ -1601,7 +1605,7 @@ app.get(["/huly", "/todo"], async (req, res) => {
     res.redirect("/tracker");
   } catch (error) {
     if (error.status === 401) return res.redirect("/login?next=/huly");
-    if (error.code === "minecraft_name_required")
+    if (error.code === "minecraft_link_required")
       return res.redirect("/minecraft?next=/huly");
     throw error;
   }
@@ -1631,7 +1635,7 @@ app.get("/huly/authorize", async (req, res) => {
       return res.redirect(
         `/login?next=${encodeURIComponent(safeNext(req.originalUrl))}`,
       );
-    if (error.code === "minecraft_name_required")
+    if (error.code === "minecraft_link_required")
       return res.redirect("/minecraft?next=/huly");
     throw error;
   }
@@ -1712,7 +1716,7 @@ const provider = new Provider(`${config.staffOrigin}/oidc`, {
   async findAccount(_ctx, id) {
     if (!/^discord:\d+$/.test(id)) return undefined;
     const user = await discord.check(id.slice(8));
-    if (!user.permissions.dashboard || !user.permissions.todo) return undefined;
+    if (!user.permissions.todo || !minecraft.verifiedStaff(user.id)) return undefined;
     return {
       accountId: id,
       async claims() {
@@ -1745,7 +1749,7 @@ app.get("/interaction/:uid", async (req, res) => {
       return res.redirect(
         `/login?next=${encodeURIComponent(safeNext(req.path))}`,
       );
-    if (error.code === "minecraft_name_required")
+    if (error.code === "minecraft_link_required")
       return res.redirect("/minecraft?next=/huly");
     throw error;
   }
@@ -1803,7 +1807,9 @@ app.get(["/login", "/access"], (_req, res) =>
 );
 app.get("/minecraft", async (req, res) => {
   try {
-    await signedIn(req);
+    const user = await signedIn(req, { allowUnlinked: true });
+    const next = safeNext(req.query.next);
+    if (minecraft.verifiedStaff(user.id)) return res.redirect(next);
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401)
@@ -1846,7 +1852,7 @@ app.get("/applications/editor", async (req, res) => {
   } catch (error) {
     if (error.status === 401)
       return res.redirect("/login?next=%2Fapplications%2Feditor");
-    if (error.code === "minecraft_name_required")
+    if (error.code === "minecraft_link_required")
       return res.redirect("/minecraft?next=%2Fapplications%2Feditor");
     throw error;
   }
@@ -1963,7 +1969,7 @@ app.get(["/applications", "/applications/:id"], async (req, res) => {
       return res.redirect(
         `/login?next=${encodeURIComponent(safeNext(req.path))}`,
       );
-    if (error.code === "minecraft_name_required")
+    if (error.code === "minecraft_link_required")
       return res.redirect(
         `/minecraft?next=${encodeURIComponent(safeNext(req.path))}`,
       );
@@ -1994,7 +2000,7 @@ app.get(
     } catch (error) {
       if (error.status === 401)
         res.redirect(`/login?next=${encodeURIComponent(req.path)}`);
-      else if (error.code === "minecraft_name_required")
+      else if (error.code === "minecraft_link_required")
         res.redirect(`/minecraft?next=${encodeURIComponent(req.path)}`);
       else throw error;
     }
@@ -2023,7 +2029,7 @@ app.use((error, req, res, _next) => {
         .type("html")
         .send(workspaceFailureHtml(config, code));
     }
-    if (code === "minecraft_name_required")
+    if (code === "minecraft_link_required")
       return res.redirect(`${config.staffOrigin}/minecraft?next=/huly`);
     const message =
       code === "staff_permission_required"
@@ -2038,7 +2044,7 @@ app.use((error, req, res, _next) => {
         `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>Drakora access</title><body style="background:#313338;color:#f2f3f5;font:18px system-ui;padding:8vw"><h1>${status === 401 ? "Sign in to Drakora" : "Workspace access unavailable"}</h1><p>${message}</p><a style="color:#a6d0ff" href="${config.staffOrigin}/login?next=%2Fhuly">Continue with Discord</a></body></html>`,
       );
   }
-  if (code === "minecraft_name_required")
+  if (code === "minecraft_link_required")
     return res.redirect(
       `/minecraft?next=${encodeURIComponent(safeNext(req.path))}`,
     );
@@ -2090,7 +2096,7 @@ const sweep = setInterval(async () => {
       )
         throw new Error("Session expired");
       let user = await discord.check(socket.userId);
-      if (!user.permissions.todo)
+      if (!user.permissions.todo || !minecraft.verifiedStaff(user.id))
         throw new Error("Access revoked");
       if (
         user.syncedAt !== user.checkedAt ||

@@ -37,7 +37,7 @@ const messages = {
     "Your Minecraft name is already linked. Request a change in Settings.",
   minecraft_name_unchanged: "Enter a different Minecraft name.",
   minecraft_verification_required:
-    "Your UUID is verified. Run /stafflink in Minecraft again to update your username.",
+    "Your UUID is verified. Run /link in Minecraft again to update your username.",
   discord_cancelled:
     "Discord sign-in was cancelled. You can try again when you are ready.",
   verified_email_required:
@@ -213,92 +213,20 @@ function AccentSettings({ userId, accent, onChange }) {
     </section>
   );
 }
-function MinecraftRegistration({ user, csrf, next, onLogout }) {
-  const [name, setName] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function submit(event) {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const response = await fetch("/api/minecraft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify({ name }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "service_unavailable");
-      location.assign(safeTarget(next));
-    } catch (failure) {
-      setError(messages[failure.message] || messages.service_unavailable);
-      setBusy(false);
-    }
-  }
-
+function MinecraftRegistration({ user, next }) {
   return (
     <main className="login-layout">
       <div className="login-shell">
         <Brand />
         <section className="login-card" aria-labelledby="minecraft-title">
-          <span className="login-label">DRAKORA STAFF</span>
-          <h1 id="minecraft-title">
-            {user.returning
-              ? `Welcome back, ${user.name}`
-              : `Welcome, ${user.name}`}
-          </h1>
-          <p>Enter your Minecraft username to add it to your staff profile.</p>
-          <form className="minecraft-form" onSubmit={submit}>
-            <label htmlFor="minecraft-name">
-              Minecraft Java Edition username
-            </label>
-            <input
-              id="minecraft-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              minLength={3}
-              maxLength={16}
-              pattern="[A-Za-z0-9_]{3,16}"
-              autoComplete="off"
-              spellCheck="false"
-              required
-            />
-            <p className="registration-warning">
-              Please be extra careful. You will need to verify this name in-game
-              later. Once submitted, it can only be changed with Founder or
-              Manager authorization. For now, you can continue while
-              verification is pending.
-            </p>
-            <label className="confirm-name">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                onChange={(event) => setConfirmed(event.target.checked)}
-                required
-              />
-              I checked my Minecraft name and understand the change policy.
-            </label>
-            {error && (
-              <p className="notice" role="alert">
-                {error}
-              </p>
-            )}
-            <button
-              className="button submit-name"
-              disabled={busy || !confirmed}
-            >
-              {busy ? "Saving…" : "Save name and continue"}
-            </button>
-          </form>
-          <button
-            className="registration-signout"
-            type="button"
-            onClick={onLogout}
-          >
-            Sign out
-          </button>
+          <h1 id="minecraft-title">Verify your Minecraft account</h1>
+          <p>Signed in to Discord as {user.name}.</p>
+          <ol>
+            <li>Join Drakora in Minecraft and run <code>/link</code>.</li>
+            <li>Open the link from chat and approve with this Discord account.</li>
+            <li>Run <code>/link status</code> in Minecraft and confirm the link.</li>
+          </ol>
+          <a className="button" href={safeTarget(next)}>Continue to the dashboard</a>
         </section>
       </div>
     </main>
@@ -350,7 +278,7 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
         <h2 id="minecraft-settings-title">Minecraft account</h2>
         <p>
           {link.uuid
-            ? "Your Minecraft UUID is verified. If you change your username, run /stafflink again to update it."
+            ? "Your Minecraft UUID is verified. If you change your username, run /link again to update it."
             : "Your linked Minecraft name is locked until a Founder or Manager approves a change."}
         </p>
       </div>
@@ -800,13 +728,11 @@ function App() {
         <p>Opening Drakora Staff…</p>
       </main>
     );
-  if (page === "/minecraft" && state.user?.dashboard && !state.user.minecraft)
+  if (state.user?.minecraftSetupRequired)
     return (
       <MinecraftRegistration
         user={state.user}
-        csrf={state.csrf}
-        next={params.get("next") || (loginPage ? "/" : location.pathname)}
-        onLogout={logout}
+        next={params.get("next") || "/"}
       />
     );
   if (loginPage || !state.user?.dashboard)

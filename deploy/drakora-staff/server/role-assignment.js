@@ -131,7 +131,7 @@ export function roleAssignments(config, store, policy, transport, sync) {
     const owner = identity && store.get("minecraft-owner", identity.uuid);
     let minecraft = "Not configured";
     if (config.minecraftBridge?.enabled) {
-      if (!owner?.staffLinked) minecraft = "Awaiting /stafflink verification";
+      if (!owner?.staffLinked) minecraft = "Awaiting /link verification";
       else if (!config.minecraftBridge.rankSyncEnabled)
         minecraft = "Verified. Rank synchronization is disabled";
       else {

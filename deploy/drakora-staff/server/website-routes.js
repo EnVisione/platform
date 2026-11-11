@@ -117,7 +117,7 @@ export function websiteEditorRouter(service, authorize, requireMutation, dist) {
       res.sendFile(`${dist}/index.html`);
     } catch (error) {
       if (error.status === 401) res.redirect("/login?next=%2Fwebsite");
-      else if (error.code === "minecraft_name_required")
+      else if (error.code === "minecraft_link_required")
         res.redirect("/minecraft?next=%2Fwebsite");
       else next(error);
     }

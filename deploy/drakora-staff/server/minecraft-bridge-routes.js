@@ -25,6 +25,7 @@ export function minecraftBridgeRouter(
   async function identity(req) {
     if (isStaff(req)) {
       const user = await options.signedIn(req, {
+        allowUnlinked: true,
         syncHuly: false,
         forceDiscord: true,
       });
@@ -152,7 +153,14 @@ export function minecraftBridgeRouter(
       mutation(req);
       preview(req, true);
       const actor = await identity(req);
-      res.json(await links.approve(req.body.challenge, actor, isStaff(req)));
+      res.json(
+        await links.approve(
+          req.body.challenge,
+          actor,
+          isStaff(req),
+          req.body.verifyStaff === true,
+        ),
+      );
     },
   );
   router.use((error, _req, res, _next) => {

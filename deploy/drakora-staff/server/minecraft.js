@@ -65,6 +65,12 @@ export function minecraftRegistry(store) {
 
   return {
     get,
+    verifiedStaff(id) {
+      const link = get(id);
+      if (!link?.uuid || link.status !== "verified") return false;
+      const owner = store.get("minecraft-owner", link.uuid);
+      return owner?.staffLinked === true && owner.discord?.id === id;
+    },
     register,
     requestChange,
     decide,
