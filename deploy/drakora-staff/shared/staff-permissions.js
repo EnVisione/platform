@@ -56,6 +56,13 @@ export const staffPermissions = [
     ["moderation.view"],
   ],
   [
+    "moderation.alts",
+    "Moderation",
+    "Look up associated accounts",
+    "Review accounts sharing a recently reported address. Addresses are hidden. An association does not establish ownership or wrongdoing.",
+    ["moderation.view", "players.view"],
+  ],
+  [
     "moderation.ip",
     "Moderation",
     "View IP associations",

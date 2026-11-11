@@ -86,19 +86,148 @@ export function minecraftBridgeRouter(
       if (!input || typeof input !== "object" || Array.isArray(input))
         throw bridgeFailure("invalid_proxy_request");
       const operation = input.operation;
-      if (["snapshot", "poll", "ack"].includes(operation) && proxy !== "na")
+      if (
+        [
+          "snapshot",
+          "poll",
+          "ack",
+          "purchase-poll",
+          "purchase-ack",
+          "moderation-poll",
+          "moderation-ack",
+        ].includes(operation) &&
+        proxy !== "na"
+      )
         throw bridgeFailure("proxy_writer_required", 403);
+      const moderation = () => {
+        if (!options.moderation)
+          throw bridgeFailure("moderation_unavailable", 503);
+        return options.moderation;
+      };
       const actions = {
         begin: () => links.begin(input),
-        status: () => links.status(input),
+        status: () => {
+          const status = links.status(input);
+          if (input.kind !== "member" || !options.plus) return status;
+          const { plus, serverTime, recheckAfter } =
+            options.plus.snapshot(input);
+          return { ...status, plus, serverTime, recheckAfter };
+        },
+        plus: () => {
+          if (!options.plus) throw bridgeFailure("plus_unavailable", 503);
+          const status = options.plus.snapshot(input);
+          return {
+            ...status,
+            ...(options.donators
+              ? { donators: options.donators.snapshot(input, status.plus) }
+              : {}),
+          };
+        },
+        "supporter-leaderboard": () => {
+          if (!options.supporterCoins)
+            throw bridgeFailure("supporter_coins_unavailable", 503);
+          return options.supporterCoins.leaderboard();
+        },
+        "supporter-coins": () => {
+          if (!options.supporterCoins)
+            throw bridgeFailure("supporter_coins_unavailable", 503);
+          return options.supporterCoins.snapshot(input);
+        },
+        "plus-grant": () => {
+          if (!options.plus) throw bridgeFailure("plus_unavailable", 503);
+          return options.plus.grant(input, proxy);
+        },
+        "plus-revoke": () => {
+          if (!options.plus) throw bridgeFailure("plus_unavailable", 503);
+          return options.plus.revoke(input, proxy);
+        },
+        "plus-claim": () => {
+          if (!options.plus) throw bridgeFailure("plus_unavailable", 503);
+          return options.plus.claim(input, proxy);
+        },
+        "purchase-poll": () => {
+          if (!options.purchases)
+            throw bridgeFailure("purchase_delivery_disabled", 503);
+          return options.purchases.poll({
+            bundles:
+              Array.isArray(input.features) &&
+              input.features.includes("bundles-v1"),
+          });
+        },
+        "purchase-ack": () => {
+          if (!options.purchases)
+            throw bridgeFailure("purchase_delivery_disabled", 503);
+          return options.purchases.ack(input);
+        },
         confirm: () => links.confirm(input),
         snapshot: () => ranks.snapshot(input),
         poll: () => ranks.poll(),
         ack: () => ranks.ack(input),
+        "staffnote-create": async () => ({
+          note: await options.staffNotes.create(
+            await moderation().actor(input.actorUuid),
+            input,
+          ),
+        }),
+        "staffnote-list": async () =>
+          options.staffNotes.list(
+            await moderation().actor(input.actorUuid),
+            input,
+          ),
+        "staffnote-clear": async () =>
+          options.staffNotes.clear(
+            await moderation().actor(input.actorUuid),
+            input,
+          ),
+        "staffnote-poll": () => options.staffNotes.poll(input, proxy),
+        "staffnote-ack": () => options.staffNotes.acknowledge(input, proxy),
+        "staffnote-delivered": () => options.staffNotes.delivered(input, proxy),
+        "moderation-create": async () => {
+          const service = moderation();
+          return {
+            case: await service.create(await service.actor(input.actorUuid), {
+              ...input,
+              platform: "minecraft",
+            }),
+          };
+        },
+        "moderation-revoke": async () => {
+          const service = moderation();
+          const actor = await service.actor(input.actorUuid);
+          const current = service.get(input.caseId, actor);
+          if (current.platform !== "minecraft")
+            throw bridgeFailure("moderation_platform_mismatch", 403);
+          return {
+            case: await service.revoke(actor, input.caseId, {
+              reason: input.reason,
+              revision: current.revision,
+            }),
+          };
+        },
+        "moderation-alts": async () => {
+          const service = moderation();
+          const actor = await service.actor(input.actorUuid);
+          service.authorize(actor, "moderation.alts");
+          if (!options.players) throw bridgeFailure("players_unavailable", 503);
+          return options.players.alts(
+            actor,
+            await service.resolveMinecraftTarget(actor, input.target ?? {}),
+          );
+        },
+        "moderation-poll": () => moderation().poll(),
+        "moderation-ack": () => moderation().ack(input),
+        "moderation-snapshot": () => moderation().snapshot(input),
+        "moderation-capabilities": () => ({
+          capabilities: moderation().capabilities(),
+        }),
+        "players-snapshot": () => {
+          if (!options.players) throw bridgeFailure("players_unavailable", 503);
+          return options.players.observe(proxy, input);
+        },
       };
       if (!Object.hasOwn(actions, operation))
         throw bridgeFailure("invalid_proxy_operation");
-      res.json(await actions[operation]());
+      res.json({ ok: true, ...(await actions[operation]()) });
     },
   );
   router.get("/minecraft/link", (req, res, next) => {

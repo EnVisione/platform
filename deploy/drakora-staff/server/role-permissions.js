@@ -120,6 +120,7 @@ export function rolePermissions(config, store) {
           [
             "moderation.view",
             "moderation.warn",
+            "moderation.alts",
             "moderation.notes",
             "staffnotes.view",
             "staffnotes.create",

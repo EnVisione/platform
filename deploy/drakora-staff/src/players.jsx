@@ -163,7 +163,7 @@ export function Players({ csrf, capabilities, onNavigate }) {
               daily activity is unavailable.
             </p>
           </section>
-          {capabilities["moderation.ip"] && (
+          {capabilities["moderation.alts"] && (
             <section className="moderation-card">
               <h3>Possible shared-IP accounts</h3>
               <button
