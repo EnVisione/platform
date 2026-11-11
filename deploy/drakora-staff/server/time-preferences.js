@@ -32,7 +32,7 @@ export function timePreferences(store) {
 export function timePreferenceRouter(preferences, signedIn, requireMutation) {
   const router = express.Router();
   router.post("/", express.json({ limit: "1kb" }), async (req, res) => {
-    const user = await signedIn(req, { allowUnlinked: true, syncHuly: false });
+    const user = await signedIn(req, { syncHuly: false });
     requireMutation(req);
     res.json({ preferences: preferences.update(user.id, req.body) });
   });

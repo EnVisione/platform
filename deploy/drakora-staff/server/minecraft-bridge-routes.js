@@ -25,7 +25,6 @@ export function minecraftBridgeRouter(
   async function identity(req) {
     if (isStaff(req)) {
       const user = await options.signedIn(req, {
-        allowUnlinked: true,
         syncHuly: false,
         forceDiscord: true,
       });

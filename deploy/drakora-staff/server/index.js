@@ -437,6 +437,7 @@ async function reviewMember(id) {
   const raw = await office.staffMember(id);
   if (!raw) return null;
   return rolePolicy.apply({
+    staffMember: !raw.pending && !raw.user.bot,
     id,
     name: raw.nick || raw.user.global_name || raw.user.username,
     roles: raw.roles,
@@ -836,7 +837,7 @@ function safeNext(value) {
 
 async function signedIn(
   req,
-  { allowUnlinked = false, syncHuly = true, forceDiscord = false } = {},
+  { syncHuly = true, forceDiscord = false } = {},
 ) {
   if (!req.session.userId || req.session.until < Date.now())
     throw new AuthError("login_required", 401);
@@ -850,9 +851,6 @@ async function signedIn(
   if ((req.session.accessEpoch || 0) !== (user.accessEpoch || 0))
     throw new AuthError("login_required", 401);
   if (!user.staffMember) throw new AuthError("staff_server_required");
-  if (!user.permissions.dashboard)
-    throw new AuthError("dashboard_role_required");
-  const link = minecraft.get(user.id);
   const path = requestPath(req);
   if (
     !["GET", "HEAD"].includes(req.method) ||
@@ -861,8 +859,6 @@ async function signedIn(
       !path.startsWith("/huly/"))
   )
     retention.touch(user.id);
-  if (!allowUnlinked && !link)
-    throw new AuthError("minecraft_name_required", 428);
   if (
     syncHuly &&
     (!user.hulyAccount ||
@@ -919,7 +915,6 @@ app.get("/logs", async (req, res, next) => {
   if (req.headers.host !== staffHost) return next();
   try {
     const user = await signedIn(req, {
-      allowUnlinked: true,
       syncHuly: false,
       forceDiscord: true,
     });
@@ -939,7 +934,6 @@ if (tickets) {
       if (!req.session.userId || req.session.until <= Date.now())
         throw new AuthError("login_required", 401);
       return signedIn(req, {
-        allowUnlinked: true,
         syncHuly: false,
         forceDiscord: !["GET", "HEAD"].includes(req.method),
       });
@@ -1036,8 +1030,7 @@ officeRouter.post(
     )
       throw new AuthError("invalid_request");
     const user = await discord.check(req.session.userId, true);
-    if (!user.permissions.dashboard)
-      throw new AuthError("dashboard_role_required");
+    if (!user.staffMember) throw new AuthError("staff_server_required");
     if (!user.capabilities["office.host"])
       throw new AuthError("meeting_host_required");
     if (!["start", "end"].includes(req.params.action))
@@ -1101,8 +1094,6 @@ app.use(async (req, res, next) => {
     let user = await discord.check(handoff.userId, true);
     if (!user.permissions.dashboard || !workspaceAllowed(user, handoff.view))
       throw new AuthError("staff_permission_required");
-    if (!minecraft.get(user.id))
-      throw new AuthError("minecraft_name_required", 428);
     user = await huly.sync(user);
     await regenerate(req);
     workspaceSession.validate(handoff.staffSession, handoff.userId);
@@ -1147,10 +1138,7 @@ app.use(async (req, res, next) => {
       handoff.userId,
     );
     const user = await discord.check(handoff.userId, true);
-    if (!user.permissions.dashboard)
-      throw new AuthError("dashboard_role_required");
-    if (!minecraft.get(user.id))
-      throw new AuthError("minecraft_name_required", 428);
+    if (!user.staffMember) throw new AuthError("staff_server_required");
     if (!user.permissions.todo)
       throw new AuthError("staff_permission_required");
     await regenerate(req);
@@ -1441,15 +1429,11 @@ app.get("/auth/discord/callback", async (req, res) => {
     csrf: newToken(),
   });
   await save(req);
-  res.redirect(
-    next === "/minecraft/link" || minecraft.get(user.id)
-      ? next
-      : `/minecraft?next=${encodeURIComponent(next)}`,
-  );
+  res.redirect(next);
 });
 
 app.get("/api/me", async (req, res) => {
-  const user = await signedIn(req, { allowUnlinked: true });
+  const user = await signedIn(req);
   res.json({ user: publicUser(user), csrf: req.session.csrf });
 });
 app.get("/api/overview", async (req, res) => {
@@ -1465,7 +1449,7 @@ app.post(
   rateLimit({ windowMs: 60000, limit: 8, legacyHeaders: false }),
   express.json({ limit: "1kb" }),
   async (req, res) => {
-    const user = await signedIn(req, { allowUnlinked: true });
+    const user = await signedIn(req);
     requireMutation(req);
     const link = minecraft.register(user.id, req.body?.name);
     res.status(201).json({ minecraft: link });
@@ -1729,7 +1713,6 @@ const provider = new Provider(`${config.staffOrigin}/oidc`, {
     if (!/^discord:\d+$/.test(id)) return undefined;
     const user = await discord.check(id.slice(8));
     if (!user.permissions.dashboard || !user.permissions.todo) return undefined;
-    if (!minecraft.get(user.id)) return undefined;
     return {
       accountId: id,
       async claims() {
@@ -1820,7 +1803,7 @@ app.get(["/login", "/access"], (_req, res) =>
 );
 app.get("/minecraft", async (req, res) => {
   try {
-    await signedIn(req, { allowUnlinked: true });
+    await signedIn(req);
     res.sendFile(`${dist}/index.html`);
   } catch (error) {
     if (error.status === 401)
@@ -1888,7 +1871,6 @@ if (reviews) {
     reviews,
     authorize: (req) =>
       signedIn(req, {
-        allowUnlinked: true,
         syncHuly: false,
         forceDiscord: true,
       }),
@@ -2046,8 +2028,8 @@ app.use((error, req, res, _next) => {
     const message =
       code === "staff_permission_required"
         ? "Your staff permissions do not allow access to this workspace."
-        : code === "dashboard_role_required"
-          ? "You need the Dashboard role to sign in to Drakora Staff."
+        : code === "staff_server_required"
+          ? "Join the Drakora Staff Discord server to sign in."
           : "Return to the staff portal to sign in or retry.";
     return res
       .status(status)
@@ -2108,11 +2090,7 @@ const sweep = setInterval(async () => {
       )
         throw new Error("Session expired");
       let user = await discord.check(socket.userId);
-      if (
-        !user.permissions.dashboard ||
-        !user.permissions.todo ||
-        !minecraft.get(user.id)
-      )
+      if (!user.permissions.todo)
         throw new Error("Access revoked");
       if (
         user.syncedAt !== user.checkedAt ||

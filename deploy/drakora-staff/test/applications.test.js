@@ -140,13 +140,14 @@ function answers(role = "community", communities = ["prom2"]) {
     ),
   };
 }
-function reviewer(rank = "28", dashboard = true) {
-  const roles = [rank, ...(dashboard ? ["10"] : [])];
+function reviewer(rank = "28", staffMember = true) {
+  const roles = [rank];
   return {
     id: rank,
     name: `Reviewer ${rank}`,
     roles,
-    permissions: permissions(config, roles),
+    staffMember,
+    permissions: permissions(config, roles, staffMember),
   };
 }
 function connectedDraft(
@@ -257,8 +258,9 @@ test("application roles follow verified Discord rank IDs", () => {
   ]) {
     assert.equal(
       applicationReviewAccess(config, {
-        roles: ["10", id],
-        permissions: permissions(config, ["10", id]),
+        roles: [id],
+        staffMember: true,
+        permissions: permissions(config, [id], true),
       }),
       expected,
     );
@@ -271,8 +273,9 @@ test("application roles follow verified Discord rank IDs", () => {
     );
     assert.equal(
       applicationDecisionAccess(config, {
-        roles: ["10", id],
-        permissions: permissions(config, ["10", id]),
+        roles: [id],
+        staffMember: true,
+        permissions: permissions(config, [id], true),
       }),
       ["20", "28"].includes(id),
     );
@@ -530,13 +533,14 @@ test("feedback uses trusted Discord avatars and restores legacy authors from cac
 });
 test("Jr Moderator and higher can leave feedback but only Manager and Founder can make a final decision", async (t) => {
   const { service } = setup(t);
-  const user = (rank, dashboard = true) => {
-    const roles = [rank, ...(dashboard ? ["10"] : [])];
+  const user = (rank, staffMember = true) => {
+    const roles = [rank];
     return {
       id: rank,
       name: `Reviewer ${rank}`,
       roles,
-      permissions: permissions(config, roles),
+      staffMember,
+      permissions: permissions(config, roles, staffMember),
     };
   };
   service.patch("session", { role: "community", answers: answers() });

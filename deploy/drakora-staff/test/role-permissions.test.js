@@ -20,7 +20,8 @@ export const settings = {
   },
   mail: {},
 };
-const actor = (rank, extra = ["10", "11"]) => ({
+const actor = (rank, extra = [], staffMember = true) => ({
+  staffMember,
   id: rank,
   name: `Member ${rank}`,
   roles: [rank, ...extra],
@@ -219,7 +220,7 @@ test("restricted categories reject lower-rank grants and mask stale saved grants
   assert.equal(fallback["tickets.category.reports.view"], true);
   assert.equal(fallback["tickets.category.billing.view"], false);
   assert.equal(
-    restarted.apply(actor("21", [])).capabilities["tickets.view"],
+    restarted.apply(actor("21", [], false)).capabilities["tickets.view"],
     false,
   );
 });
@@ -241,7 +242,7 @@ test("defaults admit dashboard staff to the workspace and preserve role boundari
       "Artist",
     ],
   );
-  assert.equal(policy.apply(actor("20", [])).permissions.dashboard, false);
+  assert.equal(policy.apply(actor("20", ["10"], false)).permissions.dashboard, false);
   assert.equal(policy.apply(actor("20", ["10"])).permissions.todo, true);
   for (const rank of [
     "20",
@@ -358,7 +359,6 @@ test("Managers cannot change Founder policy, and lower ranks cannot receive role
     code: "role_management_protected",
   });
   for (const key of [
-    "dashboard.view",
     "roles.view",
     "roles.edit",
     "roles.assign",
@@ -406,7 +406,7 @@ test("invalid, incomplete, stale and dependent permission saves leave the policy
   assert.equal(policy.read(actor("20")).revision, 1);
 });
 
-test("disabled permissions block actions even when a Discord access role remains present", (t) => {
+test("disabled permissions restrict tools while staff membership still grants dashboard admission", (t) => {
   const { policy } = setup(t);
   const edit = input(policy);
   for (const key of Object.keys(
@@ -415,7 +415,7 @@ test("disabled permissions block actions even when a Discord access role remains
     change(edit, "29", key, false);
   policy.save(actor("20"), edit);
   const member = policy.apply(actor("29"));
-  assert.equal(member.permissions.dashboard, false);
+  assert.equal(member.permissions.dashboard, true);
   assert.equal(member.permissions.todo, false);
   assert.equal(member.capabilities["applications.view"], false);
 });
@@ -431,7 +431,7 @@ test("workspace permissions remain enforced after the Todo role is retired", (t)
   policy.save(actor("20"), edit);
   assert.equal(policy.apply(staff).permissions.dashboard, true);
   assert.equal(policy.apply(staff).permissions.todo, false);
-  assert.equal(policy.apply(actor("29", ["11"])).permissions.dashboard, false);
+  assert.equal(policy.apply(actor("29", ["11"], false)).permissions.dashboard, false);
 });
 
 test("category and inbox defaults preserve billing and partnership privacy across legacy policies", (t) => {

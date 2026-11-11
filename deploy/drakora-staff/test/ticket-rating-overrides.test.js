@@ -12,11 +12,11 @@ import { ticketTranscript } from "../server/ticket-transcript.js";
 import { config as fixture } from "./fixture.js";
 
 const owner = { id: "100", name: "Player" };
-const helper = { id: "200", name: "First Helper", roles: ["10", "23"] };
-const second = { id: "201", name: "Second Helper", roles: ["10", "23"] };
-const manager = { id: "300", name: "Manager", roles: ["10", "28"] };
-const founder = { id: "400", name: "Founder", roles: ["10", "20"] };
-const admin = { id: "500", name: "Admin", roles: ["10", "21"] };
+const helper = { id: "200", name: "First Helper", staffMember: true, roles: ["23"] };
+const second = { id: "201", name: "Second Helper", staffMember: true, roles: ["23"] };
+const manager = { id: "300", name: "Manager", staffMember: true, roles: ["28"] };
+const founder = { id: "400", name: "Founder", staffMember: true, roles: ["20"] };
+const admin = { id: "500", name: "Admin", staffMember: true, roles: ["21"] };
 function setup(t) {
   const config = {
     ...fixture,

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { permissions as evaluatePermissions } from "../server/roles.js";
 import { config, ranks, accessRoles } from "./fixture.js";
-const permissions = (roles) => evaluatePermissions(config, roles);
+const permissions = (roles, staffMember) => evaluatePermissions(config, roles, staffMember);
 import { openStore } from "../server/store.js";
 import { discordClient } from "../server/discord.js";
 import { memberActivity } from "../server/activity.js";
@@ -55,23 +55,23 @@ test("public Discord identity recognizes mapped main-server specialist roles wit
   assert.deepEqual((await client.identity("code")).roles, []);
 });
 
-test("Dashboard admission grants workspace access without the legacy Todo role", () => {
+test("Staff-server membership grants dashboard and workspace access", () => {
   for (const rank of ranks) {
     assert.equal(permissions([rank.id]).dashboard, false);
     assert.equal(permissions([rank.id]).todo, false);
   }
-  assert.equal(permissions([accessRoles.dashboard]).todo, true);
+  assert.equal(permissions([accessRoles.dashboard]).todo, false);
   assert.equal(permissions([accessRoles.todo]).dashboard, false);
-  const both = permissions(Object.values(accessRoles));
+  const both = permissions([], true);
   assert.equal(both.dashboard && both.todo, true);
 });
-test("Discord sign-in requires Dashboard even for Todo members", async () => {
+test("Discord sign-in accepts staff without roles and rejects nonmembers", async () => {
   const records = new Map();
   const store = {
     get: (_, id) => records.get(id),
     set: (_, id, value) => records.set(id, value),
   };
-  let roles = [accessRoles.todo];
+  let member;
   const client = discordClient(config, store, async (url) => {
     if (url.endsWith("/oauth2/token"))
       return Response.json({ access_token: "test", expires_in: 3600 });
@@ -82,13 +82,13 @@ test("Discord sign-in requires Dashboard even for Todo members", async () => {
         verified: true,
         username: "staff",
       });
-    return Response.json({ roles });
+    return member ? Response.json(member) : new Response(null, { status: 404 });
   });
   await assert.rejects(client.login("code"), {
-    code: "dashboard_role_required",
+    code: "staff_server_required",
     status: 403,
   });
-  roles = [accessRoles.dashboard];
+  member = { roles: [] };
   const admitted = await client.login("code");
   assert.equal(admitted.permissions.dashboard, true);
   assert.equal(admitted.permissions.todo, true);
@@ -170,7 +170,7 @@ test("persistent store encrypts secrets, expires data, and consumes handoffs onc
   await adapter.revokeByGrantId("grant");
   assert.equal(await adapter.find("code"), undefined);
 });
-test("Discord role removal is applied and API errors never grant access", async () => {
+test("Discord membership is independent of roles and API errors never grant access", async () => {
   const records = new Map();
   const store = {
     get: (_, id) => records.get(id),
@@ -191,7 +191,7 @@ test("Discord role removal is applied and API errors never grant access", async 
   );
   assert.equal((await client.check("42", true)).permissions.todo, true);
   body = { roles: [] };
-  assert.equal((await client.check("42", true)).permissions.todo, false);
+  assert.equal((await client.check("42", true)).permissions.todo, true);
   body = { roles: [accessRoles.dashboard], pending: true };
   assert.equal((await client.check("42", true)).permissions.todo, false);
   status = 503;
@@ -230,7 +230,9 @@ test("staff-server membership is required at login and bot checks fail closed", 
   await assert.rejects(client.login("code"), { code: "staff_server_required" });
   member = { roles: [accessRoles.dashboard], pending: true };
   await assert.rejects(client.login("code"), { code: "staff_server_required" });
-  member = { roles: [accessRoles.dashboard] };
+  member = { roles: [], user: { bot: true } };
+  await assert.rejects(client.login("code"), { code: "staff_server_required" });
+  member = { roles: [] };
   assert.equal((await client.login("code")).staffMember, true);
   available = false;
   await assert.rejects(client.check("42"), {
@@ -332,8 +334,8 @@ test("gateway revocation ends exact staff sessions and wins against in-flight ro
     t: "GUILD_MEMBER_UPDATE",
     d: { ...event.d, roles: ["23"] },
   });
-  assert.equal(store.get("user", "42").permissions.dashboard, false);
-  assert.equal(store.get("user", "42").accessEpoch, 2);
+  assert.equal(store.get("user", "42").permissions.dashboard, true);
+  assert.equal(store.get("user", "42").accessEpoch, 1);
 });
 test("last active records presence and invisible messages and survives a restart", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "drakora-activity-"));

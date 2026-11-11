@@ -103,7 +103,7 @@ test("claims, staff replies and player closures cancel reminders, including whil
   await app.service.pump();
   await notices.pump();
   app.service.claim(
-    { id: "200", name: "Helper", roles: ["10", "23"] },
+    { id: "200", name: "Helper", staffMember: true, roles: ["23"] },
     claimed.id,
   );
   const closed = app.create();
@@ -114,7 +114,7 @@ test("claims, staff replies and player closures cancel reminders, including whil
   await app.service.pump();
   await notices.pump();
   app.service.reply(
-    { id: "200", name: "Helper", roles: ["10", "23"] },
+    { id: "200", name: "Helper", staffMember: true, roles: ["23"] },
     replied.id,
     {
       requestId: randomUUID(),

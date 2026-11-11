@@ -21,7 +21,7 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   const policy = rolePermissions(config, store),
     service = ticketService(config, store, policy);
   const player = { id: "100", name: "Player" },
-    helper = policy.apply({ id: "200", name: "Helper", roles: ["10", "23"] });
+    helper = policy.apply({ id: "200", name: "Helper", staffMember: true, roles: ["23"] });
   let staffIdentity = helper,
     signedIn = true,
     uploads = 0;
@@ -262,7 +262,8 @@ test("ticket HTTP endpoints protect owner data, upload boundaries, staff evidenc
   staffIdentity = policy.apply({
     id: "201",
     name: "Admin",
-    roles: ["10", "21"],
+    staffMember: true,
+    roles: ["21"],
   });
   assert.equal(
     (await call(`/api/tickets/${id}/takeover`, { claimedBy: helper.id }))
@@ -601,9 +602,9 @@ test("panel takeover requests require Manager review and preserve category and m
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));
   const policy = rolePermissions(config, store),
     service = ticketService(config, store, policy);
-  const helper = { id: "helper", name: "Helper", roles: ["10", "23"] },
-    jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] },
-    manager = { id: "manager", name: "Manager", roles: ["10", "28"] };
+  const helper = { id: "helper", name: "Helper", staffMember: true, roles: ["23"] },
+    jr = { id: "jr", name: "Jr Mod", staffMember: true, roles: ["30"] },
+    manager = { id: "manager", name: "Manager", staffMember: true, roles: ["28"] };
   let identity = jr;
   service.attach({
     async create(ticket) {

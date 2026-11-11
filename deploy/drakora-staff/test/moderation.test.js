@@ -204,7 +204,7 @@ test("staff moderation routes combine current grants, verified identities and ti
         guest: { discord: null, answers: { ign: "Player" } },
       })[id],
   };
-  let user = policy.apply({ id: "400", name: "Reviewer", roles: ["10", "22"] });
+  let user = policy.apply({ id: "400", name: "Reviewer", staffMember: true, roles: ["22"] });
   const app = express();
   app.use(
     moderationRouter({
@@ -293,7 +293,7 @@ test("staff moderation routes combine current grants, verified identities and ti
   assert.equal((await call("/api/applications/linked/moderation")).status, 403);
   user = policy.apply({ id: "400", roles: ["22"] });
   assert.equal((await call("/api/moderation")).status, 403);
-  user = policy.apply({ id: "400", roles: ["10", "20"] });
+  user = policy.apply({ id: "400", staffMember: true, roles: ["20"] });
   assert.equal(
     (await call(`/api/tickets/${billing.id}/moderation`)).status,
     200,

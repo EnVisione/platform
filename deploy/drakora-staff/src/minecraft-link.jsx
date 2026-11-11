@@ -12,9 +12,7 @@ const explanations = {
   link_already_approved:
     "Another Discord account already approved this request. Do not confirm it in Minecraft. Wait for this request to expire or contact support.",
   staff_admission_required:
-    "Staff linking requires membership in the staff Discord, completed screening and Dashboard access.",
-  dashboard_role_required:
-    "Your Discord account needs Dashboard access before you can verify a staff profile.",
+    "Staff linking requires membership in the staff Discord and completed screening.",
   staff_server_required:
     "Join the staff Discord before verifying your staff profile.",
   discord_unavailable:

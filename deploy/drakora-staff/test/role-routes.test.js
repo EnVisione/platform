@@ -23,7 +23,7 @@ test("role endpoints require staff host, current Manager or Founder access, CSRF
       staffHost: "staff.example.invalid",
       authorize() {
         if (!signedIn) throw new AuthError("login_required", 401);
-        return { id: "42", name: "Fixture", roles: ["10", rank] };
+        return { id: "42", name: "Fixture", staffMember: true, roles: [ rank] };
       },
       requireMutation(req) {
         if (

@@ -9,9 +9,9 @@ import { ticketRouter } from "../server/ticket-routes.js";
 import { AuthError } from "../server/discord.js";
 import { config } from "./fixture.js";
 
-const manager = { id: "200", roles: ["10", "28"] };
-const helper = { id: "201", roles: ["10", "23"] };
-const founder = { id: "202", roles: ["10", "20"] };
+const manager = { id: "200", staffMember: true, roles: ["28"] };
+const helper = { id: "201", staffMember: true, roles: ["23"] };
+const founder = { id: "202", staffMember: true, roles: ["20"] };
 
 function setup(t) {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));

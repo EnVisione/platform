@@ -170,7 +170,7 @@ test("role selection is private, bound to its reviewer and uses synchronized rol
   const select = menu.components[0].components[0];
   assert.ok(select.options.some((option) => option.label === "Developer"));
   assert.ok(
-    select.options.some((option) => option.label === "Dashboard access"),
+    !select.options.some((option) => option.label === "Dashboard access"),
   );
   assert.ok(
     !select.options.some((option) =>
@@ -227,14 +227,6 @@ test("role confirmations distinguish each server's delivery and staff-only acces
       staff: "waiting_screening",
       expected:
         "Helper: Applied in the main Discord server. Queued for the staff server until the applicant completes membership screening.",
-    },
-    {
-      role: config.accessRoles.dashboard,
-      request: "waiting_member",
-      main: "synced",
-      staff: "waiting_member",
-      expected:
-        "Dashboard access: Queued for the staff server; it will apply when the applicant joins.",
     },
   ]) {
     const app = setup(t, {
@@ -337,7 +329,7 @@ test("simultaneous invite clicks send one private DM with a single-use staff inv
   );
   const policy = rolePermissions(config, app.store);
   assert.equal(
-    policy.history({ id: "20", roles: ["20", "10"] }, 0, {
+    policy.history({ id: "20", staffMember: true, roles: ["20"] }, 0, {
       action: "application-invite",
       query: id,
     }).total,

@@ -17,11 +17,12 @@ const config = {
   ...fixture,
   applications: { specialistRoles: {}, notificationChannelId: "50" },
 };
-const user = (rank = "28", dashboard = true) => ({
+const user = (rank = "28", staffMember = true) => ({
   id: rank,
   name: "Form editor fixture",
-  roles: [rank, ...(dashboard ? ["10"] : [])],
-  permissions: permissions(config, [rank, ...(dashboard ? ["10"] : [])]),
+  roles: [rank],
+  staffMember,
+  permissions: permissions(config, [rank], staffMember),
 });
 function setup(t) {
   const { store } = openStore(":memory:", randomBytes(32).toString("base64"));

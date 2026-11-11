@@ -360,11 +360,12 @@ test("incoming alerts skip shared sent copies and advance to genuine replies", a
   assert.ok(state.clients.every((client) => client.readOnly));
 });
 
-test("mail permission requires Dashboard and Admin, Manager or Founder", () => {
+test("mail permission requires staff membership and Admin, Manager or Founder", () => {
   for (const rank of fixture.ranks) {
     const user = {
-      roles: ["10", rank.id],
-      permissions: permissions(fixture, ["10", rank.id]),
+      staffMember: true,
+      roles: [rank.id],
+      permissions: permissions(fixture, [rank.id], true),
     };
     assert.equal(
       mailAccess(settings, user),
@@ -789,11 +790,11 @@ test("email routes enforce role, host and CSRF boundaries and send attachment do
         const user = {
           id: "42",
           roles,
-          permissions: permissions(fixture, roles),
+          permissions: permissions(fixture, roles, true),
           capabilities: {
             "mail.view": mailAccess(settings, {
               roles,
-              permissions: permissions(fixture, roles),
+              permissions: permissions(fixture, roles, true),
             }),
             "mail.flags": !readOnly,
             ...Object.fromEntries(

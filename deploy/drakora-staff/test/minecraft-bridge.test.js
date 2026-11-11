@@ -260,7 +260,7 @@ test("HMAC authenticates exact bytes, timestamp, proxy and nonce with transactio
     code: "proxy_authentication_failed",
   });
 });
-test("proxy key file must be private and mappings cannot grant access roles", (t) => {
+test("proxy key file must be private and linking roles cannot overlap staff ranks", (t) => {
   const { store } = setup(t);
   const dir = mkdtempSync(join(tmpdir(), "drakora-bridge-keys-"));
   t.after(() => rmSync(dir, { recursive: true }));
@@ -284,7 +284,7 @@ test("proxy key file must be private and mappings cannot grant access roles", (t
     () =>
       validateMinecraftBridge({
         ...settings,
-        minecraftBridge: { ...settings.minecraftBridge, linkedRoleId: "10" },
+        minecraftBridge: { ...settings.minecraftBridge, linkedRoleId: "20" },
       }),
     /independent/,
   );

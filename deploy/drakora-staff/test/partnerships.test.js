@@ -12,9 +12,9 @@ import { partnershipContact } from "../server/partnership-contact.js";
 import { AuthError } from "../server/discord.js";
 import { config as fixture } from "./fixture.js";
 
-const manager = { id: "manager", name: "Manager", roles: ["10", "28"] };
-const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
-const helper = { id: "helper", name: "Helper", roles: ["10", "23"] };
+const manager = { id: "manager", name: "Manager", staffMember: true, roles: ["28"] };
+const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
+const helper = { id: "helper", name: "Helper", staffMember: true, roles: ["23"] };
 const guest = { id: "guest:partner", name: "Pack author", guest: true };
 const discordOwner = { id: "123456789012345678", name: "Pack author" };
 const network = "a".repeat(64);

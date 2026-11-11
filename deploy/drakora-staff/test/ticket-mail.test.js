@@ -38,7 +38,7 @@ test("guest email updates retry durably and contain no chat or staff resolution"
     assert.equal(closed, true);
   });
   const owner = { id: "guest:fixture", name: "Jojo", guest: true },
-    staff = { id: "200", name: "Helper", roles: ["10", "23"] };
+    staff = { id: "200", name: "Helper", staffMember: true, roles: ["23"] };
   const ticket = service.create(
     owner,
     {
@@ -64,7 +64,7 @@ test("guest email updates retry durably and contain no chat or staff resolution"
     true,
   );
   service.takeover(
-    { id: "201", name: "Admin", roles: ["10", "21"] },
+    { id: "201", name: "Admin", staffMember: true, roles: ["21"] },
     ticket.id,
     staff.id,
   );

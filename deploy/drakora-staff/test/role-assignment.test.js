@@ -22,7 +22,8 @@ const config = {
 const actor = (rank) => ({
   id: rank,
   name: `Manager ${rank}`,
-  roles: [rank, "10", "11"],
+  staffMember: true,
+  roles: [rank],
 });
 const member = (guildId, id, roles) => ({
   guildId,
@@ -95,9 +96,9 @@ function setup(t, members, settings = config) {
     get assignments() {
       return assignments;
     },
-    async input(id, rank, specialists = [], access = { dashboard: true }) {
+    async input(id, rank, specialists = []) {
       const { members } = await assignments.list(actor("20"), id);
-      return { version: members[0].version, rank, specialists, access };
+      return { version: members[0].version, rank, specialists };
     },
     async restart() {
       await assignments.close();
@@ -152,10 +153,7 @@ test("mapped specialist panel changes use both guilds and never reappear after r
   await app.assignments.assign(
     actor("28"),
     "42",
-    await app.input("42", "23", ["51", "25"], {
-      dashboard: false,
-      todo: false,
-    }),
+    await app.input("42", "23", ["51", "25"]),
   );
   assert.deepEqual(
     new Set(app.roster.get("1:42").roles),
@@ -169,7 +167,7 @@ test("mapped specialist panel changes use both guilds and never reappear after r
   await app.assignments.assign(
     actor("28"),
     "42",
-    await app.input("42", "23", ["52"], { dashboard: false, todo: false }),
+    await app.input("42", "23", ["52"]),
   );
   assert.equal(
     app.assignments.status("42").discord["Main server"].status,
@@ -188,7 +186,7 @@ test("mapped specialist panel changes use both guilds and never reappear after r
   );
 });
 
-test("Manager and Founder promotions, demotions and protected access changes require a Founder", async (t) => {
+test("Manager and Founder promotions and demotions require a Founder", async (t) => {
   const app = setup(t, [
     member("1", "42", ["23", "10", "11"]),
     member("1", "43", ["28", "10", "11"]),
@@ -202,20 +200,12 @@ test("Manager and Founder promotions, demotions and protected access changes req
     app.assignments.assign(actor("28"), "43", await app.input("43", "21")),
     { code: "founder_role_required" },
   );
-  await assert.rejects(
-    app.assignments.assign(
-      actor("28"),
-      "43",
-      await app.input("43", "28", [], { dashboard: false, todo: true }),
-    ),
-    { code: "founder_role_required" },
-  );
   assert.equal(app.changes.length, 0);
   await app.assignments.assign(actor("20"), "42", await app.input("42", "28"));
   assert.ok(app.roster.get("1:42").roles.includes("28"));
 });
 
-test("queued ranks and access survive restart and wait until the member joins staff", async (t) => {
+test("queued ranks survive restart and wait until the member joins staff", async (t) => {
   const app = setup(t, [member("2", "42", ["123", "99"])]);
   await app.assignments.assign(
     actor("28"),
@@ -233,14 +223,14 @@ test("queued ranks and access survive restart and wait until the member joins st
   await app.assignments.reconcile("42");
   assert.deepEqual(
     new Set(app.roster.get("1:42").roles),
-    new Set(["98", "23", "52", "10"]),
+    new Set(["98", "23", "52"]),
   );
   assert.equal(app.assignments.status("42").request.status, "applied");
 });
 
-test("Dashboard admission and role assignment work without a Todo role", async (t) => {
+test("Role assignment leaves admission to staff-server membership", async (t) => {
   const settings = structuredClone(config);
-  delete settings.accessRoles.todo;
+  delete settings.accessRoles;
   const app = setup(t, [member("1", "42", ["99"])], settings);
   await app.assignments.assign(
     actor("28"),
@@ -248,17 +238,18 @@ test("Dashboard admission and role assignment work without a Todo role", async (
     await app.input("42", "23", ["52"]),
   );
   const { members } = await app.assignments.list(actor("28"), "42");
-  assert.deepEqual(members[0].access, { dashboard: true });
+  assert.equal(members[0].inStaff, true);
+  assert.equal(members[0].access, undefined);
   assert.deepEqual(
     new Set(app.roster.get("1:42").roles),
-    new Set(["99", "23", "52", "10"]),
+    new Set(["99", "23", "52"]),
   );
   assert.ok(app.changes.every((change) => change.role !== "11" && change.role));
 });
 
-test("individual onboarding grants preserve queued access and specialist roles before joining", async (t) => {
+test("individual onboarding grants preserve queued rank and specialist roles before joining", async (t) => {
   const app = setup(t, [member("2", "42", ["99"])]);
-  for (const roleId of ["10", "52", "23"]) {
+  for (const roleId of ["52", "23"]) {
     const { members } = await app.assignments.list(actor("28"), "42");
     await app.assignments.grant(actor("28"), "42", members[0].version, roleId);
   }
@@ -279,7 +270,7 @@ test("individual onboarding grants preserve queued access and specialist roles b
   await app.assignments.reconcile("42");
   assert.deepEqual(
     new Set(app.roster.get("1:42").roles),
-    new Set(["98", "23", "52", "10"]),
+    new Set(["98", "23", "52"]),
   );
   assert.equal(app.assignments.status("42").request.status, "applied");
 });

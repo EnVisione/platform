@@ -175,9 +175,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
       roles: managed
         .filter((role) => roles.includes(role.id))
         .map((role) => role.id),
-      access: {
-        dashboard: roles.includes(config.accessRoles.dashboard),
-      },
       inStaff: members.some((member) => member.guildId === config.guildId),
       inMain: members.some(
         (member) => member.guildId === config.roleSync?.guildId,
@@ -213,12 +210,9 @@ export function roleAssignments(config, store, policy, transport, sync) {
           });
           return;
         }
-        const extraIds = [
-          ...managed
-            .filter((role) => role.specialist && !mappedIds.has(role.id))
-            .map((role) => role.id),
-          config.accessRoles.dashboard,
-        ];
+        const extraIds = managed
+          .filter((role) => role.specialist && !mappedIds.has(role.id))
+          .map((role) => role.id);
         const desired = new Set(request.extraRoles);
         const changes = extraIds.filter(
           (role) => member.roles.includes(role) !== desired.has(role),
@@ -272,13 +266,8 @@ export function roleAssignments(config, store, policy, transport, sync) {
           new Set(input.specialists).size !== input.specialists.length ||
           input.specialists.some(
             (id) => !managed.some((role) => role.specialist && role.id === id),
-          ) ||
-          typeof input.access?.dashboard !== "boolean")) ||
-      (addRole &&
-        ![
-          ...managed.map((role) => role.id),
-          config.accessRoles.dashboard,
-        ].includes(addRole))
+          ))) ||
+      (addRole && !managed.some((role) => role.id === addRole))
     )
       throw new AuthError("invalid_role_assignment", 400);
     return exclusive(id, async () => {
@@ -293,12 +282,11 @@ export function roleAssignments(config, store, policy, transport, sync) {
         const pending = queued && queued.status !== "applied";
         const extras = new Set(pending ? queued.extraRoles : roles);
         const selected = managed.find((role) => role.id === addRole);
-        if (selected?.specialist || addRole === config.accessRoles.dashboard)
-          extras.add(addRole);
+        if (selected.specialist) extras.add(addRole);
         input = {
           version: input.version,
           rank:
-            selected && !selected.specialist
+            !selected.specialist
               ? selected.id
               : pending
                 ? queued.rank
@@ -308,9 +296,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
           specialists: managed
             .filter((role) => role.specialist && extras.has(role.id))
             .map((role) => role.id),
-          access: {
-            dashboard: extras.has(config.accessRoles.dashboard),
-          },
         };
         if (
           pending &&
@@ -330,25 +315,19 @@ export function roleAssignments(config, store, policy, transport, sync) {
       );
       if (
         !policy.isFounder(current) &&
-        (protectedRoles.some(
+        protectedRoles.some(
           (role) => roles.includes(role.id) !== (input.rank === role.id),
-        ) ||
-          (roles.some((id) => protectedRoles.some((role) => role.id === id)) &&
-            input.access.dashboard !==
-              roles.includes(config.accessRoles.dashboard)))
+        )
       )
         throw new AuthError("founder_role_required");
       if (
         policy.isFounder(current) &&
         current.id === id &&
-        (desiredRank?.name !== "Founder" || !input.access.dashboard)
+        desiredRank?.name !== "Founder"
       )
         throw new AuthError("founder_access_protected", 400);
       if (!sync) throw new AuthError("role_sync_unavailable", 503);
-      const extraRoles = [
-        ...input.specialists,
-        ...(input.access.dashboard ? [config.accessRoles.dashboard] : []),
-      ];
+      const extraRoles = [...input.specialists];
       const request = {
         id,
         operationId: randomUUID(),
@@ -364,7 +343,6 @@ export function roleAssignments(config, store, policy, transport, sync) {
         memberId: id,
         rank: input.rank,
         specialists: input.specialists,
-        access: input.access,
       });
       const syncedRoles = syncRoles(request);
       await sync.assign(id, syncedRoles);

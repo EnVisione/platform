@@ -44,9 +44,6 @@
   "hulyWorkspace": "REPLACE_WORKSPACE_UUID",
   "hulyAccounts": "http://account:3000",
   "hulyUpstream": "http://nginx:80",
-  "accessRoles": {
-    "dashboard": "REPLACE_DASHBOARD_ROLE_ID"
-  },
   "ranks": [
     {
       "id": "REPLACE_FOUNDER_ROLE_ID",

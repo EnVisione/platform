@@ -1,9 +1,9 @@
-export function permissions(config, roleIds = []) {
+export function permissions(config, roleIds = [], staffMember = false) {
   const ids = new Set(roleIds);
   const assigned = config.ranks.filter((role) => ids.has(role.id));
   return {
-    dashboard: ids.has(config.accessRoles.dashboard),
-    todo: ids.has(config.accessRoles.dashboard),
+    dashboard: staffMember === true,
+    todo: staffMember === true,
     dashboardRanks: assigned
       .filter((role) => role.dashboard)
       .map((role) => role.name),

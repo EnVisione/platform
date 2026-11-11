@@ -164,7 +164,7 @@ function discordHarness(t, settings = config) {
   });
   const members = new Map([
     ["40", member("40", ["10", "21"])],
-    ["41", member("41", ["21"])],
+    ["41", { ...member("41", ["21"]), pending: true }],
     ["42", member("42", ["10", "29"])],
   ]);
   const channel = {
@@ -256,7 +256,7 @@ test("channel is private at creation and effective View email permission control
   );
   assert.ok(entries[0].deny & PermissionFlagsBits.ViewChannel);
   assert.equal(entries[2].allow & PermissionFlagsBits.SendMessages, 0n);
-  const founder = { id: "50", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "50", name: "Founder", staffMember: true, roles: ["20"] };
   const model = policy.read(founder);
   const roles = model.roles
     .filter((role) => role.id)
@@ -325,7 +325,7 @@ test("inbox alerts isolate partners from support and refresh revoked access", as
   assert.equal(partners.permissionOverwrites.cache.has("40"), false);
   assert.ok(partners.permissionOverwrites.cache.has("43"));
   assert.ok(partners.permissionOverwrites.cache.has("50"));
-  const founder = { id: "50", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "50", name: "Founder", staffMember: true, roles: ["20"] };
   const model = policy.read(founder);
   const roles = model.roles
     .filter((entry) => entry.id)

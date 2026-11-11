@@ -76,18 +76,17 @@ export function discordMailTransport(config, store, policy, client) {
     if (!client.isReady()) throw new Error("Discord unavailable");
     const guild = await client.guilds.fetch(config.guildId);
     const members = await discordMembers(client, guild);
-    const viewers = [...members.values()].filter(
-      (member) =>
-        !member.user.bot &&
-        policy.apply({ roles: [...member.roles.cache.keys()] }).capabilities[
-          "mail.view"
-        ] &&
-        addresses.every(
-          (address) =>
-            policy.apply({ roles: [...member.roles.cache.keys()] })
-              .capabilities[inboxPermission(address)],
-        ),
-    );
+    const viewers = [...members.values()].filter((member) => {
+      if (member.user.bot || member.pending) return false;
+      const { capabilities } = policy.apply({
+        roles: [...member.roles.cache.keys()],
+        staffMember: true,
+      });
+      return (
+        capabilities["mail.view"] &&
+        addresses.every((address) => capabilities[inboxPermission(address)])
+      );
+    });
     const view =
       PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory;
     const overwrites = [

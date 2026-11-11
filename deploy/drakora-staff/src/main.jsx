@@ -51,8 +51,6 @@ const messages = {
   discord_login_required:
     "Your Discord session has expired. Please sign in again.",
   login_required: "Please sign in to continue.",
-  dashboard_role_required:
-    "You need the Dashboard role in the Drakora Staff Discord server to sign in.",
   staff_server_required:
     "Join the Drakora Staff Discord server before signing in. A rank in the main server does not grant staff access.",
   invalid_login_state:
@@ -251,7 +249,7 @@ function MinecraftRegistration({ user, csrf, next, onLogout }) {
               ? `Welcome back, ${user.name}`
               : `Welcome, ${user.name}`}
           </h1>
-          <p>Please enter your Minecraft name to continue.</p>
+          <p>Enter your Minecraft username to add it to your staff profile.</p>
           <form className="minecraft-form" onSubmit={submit}>
             <label htmlFor="minecraft-name">
               Minecraft Java Edition username
@@ -333,6 +331,16 @@ function MinecraftSettings({ minecraft, csrf, canChange }) {
       "Change request sent for Founder or Manager approval. Your current link stays active.",
     );
   }
+  if (!link)
+    return (
+      <section className="settings-card minecraft-settings">
+        <h2>Minecraft account</h2>
+        <p>Link your account to use features that need your Minecraft profile.</p>
+        <a className="button" href="/minecraft?next=%2Fsettings">
+          Link Minecraft account
+        </a>
+      </section>
+    );
   return (
     <section
       className="settings-card minecraft-settings"
@@ -792,7 +800,7 @@ function App() {
         <p>Opening Drakora Staff…</p>
       </main>
     );
-  if (state.user?.dashboard && !state.user.minecraft)
+  if (page === "/minecraft" && state.user?.dashboard && !state.user.minecraft)
     return (
       <MinecraftRegistration
         user={state.user}

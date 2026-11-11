@@ -167,13 +167,8 @@ export function validateConfig(config) {
         "Configure Discord ticket and appeal queues with Office enabled",
       );
   }
-  const ids = [
-    config.guildId,
-    config.discordClientId,
-    config.accessRoles?.dashboard,
-  ];
-  if (!ids.every(snowflake))
-    throw new Error("Configure a guild and dashboard access role");
+  if (![config.guildId, config.discordClientId].every(snowflake))
+    throw new Error("Configure the staff guild and Discord application IDs");
   if (
     !Array.isArray(config.ranks) ||
     !config.ranks.length ||
@@ -273,7 +268,6 @@ export function validateConfig(config) {
         (role) =>
           !role ||
           !staffRoleIds.has(role.staffId) ||
-          Object.values(config.accessRoles).includes(role.staffId) ||
           !snowflake(role.mainId) ||
           role.mainId === settings.guildId,
       ) ||
@@ -449,7 +443,6 @@ export function validateConfig(config) {
       !snowflake(settings.staffRoleId) ||
       [settings.guildId, config.guildId].includes(settings.staffRoleId) ||
       config.ranks.some((rank) => rank.id === settings.staffRoleId) ||
-      Object.values(config.accessRoles).includes(settings.staffRoleId) ||
       config.roleSync.roles.some((role) =>
         [role.staffId, role.mainId].includes(settings.staffRoleId),
       ) ||

@@ -183,7 +183,7 @@ export const staffPermissions = [
     "dashboard.view",
     "Dashboard",
     "Open the staff dashboard",
-    "Sign in and open the overview.",
+    "Access follows membership in the Drakora Staff Discord server.",
   ],
   [
     "huly.access",

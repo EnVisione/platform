@@ -649,7 +649,7 @@ test("internal notes wait for a delayed ticket channel instead of creating an or
     description:
       "A support ticket waiting for its Discord channel to become available.",
   });
-  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const manager = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   service.addNote(manager, ticket.id, {
     requestId: randomUUID(),
     content: "Prepare private handling guidance.",
@@ -686,7 +686,7 @@ test("internal notes sync privately and remain in the dashboard after the ticket
   const app = setupDiscord(t),
     { service, transport, channels, client, user, config } = app;
   await transport.recover();
-  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const manager = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   const ticket = service.create(user, {
     requestId: randomUUID(),
     type: "general",
@@ -908,7 +908,7 @@ test("legacy staff-server threads migrate to the ticket with saved private histo
   assert.notEqual(state.threadId, legacy.id);
   assert.equal(channels.has(legacy.id), false);
   assert.equal(service.store.get("ticket-notes-channel", legacy.id), undefined);
-  const notes = service.notes({ id: "200", roles: ["10", "28"] }, ticket.id);
+  const notes = service.notes({ id: "200", staffMember: true, roles: ["28"] }, ticket.id);
   assert.equal(notes.messages[0].content, "Legacy private discussion");
   assert.equal(notes.messages[0].attachments.length, 1);
   const file = service.store.entries("ticket-media")[0][1];
@@ -927,7 +927,7 @@ test("legacy staff-server threads migrate to the ticket with saved private histo
 test("ticket deletion saves final thread notes and waits for proof before removing either channel", async (t) => {
   const { service, transport, channels, user, config } = setupDiscord(t);
   await transport.recover();
-  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const manager = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   const ticket = service.create(user, {
     requestId: randomUUID(),
     type: "general",
@@ -1034,7 +1034,7 @@ test("notes threads enforce category access and revoke old thread membership", a
       ]),
     },
   });
-  const founder = { id: "202", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "202", name: "Founder", staffMember: true, roles: ["20"] };
   const ticket = service.create(user, {
     requestId: randomUUID(),
     type: "billing",
@@ -1061,7 +1061,7 @@ test("notes threads enforce category access and revoke old thread membership", a
     false,
   );
   assert.throws(
-    () => service.notes({ id: "200", roles: ["10", "28"] }, ticket.id),
+    () => service.notes({ id: "200", staffMember: true, roles: ["28"] }, ticket.id),
     { code: "ticket_access_denied" },
   );
   const support = service.create(
@@ -1114,7 +1114,7 @@ test("notes threads enforce category access and revoke old thread membership", a
 test("internal notes recover lost sends and thread creation without duplicates", async (t) => {
   const { service, transport, channels, user } = setupDiscord(t);
   await transport.recover();
-  const staff = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const staff = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   const ticket = service.create(user, {
     requestId: randomUUID(),
     type: "general",
@@ -1291,7 +1291,7 @@ test("restricted notices stay generic and a claim during delivery cancels the re
   const fetch = noticeChannel.messages.fetch;
   noticeChannel.messages.fetch = async (options) => {
     app.service.claim(
-      { id: "200", name: "Manager", roles: ["10", "28"] },
+      { id: "200", name: "Manager", staffMember: true, roles: ["28"] },
       ticket.id,
     );
     return fetch(options);
@@ -1362,7 +1362,8 @@ test("Discord transport creates private tickets, preserves webhook identity and 
   const staff = policy.apply({
     id: "200",
     name: "Manager",
-    roles: ["10", "28"],
+    staffMember: true,
+    roles: ["28"],
   });
   service.claim(staff, ticket.id);
   await service.pump();
@@ -1725,7 +1726,7 @@ test("historical report files in shared support storage require both category gr
   await transport.refreshPermissions();
   const storage = channels.get(archived.channelId);
   assert.ok(storage.overwrites.some((entry) => entry.id === "201"));
-  const founder = { id: "founder", roles: ["10", "20"] };
+  const founder = { id: "founder", staffMember: true, roles: ["20"] };
   const model = policy.read(founder);
   const roles = model.roles
     .filter((role) => role.id)
@@ -1897,7 +1898,7 @@ test("web replies send without embeds or history reads and recover lost response
   );
 });
 
-test("ticket visibility follows screened staff membership and Dashboard access instead of main-server ranks", async (t) => {
+test("ticket visibility follows screened staff membership instead of main-server ranks", async (t) => {
   const { service, transport, client, channels, user, staffMembers, config } =
     setupDiscord(t);
   const ticket = service.create(user, {
@@ -1925,7 +1926,11 @@ test("ticket visibility follows screened staff membership and Dashboard access i
     d: { guild_id: config.guildId, user: { id: "201" }, roles: ["23"] },
   });
   await transport.recover();
-  assert.equal((await transport.staffUser("201")).permissions.dashboard, false);
+  assert.equal((await transport.staffUser("201")).permissions.dashboard, true);
+  assert.ok(target.overwrites.some((value) => value.id === "201"));
+  helper.pending = true;
+  await transport.refreshPermissions();
+  assert.equal(await transport.staffUser("201"), null);
   for (const channel of [target, category]) {
     assert.ok(!channel.overwrites.some((value) => value.id === "201"));
     assert.ok(
@@ -2092,10 +2097,10 @@ test("closure preserves owner read access and paginated history before Admin cha
   assert.ok(ownerPermissions.allow.includes(P.ViewChannel));
   assert.ok(ownerPermissions.deny.includes(P.SendMessages));
   await assert.rejects(
-    service.deleteChannel({ id: "200", roles: ["10", "23"] }, ticket.id),
+    service.deleteChannel({ id: "200", staffMember: true, roles: ["23"] }, ticket.id),
     { code: "ticket_access_denied" },
   );
-  const admin = { id: "admin", name: "Admin", roles: ["10", "21"] };
+  const admin = { id: "admin", name: "Admin", staffMember: true, roles: ["21"] };
   await service.deleteChannel(admin, ticket.id);
   await service.pump();
   await service.pump();
@@ -2117,7 +2122,7 @@ test("closure notices and ratings remain available when oversized attachments ar
       const ticket = await supportTicket(service, user, transport);
       await service.pump();
       const target = channels.get(service.get(ticket.id).channelId);
-      const manager = { id: "200", name: "Manager", roles: ["10", "21"] };
+      const manager = { id: "200", name: "Manager", staffMember: true, roles: ["21"] };
       service.claim(manager, ticket.id);
       await service.pump();
       target.savedMessages.set("20000", {
@@ -2285,7 +2290,7 @@ test("Discord size rejections skip only the rejected attachment while transient 
       service.closeTicket(user, ticket.id, {});
       await service.pump();
       await service.deleteChannel(
-        { id: "admin", roles: ["10", "21"] },
+        { id: "admin", staffMember: true, roles: ["21"] },
         ticket.id,
       );
       await service.pump();
@@ -2365,7 +2370,7 @@ test("a lost channel deletion response resumes from the saved transcript checkpo
   service.closeTicket({ id: user.id, name: "Player" }, ticket.id, {});
   await service.pump();
   await service.deleteChannel(
-    { id: "admin", name: "Admin", roles: ["10", "21"] },
+    { id: "admin", name: "Admin", staffMember: true, roles: ["21"] },
     ticket.id,
   );
   await service.pump();
@@ -2572,7 +2577,7 @@ test("each closure resolves once across Discord and dashboard without repeated r
     return fetch(query);
   };
   const manager = { ...user, id: "200", username: "Manager" };
-  const staff = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const staff = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   const ticket = await supportTicket(service, user, transport);
   const target = channels.get(service.get(ticket.id).channelId);
   const overview = () =>
@@ -2729,7 +2734,7 @@ test("player closure, private rating and staff resolution each post a notice wit
   const app = setupDiscord(t, true),
     { service, transport, user, channels } = app;
   const owner = { id: user.id, name: "Player" };
-  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
+  const helper = { id: "201", name: "Helper", staffMember: true, roles: ["23"] };
   const ticket = await supportTicket(service, owner, transport);
   const target = channels.get(service.get(ticket.id).channelId);
   service.claim(helper, ticket.id);
@@ -2820,8 +2825,8 @@ test("player closure, private rating and staff resolution each post a notice wit
 test("staff closure mentions the ticket author alongside the assigned and closing staff", async (t) => {
   const { service, transport, user, channels } = setupDiscord(t);
   const owner = { id: user.id, name: "Player" };
-  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
-  const manager = { id: "200", name: "Manager", roles: ["10", "28"] };
+  const helper = { id: "201", name: "Helper", staffMember: true, roles: ["23"] };
+  const manager = { id: "200", name: "Manager", staffMember: true, roles: ["28"] };
   const ticket = await supportTicket(service, owner, transport);
   service.claim(helper, ticket.id);
   await service.pump();
@@ -2849,7 +2854,7 @@ test("feedback after channel deletion is delivered privately to staff without ex
   service.closeTicket(owner, ticket.id, {});
   await service.pump();
   await service.deleteChannel(
-    { id: "200", name: "Manager", roles: ["10", "28"] },
+    { id: "200", name: "Manager", staffMember: true, roles: ["28"] },
     ticket.id,
   );
   await service.pump();
@@ -3089,7 +3094,7 @@ test("guest claim notices only ping staff and recover an uncertain notification 
   await service.pump();
   const target = channels.get(service.get(ticket.id).channelId);
   target.failAfterBotSend = true;
-  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  service.claim({ id: "201", name: "Helper", staffMember: true, roles: ["23"] }, ticket.id);
   await service.pump();
   const key = `${ticket.id}:status:${ticket.id}`;
   const job = service.store.get("ticket-outbox", key);
@@ -3131,7 +3136,7 @@ test("reopened Discord tickets preserve old messages through reconciliation and 
     createdTimestamp: Date.now() - 10000,
     attachments: new Collection(),
   });
-  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  service.claim({ id: "201", name: "Helper", staffMember: true, roles: ["23"] }, ticket.id);
   service.closeTicket(user, ticket.id, {});
   await service.pump();
   assert.equal(dms.length, 1);
@@ -3178,7 +3183,7 @@ test("reopened Discord tickets preserve old messages through reconciliation and 
   ]);
   assert.match(result.data, /earlier closure/);
   assert.equal(service.get(ticket.id).rating, null);
-  await service.deleteChannel({ id: "admin", roles: ["10", "21"] }, ticket.id);
+  await service.deleteChannel({ id: "admin", staffMember: true, roles: ["21"] }, ticket.id);
   await service.pump();
   await service.reopen(user, ticket.id);
   await service.pump();
@@ -3217,7 +3222,7 @@ test("blocked DMs ping only the owner in the tickets channel and retry removal w
   const ticket = await supportTicket(service, user, context.transport);
   await service.pump();
   service.claim(
-    { id: "201", name: "Secret Staff", roles: ["10", "23"] },
+    { id: "201", name: "Secret Staff", staffMember: true, roles: ["23"] },
     ticket.id,
   );
   service.closeTicket(user, ticket.id, {});
@@ -3249,7 +3254,7 @@ test("blocked DMs ping only the owner in the tickets channel and retry removal w
     "channel",
   );
   service.claim(
-    { id: "201", name: "Secret Staff", roles: ["10", "23"] },
+    { id: "201", name: "Secret Staff", staffMember: true, roles: ["23"] },
     ticket.id,
   );
   service.closeTicket(user, ticket.id, {});
@@ -3359,7 +3364,7 @@ test("retention erasure deletes only its owned channel and tracked bot notices",
 
 test("rating is available by DM and retained channel, then auto-deletes only after resolution and saved history", async (t) => {
   const { service, transport, user, client, channels, dms } = setupDiscord(t);
-  const helper = { id: "201", name: "Helper", roles: ["10", "23"] };
+  const helper = { id: "201", name: "Helper", staffMember: true, roles: ["23"] };
   const ticket = await supportTicket(service, user, transport);
   service.claim(helper, ticket.id);
   service.closeTicket(user, ticket.id, {});
@@ -3538,7 +3543,7 @@ test("ticket notice cleanup retries the same embed without a second mention", as
     };
     return sent;
   };
-  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  service.claim({ id: "201", name: "Helper", staffMember: true, roles: ["23"] }, ticket.id);
   await service.pump();
   const [key, job] = service.store
     .entries("ticket-outbox")
@@ -3558,7 +3563,7 @@ test("ticket notice cleanup retries the same embed without a second mention", as
 test("existing managed ticket notices move into embeds without sending another message", async (t) => {
   const { service, transport, user, channels } = setupDiscord(t);
   const ticket = await supportTicket(service, user, transport);
-  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, ticket.id);
+  service.claim({ id: "201", name: "Helper", staffMember: true, roles: ["23"] }, ticket.id);
   await service.pump();
   const target = channels.get(service.get(ticket.id).channelId);
   const [key, entry] = service.store.entries("ticket-status-notice")[0];
@@ -3677,7 +3682,7 @@ test("Discord hierarchy and private request approval assign the requester and ke
       description: "A second support ticket for direct hierarchy transfer.",
     },
   );
-  service.claim({ id: "201", name: "Helper", roles: ["10", "23"] }, second.id);
+  service.claim({ id: "201", name: "Helper", staffMember: true, roles: ["23"] }, second.id);
   const direct = await click(
     client,
     mod.user,
@@ -3927,7 +3932,7 @@ test("rating feedback works privately from a DM or deleted ticket channel", asyn
       });
       assert.match(submitted.data.content, /private feedback has been saved/);
       assert.equal(service.get(ticket.id).rating, 4);
-      const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+      const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
       assert.equal(
         service
           .view(founder, ticket.id, true)

@@ -58,6 +58,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
         : null;
       return rolePolicy.apply({
         ...actor(member.user, member),
+        staffMember: true,
         roles: [...member.roles.cache.keys()],
         ticketRole: Boolean(
           mainMember &&
@@ -81,6 +82,7 @@ export function ticketDiscord(config, service, client, rolePolicy) {
       .map((member) =>
         rolePolicy.apply({
           id: member.id || member.user.id,
+          staffMember: true,
           roles: [...member.roles.cache.keys()],
           ticketRole: Boolean(
             mainMembers

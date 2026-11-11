@@ -72,6 +72,7 @@ export function applicationOnboarding(
       id: interaction.user.id,
       name: member.nick || member.user?.global_name || member.user?.username,
       roles: member.roles,
+      staffMember: true,
     });
     if (
       !user.permissions.dashboard ||
@@ -116,11 +117,6 @@ export function applicationOnboarding(
         value: role.id,
         description: role.specialist ? "Add specialist role" : "Set staff rank",
       }));
-    options.push({
-      label: "Dashboard access",
-      value: config.accessRoles.dashboard,
-      description: "Allow staff dashboard sign-in",
-    });
     if (!options.length) throw new AuthError("role_sync_unavailable", 503);
     for (const [key, value] of selections)
       if (value.expiresAt <= Date.now() || value.actorId === user.id)
@@ -136,7 +132,7 @@ export function applicationOnboarding(
     });
     await interaction.editReply({
       content:
-        "Choose a role for the accepted applicant. Mapped roles apply in each Discord server they have joined and remain queued for the other. A staff rank replaces their current rank; specialist and Dashboard roles are added. Existing access is preserved.",
+        "Choose a role for the accepted applicant. Mapped roles apply in each Discord server they have joined and remain queued for the other. A staff rank replaces their current rank; specialist roles are added.",
       components: [
         {
           type: 1,

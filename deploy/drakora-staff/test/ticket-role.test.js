@@ -18,7 +18,8 @@ const config = {
 const actor = (rank, ticketRole = true) => ({
   id: rank,
   name: `Staff ${rank}`,
-  roles: ["10", rank],
+  staffMember: true,
+  roles: [rank],
   ticketRole,
 });
 function setup(t, withService = false) {
@@ -97,7 +98,7 @@ test("Tickets grants general actions across staff specialties but deletion still
     );
   }
   assert.equal(
-    policy.apply({ ...actor("52"), roles: ["52"] }).capabilities[
+    policy.apply({ ...actor("52"), staffMember: false }).capabilities[
       "tickets.view"
     ],
     false,
@@ -175,7 +176,7 @@ test("authoritative main membership and Gateway changes revoke ticket access wit
     policy.apply,
     {
       available: () => true,
-      member: async () => ({ roles: ["10", "52"] }),
+      member: async () => ({ staffMember: true, roles: ["52"] }),
       ticketMember: async () => main,
     },
   );

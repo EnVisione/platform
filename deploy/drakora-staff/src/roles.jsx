@@ -78,7 +78,6 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
   const [selected, setSelected] = useState(null);
   const [rank, setRank] = useState("");
   const [specialists, setSpecialists] = useState([]);
-  const [access, setAccess] = useState({ dashboard: false });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -114,7 +113,6 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
         .filter((role) => member.roles.includes(role.id))
         .map((role) => role.id),
     );
-    setAccess(member.access);
     setConfirming(false);
     setError("");
     setNotice("");
@@ -137,7 +135,6 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
           version: selected.version,
           rank: rank || null,
           specialists,
-          access,
         }),
       });
       setSelected((previous) => ({ ...previous, ...result }));
@@ -159,7 +156,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
       <p>
         Community ranks sync between the main and staff servers. Specialist
         roles marked “Both servers” sync too. Other specialist roles stay in the
-        staff server. Dashboard admission is a separate choice.
+        staff server. Staff-server membership grants dashboard access.
       </p>
       <form
         className="roles-search"
@@ -330,29 +327,6 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                 </label>
               ))}
             </div>
-            <h5>Dashboard admission</h5>
-            <p className="roles-help">
-              The Dashboard role admits this member to the staff portal and
-              automatically creates their workspace membership. Tracker and
-              Calendar permissions are controlled above. Your staff roles
-              determine which Tracker boards you can open.
-            </p>
-            <div className="role-checks">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={access.dashboard}
-                  disabled={rankLocked || ownFounder}
-                  onChange={(event) =>
-                    setAccess((previous) => ({
-                      ...previous,
-                      dashboard: event.target.checked,
-                    }))
-                  }
-                />
-                Dashboard access
-              </label>
-            </div>
           </fieldset>
           {data.canAssign &&
             (confirming ? (
@@ -373,7 +347,7 @@ function MemberRoles({ data, csrf, userId, onAudit }) {
                         .map((role) => role.label)
                         .join(", ")}`
                     : " with no specialist roles"}
-                  ? Dashboard access: {access.dashboard ? "on" : "off"}.
+                  {"."}
                 </p>
                 <button className="button" disabled={busy} onClick={assign}>
                   {busy ? "Saving…" : "Confirm Discord changes"}

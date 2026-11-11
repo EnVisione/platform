@@ -377,7 +377,7 @@ test("startup snapshots cannot overwrite a newer Gateway change", async (t) => {
   assert.deepEqual(app.roles("2"), ["128"]);
 });
 
-test("optional configuration rejects access-role mappings and ambiguous role pairs", () => {
+test("optional configuration validates staff role mappings and rejects ambiguous pairs", () => {
   const valid = {
     ...structuredClone(config),
     staffOrigin: "https://staff.example.invalid",
@@ -401,7 +401,7 @@ test("optional configuration rejects access-role mappings and ambiguous role pai
   };
   assert.equal(validateConfig(valid), valid);
   const retired = structuredClone(valid);
-  delete retired.accessRoles.todo;
+  delete retired.accessRoles;
   retired.trackerProjects = [
     { projectId: "dev", name: "Dev", roleIds: ["20", "25"] },
   ];
@@ -452,10 +452,6 @@ test("optional configuration rejects access-role mappings and ambiguous role pai
     Object.assign(invalid.roleSync, patch);
     assert.throws(() => validateConfig(invalid), /staff rank mappings/);
   }
-  const access = structuredClone(valid);
-  access.ranks.push({ ...fixture.ranks[0], id: "10" });
-  access.roleSync.roles = [{ staffId: "10", mainId: "123" }];
-  assert.throws(() => validateConfig(access), /staff rank mappings/);
 });
 
 test("Discord transport uses individual role endpoints and treats missing membership as pending", async () => {

@@ -413,7 +413,8 @@ export function discordHoneypot(config, store, client, rolePolicy) {
   }
   async function administrator(id) {
     const staff = await client.rest.get(Routes.guildMember(config.guildId, id));
-    const user = rolePolicy.apply({ id, roles: staff.roles });
+    if (staff.pending || staff.user?.bot) return false;
+    const user = rolePolicy.apply({ id, roles: staff.roles, staffMember: true });
     return user.permissions.dashboard && rolePolicy.isManager(user);
   }
   async function interact(interaction) {

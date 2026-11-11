@@ -17,9 +17,9 @@ const config = {
   tickets: { guildId: "2", minecraftEnabled: false },
 };
 const owner = { id: "100", name: "Player" };
-const helper = { id: "200", name: "Helper", roles: ["10", "23"] };
-const manager = { id: "201", name: "Manager", roles: ["10", "28"] };
-const otherStaff = { id: "202", name: "Other Helper", roles: ["10", "23"] };
+const helper = { id: "200", name: "Helper", staffMember: true, roles: ["23"] };
+const manager = { id: "201", name: "Manager", staffMember: true, roles: ["28"] };
+const otherStaff = { id: "202", name: "Other Helper", staffMember: true, roles: ["23"] };
 const input = (values = {}) => ({
   requestId: randomUUID(),
   ign: "Jojo",
@@ -303,7 +303,7 @@ test("staff search finds first helpers, resolvers and previous closures without 
     { id: "101", name: "Hidden" },
     input({ type: "billing" }),
   );
-  const founder = { id: "203", name: "Private Founder", roles: ["10", "20"] };
+  const founder = { id: "203", name: "Private Founder", staffMember: true, roles: ["20"] };
   service.claim(founder, billing.id);
   const hidden = service.list(helper, { staff: founder.name });
   assert.equal(hidden.total, 0);
@@ -351,15 +351,15 @@ test("private ownership and staff report rank boundaries apply to reads, replies
   assert.equal(service.list(manager).total, 1);
   assert.equal(service.view(manager, ticket.id, true).ign, "Jojo");
   fails(
-    () => service.claim({ ...helper, roles: ["23"] }, ticket.id),
+    () => service.claim({ ...helper, staffMember: false, roles: ["23"] }, ticket.id),
     "ticket_access_denied",
   );
 });
 
 test("player reports require a target and have an independent authorized reports queue", async (t) => {
   const { service, store, policy } = setup(t);
-  const moderator = { id: "203", name: "Moderator", roles: ["10", "29"] };
-  const founder = { id: "204", name: "Founder", roles: ["10", "20"] };
+  const moderator = { id: "203", name: "Moderator", staffMember: true, roles: ["29"] };
+  const founder = { id: "204", name: "Founder", staffMember: true, roles: ["20"] };
   for (const type of ["player", "staff"])
     for (const reportTarget of [
       undefined,
@@ -441,7 +441,7 @@ test("player reports require a target and have an independent authorized reports
 
 test("type-specific details are validated, saved and included in views and safe transcripts", async (t) => {
   const { service } = setup(t);
-  const founder = { id: "204", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "204", name: "Founder", staffMember: true, roles: ["20"] };
   const bill = service.create(
     owner,
     input({
@@ -558,7 +558,7 @@ test("Discord staff replies update helped status once and never reopen closed ti
 
 test("Admin takeover is audited, category restricted, and rejects stale assignments", async (t) => {
   const { service, policy } = setup(t);
-  const admin = { id: "203", name: "Admin", roles: ["10", "21"] };
+  const admin = { id: "203", name: "Admin", staffMember: true, roles: ["21"] };
   const ticket = service.create(owner, input());
   service.claim(helper, ticket.id);
   await assert.rejects(service.takeover(otherStaff, ticket.id, helper.id), {
@@ -616,9 +616,9 @@ test("Admin takeover is audited, category restricted, and rejects stale assignme
 
 test("two-rank hierarchy permits Mod over Helper and Manager over Founder, with fresh assignee checks", async (t) => {
   const { service } = setup(t);
-  const mod = { id: "mod", name: "Mod", roles: ["10", "22"] };
-  const jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] };
-  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const mod = { id: "mod", name: "Mod", staffMember: true, roles: ["22"] };
+  const jr = { id: "jr", name: "Jr Mod", staffMember: true, roles: ["30"] };
+  const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
   const ticket = service.create(owner, input());
   service.claim(helper, ticket.id);
   await assert.rejects(service.takeover(jr, ticket.id, helper.id), {
@@ -627,7 +627,7 @@ test("two-rank hierarchy permits Mod over Helper and Manager over Founder, with 
   await service.takeover(mod, ticket.id, helper.id);
   assert.equal(service.get(ticket.id).claimedBy.id, mod.id);
   await service.takeover(
-    { id: "admin", name: "Admin", roles: ["10", "21"] },
+    { id: "admin", name: "Admin", staffMember: true, roles: ["21"] },
     ticket.id,
     mod.id,
   );
@@ -650,7 +650,7 @@ test("two-rank hierarchy permits Mod over Helper and Manager over Founder, with 
       return { id: randomUUID() };
     },
     async staffUser() {
-      return { ...helper, roles: ["10", "29"] };
+      return { ...helper, staffMember: true, roles: ["29"] };
     },
   });
   await assert.rejects(service.takeover(mod, fresh.id, helper.id), {
@@ -662,7 +662,7 @@ test("two-rank hierarchy permits Mod over Helper and Manager over Founder, with 
 test("private takeover requests approve once, reject stale and revoked requesters, and never enter player data", async (t) => {
   let at = Date.now();
   const { service } = setup(t, { now: () => at });
-  const jr = { id: "jr", name: "Jr Mod", roles: ["10", "30"] };
+  const jr = { id: "jr", name: "Jr Mod", staffMember: true, roles: ["30"] };
   let requester = jr;
   service.attach({
     async create(ticket) {
@@ -703,7 +703,7 @@ test("private takeover requests approve once, reject stale and revoked requester
     service.reviewTakeover(jr, ticket.id, request.id, true),
     { code: "ticket_takeover_manager_required" },
   );
-  requester = { ...jr, roles: [] };
+  requester = { ...jr, staffMember: false, roles: [] };
   await assert.rejects(
     service.reviewTakeover(manager, ticket.id, request.id, true),
     { code: "ticket_access_denied" },
@@ -1157,7 +1157,7 @@ test("oversized attachment batches roll back without consuming uploaded files", 
 test("closure retains the channel and Admin deletion preserves logs while reopening restores access", async (t) => {
   const { service, store } = setup(t);
   const ticket = service.create(owner, input());
-  const admin = { id: "admin", name: "Admin", roles: ["10", "21"] };
+  const admin = { id: "admin", name: "Admin", staffMember: true, roles: ["21"] };
   let removed = 0,
     created = 0;
   service.attach({
@@ -1240,7 +1240,7 @@ test("Admin channel deletion waits for queued replies and blocks reopening until
     removed = false;
   const { service, store } = setup(t, { now: () => time });
   const ticket = service.create(owner, input());
-  const admin = { id: "admin", roles: ["10", "21"] };
+  const admin = { id: "admin", staffMember: true, roles: ["21"] };
   service.attach({
     async create(value) {
       service.bind(value.id, "900");
@@ -1326,7 +1326,7 @@ test("maintenance locks legacy closed channels without deleting them", async (t)
 test("category permissions guard lists, attention, messages, files and transcripts and can be revoked", async (t) => {
   const { service, policy } = setup(t);
   const ticket = service.create(owner, input({ type: "billing" }));
-  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
   const file = mediaFixture(service, owner, ticket.id, {
     name: "receipt.txt",
     type: "text/plain",
@@ -1337,7 +1337,8 @@ test("category permissions guard lists, attention, messages, files and transcrip
     manager,
     ...["21", "29", "22", "30", "25", "unknown"].map((rank) => ({
       id: `staff-${rank}`,
-      roles: ["10", rank],
+      staffMember: true,
+      roles: [rank],
     })),
   ]) {
     assert.equal(service.list(user).items.length, 0);
@@ -1555,7 +1556,7 @@ test("staff support summaries preserve closure attribution, deduplicate resoluti
     },
     async eraseTicket() {},
   });
-  const founder = { id: "300", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "300", name: "Founder", staffMember: true, roles: ["20"] };
   const ticket = service.create(owner, input());
   service.claim(helper, ticket.id);
   service.closeTicket(
@@ -1606,7 +1607,7 @@ test("staff support summaries preserve closure attribution, deduplicate resoluti
 
 test("rating feedback requires the rated closure and stays private to Founders", async (t) => {
   const { service, store } = setup(t);
-  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
   const ticket = service.create(owner, input());
   service.claim(helper, ticket.id);
   service.closeTicket(
@@ -1689,7 +1690,7 @@ test("rating feedback requires the rated closure and stays private to Founders",
 
 test("resolved totals and logs both include reopened ticket history", async (t) => {
   const { service, store } = setup(t);
-  const founder = { id: "founder", name: "Founder", roles: ["10", "20"] };
+  const founder = { id: "founder", name: "Founder", staffMember: true, roles: ["20"] };
   const tickets = [];
   for (const rating of [5, 5, 1, null, null]) {
     const ticket = service.create(owner, input());

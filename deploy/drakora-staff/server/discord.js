@@ -68,8 +68,6 @@ export function discordClient(
     store.set("user", user.id, user, Number.MAX_SAFE_INTEGER);
     const admitted = await check(user.id, true);
     if (!admitted.staffMember) throw new AuthError("staff_server_required");
-    if (!admitted.permissions.dashboard)
-      throw new AuthError("dashboard_role_required");
     return admitted;
   }
   async function refresh(id, botOnly = false) {
@@ -92,7 +90,10 @@ export function discordClient(
         );
     const ticketMember = config.tickets?.staffRoleId
       ? membership
-        ? await membership.ticketMember(id)
+        ? await membership.ticketMember(id).catch((error) => {
+            if (error.code !== "discord_unavailable") throw error;
+            return undefined;
+          })
         : await api(
             `/users/@me/guilds/${config.tickets.guildId}/member`,
             user.tokens.access_token,
@@ -105,15 +106,15 @@ export function discordClient(
       latest.lastActiveAt || 0,
     );
     if ((latest?.accessRevision || 0) !== revision) return latest;
-    user.staffMember = Boolean(member && !member.pending);
-    user.roles = member?.pending ? [] : (member?.roles ?? []);
+    user.staffMember = Boolean(member && !member.pending && !member.user?.bot);
+    user.roles = user.staffMember ? (member.roles ?? []) : [];
     user.ticketRole = Boolean(
       ticketMember &&
       !ticketMember.pending &&
       ticketMember.roles.includes(config.tickets.staffRoleId),
     );
-    user.permissions = permissions(config, user.roles);
-    if (member?.user) {
+    user.permissions = permissions(config, user.roles, user.staffMember);
+    if (user.staffMember && member.user) {
       user.avatar = discordAvatar(member.user, config.guildId, member.avatar);
       user.name =
         member.nick || member.user.global_name || member.user.username;
@@ -190,8 +191,10 @@ export function discordClient(
     )
       return;
     const user = store.get("user", member.user.id);
-    const changedRoles =
-      packet.t === "GUILD_MEMBER_REMOVE" || member.pending ? [] : member.roles;
+    const activeMember =
+      packet.t !== "GUILD_MEMBER_REMOVE" && !member.pending && !member.user.bot;
+    const staffMember = mainTicketEvent ? user?.staffMember : activeMember;
+    const changedRoles = activeMember ? member.roles : [];
     const roles = mainTicketEvent ? (user?.roles ?? []) : changedRoles;
     const ticketRole = mainTicketEvent
       ? changedRoles.includes(config.tickets.staffRoleId)
@@ -201,9 +204,10 @@ export function discordClient(
       id: member.user.id,
       roles,
       ticketRole,
-      permissions: permissions(config, roles),
+      staffMember,
+      permissions: permissions(config, roles, staffMember),
     });
-    const revoked = !mainTicketEvent && !current.permissions.dashboard;
+    const revoked = !mainTicketEvent && !staffMember;
     const ticketRevoked = Boolean(
       config.tickets?.staffRoleId && !current.capabilities?.["tickets.view"],
     );
@@ -212,9 +216,7 @@ export function discordClient(
         roles,
         ticketRole,
         permissions: current.permissions,
-        staffMember: mainTicketEvent
-          ? user.staffMember
-          : packet.t !== "GUILD_MEMBER_REMOVE" && !member.pending,
+        staffMember,
         checkedAt: 0,
         accessRevision: (user.accessRevision || 0) + 1,
         accessEpoch: (user.accessEpoch || 0) + Number(revoked),

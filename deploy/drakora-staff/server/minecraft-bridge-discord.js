@@ -29,8 +29,7 @@ export function minecraftRoleTransport(config, client) {
       if (
         !value ||
         value.pending ||
-        value.bot ||
-        !value.roles.includes(config.accessRoles.dashboard)
+        value.bot
       )
         throw bridgeFailure("staff_admission_required", 403);
       return value;

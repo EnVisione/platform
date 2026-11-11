@@ -67,6 +67,7 @@ export function discordOffice(config, store, dependencies = {}) {
         void emailAlerts?.refreshPermissions();
     });
   let ready = false;
+  let officeReady = false;
   const roleSync = config.roleSync
     ? staffRoleSync(config, store, discordRoleTransport(config, client))
     : undefined;
@@ -98,7 +99,7 @@ export function discordOffice(config, store, dependencies = {}) {
     async setOpen(room, open) {
       const target = await channel(room.id, ChannelType.GuildVoice);
       await target.permissionOverwrites.edit(
-        config.accessRoles.dashboard,
+        guild.id,
         { ViewChannel: true, Connect: open, Speak: true },
         { reason: "staff meeting access" },
       );
@@ -109,7 +110,7 @@ export function discordOffice(config, store, dependencies = {}) {
         ChannelType.GuildText,
       );
       const message = await target.send({
-        content: `<@&${config.accessRoles.dashboard}> **${room.name} is starting.**\nHosted by <@${user.id}>. Join when you are ready.`,
+        content: `**${room.name} is starting.**\nHosted by <@${user.id}>. Join when you are ready.`,
         components: [
           {
             type: 1,
@@ -123,11 +124,7 @@ export function discordOffice(config, store, dependencies = {}) {
             ],
           },
         ],
-        allowedMentions: {
-          parse: [],
-          roles: [config.accessRoles.dashboard],
-          users: [],
-        },
+        allowedMentions: { parse: [] },
         nonce,
         enforceNonce: true,
       });
@@ -151,7 +148,8 @@ export function discordOffice(config, store, dependencies = {}) {
   };
   const meetings = meetingService(config, store, transport);
   const profile = (member) => {
-    const assigned = permissions(config, [...member.roles.cache.keys()]);
+    const staff = !member.user.bot && !member.pending;
+    const assigned = permissions(config, [...member.roles.cache.keys()], staff);
     return {
       id: member.id,
       name: member.displayName,
@@ -160,8 +158,7 @@ export function discordOffice(config, store, dependencies = {}) {
       roles: [...member.roles.cache.keys()],
       bot: member.user.bot,
       pending: member.pending,
-      staff:
-        assigned.dashboard || assigned.todo || assigned.hulyRanks.length > 0,
+      staff,
       status:
         ready && guild?.available
           ? (member.presence?.status ?? "offline")
@@ -223,6 +220,36 @@ export function discordOffice(config, store, dependencies = {}) {
         `Discord message activity refreshed. ${scanned} channels, ${unavailable} unavailable.`,
       );
   }
+  async function prepareRooms() {
+    const category = await guild.channels.fetch(config.office.categoryId);
+    if (!category || category.type !== ChannelType.GuildCategory) return;
+    const invitations = await channel(
+      config.office.inviteChannelId,
+      ChannelType.GuildText,
+    );
+    const voices = await Promise.all(
+      config.office.rooms
+        .filter((room) => room.kind === "voice")
+        .map((room) => channel(room.id, ChannelType.GuildVoice)),
+    );
+    await category.permissionOverwrites.edit(
+      guild.id,
+      { ViewChannel: true, Connect: true, Speak: true },
+      { reason: "staff server office access" },
+    );
+    await invitations.permissionOverwrites.edit(
+      guild.id,
+      { ViewChannel: true, SendMessages: true, ReadMessageHistory: true },
+      { reason: "staff server office access" },
+    );
+    for (const voice of voices)
+      await voice.permissionOverwrites.edit(
+        guild.id,
+        { ViewChannel: true, Connect: true, Speak: true },
+        { reason: "staff server office access" },
+      );
+    officeReady = true;
+  }
   async function connect() {
     if (connecting || stopped || !client.isReady()) return;
     connecting = true;
@@ -235,37 +262,13 @@ export function discordOffice(config, store, dependencies = {}) {
         if (!member.user.bot)
           activity.observe(member.id, member.presence?.status);
       ready = true;
-      const category = await guild.channels.fetch(config.office.categoryId);
-      if (!category || category.type !== ChannelType.GuildCategory)
-        throw new Error(
-          "Office category configuration no longer matches Discord",
-        );
-      await category.permissionOverwrites.edit(
-        config.accessRoles.dashboard,
-        { ViewChannel: true, Connect: true, Speak: true },
-        { reason: "dashboard staff office access" },
-      );
-      const invitations = await channel(
-        config.office.inviteChannelId,
-        ChannelType.GuildText,
-      );
-      await invitations.permissionOverwrites.edit(
-        config.accessRoles.dashboard,
-        { ViewChannel: true, SendMessages: true, ReadMessageHistory: true },
-        { reason: "dashboard staff office access" },
-      );
-      for (const room of config.office.rooms.filter(
-        (room) => room.kind === "voice",
-      )) {
-        const voice = await channel(room.id, ChannelType.GuildVoice);
-        await voice.permissionOverwrites.edit(
-          config.accessRoles.dashboard,
-          { ViewChannel: true, Connect: true, Speak: true },
-          { reason: "dashboard staff office access" },
-        );
-      }
+      officeReady = false;
+      await prepareRooms().catch((error) => {
+        if (error.code !== 10003)
+          console.error("Discord Office channels could not be configured.");
+      });
       await reconcileTrackerChannels(config, guild);
-      await meetings.reconcile();
+      if (officeReady) await meetings.reconcile();
       attempts = 0;
       console.log("Discord office connected.");
       emailAlerts?.start();
@@ -384,7 +387,7 @@ export function discordOffice(config, store, dependencies = {}) {
           .filter((member) => !member.user.bot)
           .map(profile)
       : [];
-    const available = ready && guild?.available;
+    const available = ready && officeReady && guild?.available;
     return {
       connected: Boolean(available),
       canHost: canHost(config, user),
@@ -396,7 +399,7 @@ export function discordOffice(config, store, dependencies = {}) {
         const target = guild?.channels.cache.get(room.id);
         const allowed =
           target
-            ?.permissionsFor(config.accessRoles.dashboard)
+            ?.permissionsFor(guild.id)
             ?.has(PermissionFlagsBits.Connect) ?? false;
         return {
           ...room,
@@ -438,10 +441,7 @@ export function discordOffice(config, store, dependencies = {}) {
     emailAlerts,
     roleAdministration: discordRoleAdministration(config, client),
     staffAvailable: () =>
-      ready &&
-      Boolean(guild?.available) &&
-      (!config.tickets?.staffRoleId ||
-        Boolean(client.guilds.cache.get(config.tickets.guildId)?.available)),
+      client.isReady() && Boolean(client.guilds.cache.get(config.guildId)?.available),
     async staffMember(id) {
       try {
         return await client.rest.get(Routes.guildMember(config.guildId, id));

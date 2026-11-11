@@ -24,7 +24,6 @@ export function validateMinecraftBridge(config) {
       "Configure a private proxy key file and a dedicated Linked role before enabling Minecraft linking",
     );
   const protectedIds = new Set([
-    ...Object.values(config.accessRoles),
     config.tickets?.staffRoleId,
     ...config.roleSync.roles.flatMap((role) => [role.staffId, role.mainId]),
   ]);

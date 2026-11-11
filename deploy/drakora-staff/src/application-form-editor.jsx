@@ -7,7 +7,7 @@ import {
 
 const messages = {
   application_decision_role_required:
-    "Only Managers and Founders with Dashboard access can edit application questions.",
+    "Only Managers and Founders in the staff server can edit application questions.",
   application_form_changed:
     "Someone saved changes while you were editing. Your changes are still here. Copy anything you need, then reload the latest version before saving again.",
   invalid_application_form:
